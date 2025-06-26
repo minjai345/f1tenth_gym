@@ -288,24 +288,27 @@ class PyQtEnvRendererGL(EnvRenderer):
         points: list | np.ndarray,
         color: Optional[tuple[int, int, int]] = (0, 0, 255),
         size: Optional[int] = 1,
+        **kwargs
     ) -> ObjectRenderer:
-        return PointsRenderer(self, points, color, size)
+        return PointsRenderer(self, points, color, size, **kwargs)
 
     def get_lines_renderer(
         self,
         points: list | np.ndarray,
         color: Optional[tuple[int, int, int]] = (0, 0, 255),
-        size: Optional[int] = 1,
+        size: Optional[int] = 1, 
+        **kwargs
     ) -> ObjectRenderer:
-        return LinesRenderer(self, points, color, size)
+        return LinesRenderer(self, points, color, size, **kwargs)
 
     def get_closed_lines_renderer(
         self,
         points: list | np.ndarray,
         color: Optional[tuple[int, int, int]] = (0, 0, 255),
         size: Optional[int] = 1,
+        **kwargs
     ) -> ObjectRenderer:
-        return ClosedLinesRenderer(self, points, color, size)
+        return ClosedLinesRenderer(self, points, color, size, **kwargs)
 
     def close(self):
         self.window.close()

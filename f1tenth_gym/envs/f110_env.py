@@ -233,8 +233,7 @@ class F110Env(gym.Env):
             "h": 0.557,
             "m": 1225.8878467253344,
             "I": 1538.8533713561394,
-            # "width": 1.674,
-            "width": 0.1,
+            "width": 1.674,
             "length": 4.298,
             # steering constraints
             "s_min": -0.91,

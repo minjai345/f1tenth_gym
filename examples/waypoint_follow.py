@@ -4,6 +4,7 @@ from typing import Tuple
 import gymnasium as gym
 import numpy as np
 from numba import njit
+import pathlib
 
 from f1tenth_gym.envs.f110_env import F110Env
 
@@ -307,7 +308,6 @@ def main():
         "tlad": 0.82461887897713965 * 2,
         "vgain": 1.,
     }
-
     num_agents = 1
     env = gym.make(
         "f1tenth_gym:f1tenth-v0",
@@ -330,7 +330,7 @@ def main():
             "compute_frenet": 0,
             "max_laps": 5,  # 'inf' for infinite laps, or a positive integer
         },
-        render_mode="human_fast", # "human", "human_fast", "unlimited"
+        render_mode="unlimited", # "human", "human_fast", "unlimited"
     )
     track = env.unwrapped.track
 
@@ -344,7 +344,7 @@ def main():
         ),
     )
 
-    env.unwrapped.add_render_callback(track.raceline.render_waypoints)
+    track.raceline.render_waypoints(env.unwrapped.renderer)
     for r in planner.get_render_callbacks():
         env.unwrapped.add_render_callback(r)
 
