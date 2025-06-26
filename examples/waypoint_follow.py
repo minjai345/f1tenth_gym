@@ -328,9 +328,9 @@ def main():
             "enable_scan": 0,
             "lidar_num_beams": 270,
             "compute_frenet": 0,
-            "max_laps": 2,  # 'inf' for infinite laps, or a positive integer
+            "max_laps": 5,  # 'inf' for infinite laps, or a positive integer
         },
-        render_mode="unlimited", # "human", "human_fast", "unlimited"
+        render_mode="human_fast", # "human", "human_fast", "unlimited"
     )
     track = env.unwrapped.track
 

@@ -102,7 +102,8 @@ class CarRenderer(ObjectRenderer):
             self.mesh.resetTransform()
             self.mesh.rotate(self.pose[2] / np.pi * 180, 0, 0, 1)
             self.mesh.translate(self.pose[0], self.pose[1], 0.02)
-
+            
+            
 class LinesRenderer(ObjectRenderer):
     def __init__(
         self, 
@@ -190,5 +191,7 @@ class PointsRenderer(ObjectRenderer):
         env_renderer.view.addItem(self.scatter)
 
     def update(self, points: np.ndarray):
+        if points.ndim == 1:
+            points = points.reshape(1, -1)
         self.points = np.hstack([points, np.ones((points.shape[0], 1)) * 0.01])
         self.scatter.setData(pos=self.points)

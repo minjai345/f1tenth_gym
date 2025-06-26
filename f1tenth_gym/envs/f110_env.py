@@ -23,6 +23,7 @@
 """
 Author: Hongrui Zheng, Zirui Zang
 """
+import copy
 import gymnasium as gym
 import numpy as np
 
@@ -232,7 +233,8 @@ class F110Env(gym.Env):
             "h": 0.557,
             "m": 1225.8878467253344,
             "I": 1538.8533713561394,
-            "width": 1.674,
+            # "width": 1.674,
+            "width": 0.1,
             "length": 4.298,
             # steering constraints
             "s_min": -0.91,
@@ -481,10 +483,10 @@ class F110Env(gym.Env):
         obs = self.observation_type.observe()
         if self.observation_config["type"] == "direct":
             # for direct observation, also update the render_obs
-            self.render_obs = obs
+            self.render_obs = copy.deepcopy(obs)
         else:
             # for other observation types, update the render_obs
-            self.render_obs = self.render_obs_type.observe()
+            self.render_obs = copy.deepcopy(self.render_obs_type.observe())
 
         # times
         reward = self.timestep

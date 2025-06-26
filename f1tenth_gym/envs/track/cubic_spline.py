@@ -56,23 +56,22 @@ class CubicSpline2D:
         self.spline = interpolate.CubicSpline(self.s, self.points, bc_type="periodic")
         self.spline_x = np.array(self.spline.x) 
         self.spline_c = np.array(self.spline.c) 
-        self.diffs = self.points[1:, :2] - self.points[:, :2][:-1, :2]
-        self.l2s = self.diffs[:, 0] ** 2 + self.diffs[:, 1] ** 2
+        self.length = len(self.spline_x)
 
     def find_segment_for_s(self, x):
         # Find the segment of the spline that x is in
         # print(x, self.spline.x[-1], self.s_interval, len(self.spline_x))
-        return (x / (self.spline.x[-1] + self.s_interval) * (len(self.spline_x) - 1)).astype(int)
-        # return (x / (self.spline.x[-1]) * (len(self.spline_x) - 2)).astype(int)
+        # return (x / (self.spline.x[-1] + self.s_interval) * (len(self.spline_x) - 1)).astype(int)
+        return (x / (self.spline.x[-1]) * (len(self.spline_x) - 2)).astype(int)
     
     def predict_with_spline(self, point, segment, state_index=0):
         # A (4, 100) array, where the rows contain (x-x[i])**3, (x-x[i])**2 etc.
         # exp_x = (point - self.spline.x[[segment]])[None, :] ** np.arange(4)[::-1, None]
-        exp_x = ((point - self.spline.x[segment % len(self.spline.x)]) ** np.arange(4)[::-1])[:, None]
-        vec = self.spline_c[:, segment % self.spline_c.shape[1], state_index]
+        exp_x = ((point - self.spline.x[segment % self.length]) ** np.arange(4)[::-1])[:, None]
+        vec = self.spline_c[:, segment % (self.length - 1), state_index]
         # Sum over the rows of exp_x weighted by coefficients in the ith column of s.c
         point = vec.dot(exp_x)
-        return np.asarray(point)
+        return point
 
     def __calc_s(self, x: np.ndarray, y: np.ndarray) -> np.ndarray:
         """

@@ -49,6 +49,7 @@ class PyQtEnvRendererGL(EnvRenderer):
         
         if self.render_spec.car_model == "2d":
             self._enable_pan_only()
+            self.focused = True
         self._init_map(track)
         
         # FPS label
@@ -159,6 +160,7 @@ class PyQtEnvRendererGL(EnvRenderer):
                 self.view.pan_active = True
                 self.view.pan_start = event.pos()
                 event.accept()
+                self.focused = False
             if event.button() == QtCore.Qt.MouseButton.RightButton:
                 logging.debug("Pressed right button -> Follow Next agent")
                 if self.agent_to_follow is None:
@@ -166,6 +168,7 @@ class PyQtEnvRendererGL(EnvRenderer):
                 else:
                     self.agent_to_follow = (self.agent_to_follow + 1) % len(self.agent_ids)
                 self._center_camera_on_car(self.agent_to_follow, distance_reset=True)
+                self.focused = True
             elif event.button() == QtCore.Qt.MouseButton.MiddleButton:
                 logging.debug("Pressed middle button -> Change to Map View")
                 self._center_camera_on_map()
@@ -242,7 +245,8 @@ class PyQtEnvRendererGL(EnvRenderer):
             for callback_fn in self.callbacks:
                 callback_fn(self)
             if self.agent_to_follow is not None and self.render_spec.car_model == "2d":
-                self._center_camera_on_car(self.agent_to_follow)
+                if self.focused:
+                    self._center_camera_on_car(self.agent_to_follow, distance_reset=True)
             # draw cars
             for i in range(len(self.agent_ids)):
                 self.cars[i].render(self.car_scale)
