@@ -21,6 +21,7 @@ class PyQtEnvRendererGL(EnvRenderer):
         render_fps: int,
     ):
         super().__init__()
+        self.camera_free_rotation = 0
         self.params = params
         self.agent_ids = agent_ids
         self.render_spec = render_spec
@@ -34,6 +35,7 @@ class PyQtEnvRendererGL(EnvRenderer):
         self.car_scale = 1.0
         self.default_camera_dist = self.params['width'] * 70
         self.obs = None
+        self.zoom_level = 1.0
         
         fmt = QtGui.QSurfaceFormat()
         fmt.setSwapInterval(0)  # 0 = no vsync, 1 = vsync
@@ -48,7 +50,7 @@ class PyQtEnvRendererGL(EnvRenderer):
         self.window.setGeometry(0, 0, self.render_spec.window_size, self.render_spec.window_size)
         
         if self.render_spec.car_model == "2d":
-            self._enable_pan_only()
+            if not self.camera_free_rotation: self._enable_pan_only()
             self.focused = True
         self._init_map(track)
         
@@ -142,7 +144,7 @@ class PyQtEnvRendererGL(EnvRenderer):
         self.car_scale = 1.0
         if distance_reset:
             self.view.setCameraPosition(
-                distance=self.default_camera_dist,  # zoom level
+                distance=self.default_camera_dist * self.zoom_level,  # zoom level
             )
         self.view.setCameraPosition(
             pos=QtGui.QVector3D(x, y, 1),             # camera position
@@ -184,6 +186,12 @@ class PyQtEnvRendererGL(EnvRenderer):
                 event.accept()
             else:
                 event.ignore()
+                
+        def wheelEvent(event):
+            delta = event.angleDelta().y()
+            factor = 0.85 if delta > 0 else 1.15
+            self.zoom_level *= factor
+            event.accept()
 
         def mouseReleaseEvent(event):
             self.view.pan_active = False
@@ -192,6 +200,7 @@ class PyQtEnvRendererGL(EnvRenderer):
         self.view.mousePressEvent = mousePressEvent
         self.view.mouseMoveEvent = mouseMoveEvent
         self.view.mouseReleaseEvent = mouseReleaseEvent
+        self.view.wheelEvent = wheelEvent
 
     def update(self, obs: dict) -> None:
         """
@@ -244,13 +253,14 @@ class PyQtEnvRendererGL(EnvRenderer):
             # call callbacks
             for callback_fn in self.callbacks:
                 callback_fn(self)
-            if self.agent_to_follow is not None and self.render_spec.car_model == "2d":
-                if self.focused:
+            if self.agent_to_follow is not None and \
+                self.render_spec.car_model == "2d" and \
+                not self.camera_free_rotation and \
+                self.focused:
                     self._center_camera_on_car(self.agent_to_follow, distance_reset=True)
             # draw cars
             for i in range(len(self.agent_ids)):
                 self.cars[i].render(self.car_scale)
-            
             self.app.processEvents()
             
             if self.render_mode in ["human", "human_fast", 'unlimited']:

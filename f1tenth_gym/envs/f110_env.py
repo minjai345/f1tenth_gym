@@ -480,12 +480,13 @@ class F110Env(gym.Env):
 
         # observation
         obs = self.observation_type.observe()
-        if self.observation_config["type"] == "direct":
-            # for direct observation, also update the render_obs
-            self.render_obs = copy.deepcopy(obs)
-        else:
-            # for other observation types, update the render_obs
-            self.render_obs = copy.deepcopy(self.render_obs_type.observe())
+        if self.config["enable_rendering"]:
+            if self.observation_config["type"] == "direct":
+                # for direct observation, also update the render_obs
+                self.render_obs = copy.deepcopy(obs)
+            else:
+                # for other observation types, update the render_obs
+                self.render_obs = copy.deepcopy(self.render_obs_type.observe())
 
         # times
         reward = self.timestep
