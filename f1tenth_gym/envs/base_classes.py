@@ -351,7 +351,7 @@ class RaceCar(object):
             )
 
         # bound yaw angle
-        self.state[4] = (self.state[4] + 2 * np.pi) % (2 * np.pi)  # TODO: This is a problem waiting to happen
+        self.state[4] = np.arctan2(np.sin(self.state[4]), np.cos(self.state[4]))
 
         if self.config['enable_scan']:
             # update scan

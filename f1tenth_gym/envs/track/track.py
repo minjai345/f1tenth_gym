@@ -436,7 +436,7 @@ class Track:
 
         # Adjust psi by adding the heading deviation
         psi += ephi
-        return x, y, (psi + (2 * np.pi)) % (2 * np.pi)
+        return x, y, np.arctan2(np.sin(psi), np.cos(psi))
 
     def cartesian_to_frenet(self, x, y, psi, use_raceline=False, s_guess=None, use_s_guess=True):
         """
@@ -479,4 +479,4 @@ class Track:
         ey = ey * distance_sign
 
         psi = psi - yaw
-        return s, ey, (psi + (2 * np.pi)) % (2 * np.pi)
+        return s, ey, np.arctan2(np.sin(psi), np.cos(psi))

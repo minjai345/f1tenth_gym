@@ -97,7 +97,7 @@ class CubicSpline2D:
     def _calc_yaw_from_xy(self, x, y):
         dx_dt = np.gradient(x, edge_order=2)
         dy_dt = np.gradient(y, edge_order=2)
-        heading = (np.arctan2(dy_dt, dx_dt) + 2 * math.pi) % (2 * math.pi)
+        heading = np.arctan2(dy_dt, dx_dt)
         return heading
 
     def _calc_kappa_from_xy(self, x, y):
@@ -189,7 +189,7 @@ class CubicSpline2D:
         segment = segment or self.find_segment_for_s(s)
         cos = self.predict_with_spline(s, segment, 2)[0]
         sin = self.predict_with_spline(s, segment, 3)[0]
-        yaw = (math.atan2(sin, cos) + 2 * math.pi) % (2 * math.pi)
+        yaw = np.arctan2(sin, cos)
         return yaw
 
     # def calc_arclength(
