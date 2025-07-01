@@ -81,9 +81,9 @@ class DirectObservation(Observation):
 
             # create agent's observation dict
             agent_obs = {
-                "scan": scan,
-                "std_state": agent.standard_state,
-                "state": agent.state,
+                "scan": scan.copy(),
+                "std_state": agent.standard_state.copy(),
+                "state": agent.state.copy(),
                 "collision": agent.in_collision,
                 "lap_time": self.env.unwrapped.lap_times[i],
                 "lap_count": self.env.unwrapped.lap_counts[i],

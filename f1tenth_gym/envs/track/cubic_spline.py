@@ -61,8 +61,8 @@ class CubicSpline2D:
     def find_segment_for_s(self, x):
         # Find the segment of the spline that x is in
         # print(x, self.spline.x[-1], self.s_interval, len(self.spline_x))
-        # return (x / (self.spline.x[-1] + self.s_interval) * (len(self.spline_x) - 1)).astype(int)
-        return (x / (self.spline.x[-1]) * (len(self.spline_x) - 2)).astype(int)
+        return (x / (self.spline.x[-1] + self.s_interval) * (len(self.spline_x) - 1)).astype(int)
+        # return (x / (self.spline.x[-1]) * (len(self.spline_x) - 2)).astype(int)
     
     def predict_with_spline(self, point, segment, state_index=0):
         # A (4, 100) array, where the rows contain (x-x[i])**3, (x-x[i])**2 etc.

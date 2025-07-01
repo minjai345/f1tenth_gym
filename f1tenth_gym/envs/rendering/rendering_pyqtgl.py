@@ -36,6 +36,7 @@ class PyQtEnvRendererGL(EnvRenderer):
         self.default_camera_dist = self.params['width'] * 70
         self.obs = None
         self.zoom_level = 1.0
+        self.init = True
         
         fmt = QtGui.QSurfaceFormat()
         fmt.setSwapInterval(0)  # 0 = no vsync, 1 = vsync
@@ -87,7 +88,7 @@ class PyQtEnvRendererGL(EnvRenderer):
         self.sim_time = None
         self.callbacks = []
         self.draw_flag = True
-        self.window.show()
+        # self.window.show()
         
         # Colors
         self.car_colors = [
@@ -245,6 +246,10 @@ class PyQtEnvRendererGL(EnvRenderer):
 
     def render(self):
         if self.draw_flag:
+            if self.init:
+                self.window.show()
+                self.init = False
+            
             if self.obs is not None:
                 self.lap_label.setText(f"Lap Time {self.obs[self.agent_ids[0]]['lap_time']:.2f}, " + 
                     f"Lap {int(self.obs[self.agent_ids[0]]['lap_count']):d}")

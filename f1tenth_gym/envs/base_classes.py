@@ -29,6 +29,7 @@ Author: Hongrui Zheng
 
 from __future__ import annotations
 import numpy as np
+from collections import deque
 from .dynamic_models import DynamicModel
 from .action import CarAction
 from .collision_models import collision_multiple, get_vertices
@@ -126,8 +127,7 @@ class RaceCar(object):
         self.steer_angle_vel = 0.0
 
         # steering delay buffer
-        self.steer_buffer = np.empty((0,))
-        self.steer_buffer_size = self.config['steer_delay_buffer_size']
+        self.steer_buffer = deque(maxlen=self.config['steer_delay_buffer_size'])
 
         # collision identifier
         self.in_collision = False
@@ -224,7 +224,7 @@ class RaceCar(object):
         if self.config['compute_frenet'] and self.track is not None:
             self.frenet_pose = self.track.cartesian_to_frenet(self.state[0], self.state[1], self.state[4], use_s_guess=False)
 
-        self.steer_buffer = np.empty((0,))
+        self.steer_buffer = deque(maxlen=self.config['steer_delay_buffer_size'])
         # reset scan random generator
         self.scan_rng = np.random.default_rng(seed=self.seed)
 
@@ -305,14 +305,14 @@ class RaceCar(object):
         """
 
         # steering delay
-        steer = 0.0
-        if self.steer_buffer.shape[0] < self.steer_buffer_size:
-            steer = 0.0
-            self.steer_buffer = np.append(raw_steer, self.steer_buffer)
-        else:
-            steer = self.steer_buffer[-1]
-            self.steer_buffer = self.steer_buffer[:-1]
-            self.steer_buffer = np.append(raw_steer, self.steer_buffer)
+        steer = raw_steer
+        if self.steer_buffer.maxlen > 0:
+            if len(self.steer_buffer) < self.steer_buffer.maxlen:
+                steer = 0.0
+                self.steer_buffer.append(raw_steer)
+            else:
+                steer = self.steer_buffer.popleft()
+                self.steer_buffer.append(raw_steer)
 
         if self.action_type.type is None:
             raise ValueError("No Control Action Type Specified.")
@@ -351,7 +351,8 @@ class RaceCar(object):
             )
 
         # bound yaw angle
-        self.state[4] = np.arctan2(np.sin(self.state[4]), np.cos(self.state[4]))
+        # self.state[4] = (self.state[4] + 2 * np.pi) % (2 * np.pi)
+        self.state[4] = (self.state[4] + np.pi) % (2 * np.pi) - np.pi
 
         if self.config['enable_scan']:
             # update scan
@@ -544,7 +545,7 @@ class Simulator(object):
         all_vertices = np.empty((self.num_agents, 4, 2))
         for i in range(self.num_agents):
             all_vertices[i, :, :] = get_vertices(
-                np.append(self.agents[i].state[0:2], self.agents[i].state[4]),
+                np.append(self.agents[i].state[0:2].copy(), self.agents[i].state[4]).copy(),
                 self.params["length"],
                 self.params["width"],
             )
@@ -568,8 +569,8 @@ class Simulator(object):
             self.agent_scans[i, :] = current_scan
 
             # update sim's information of agent poses
-            self.agent_poses[i, :] = np.append(agent.state[0:2], agent.state[4])
-            self.agent_steerings[i] = agent.state[2]
+            self.agent_poses[i, :] = np.append(agent.state[0:2], agent.state[4]).copy()
+            self.agent_steerings[i] = agent.state[2].copy()
             
             
         # check collisions between all agents

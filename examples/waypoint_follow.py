@@ -329,6 +329,7 @@ def main():
             "lidar_num_beams": 270,
             "compute_frenet": 0,
             "max_laps": 5,  # 'inf' for infinite laps, or a positive integer
+            "steer_delay_buffer_size": 1,  # 0 for no delay, >0 for delay
         },
         render_mode="unlimited", # "human", "human_fast", "unlimited"
     )

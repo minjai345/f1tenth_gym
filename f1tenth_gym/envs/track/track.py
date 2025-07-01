@@ -436,7 +436,8 @@ class Track:
 
         # Adjust psi by adding the heading deviation
         psi += ephi
-        return x, y, np.arctan2(np.sin(psi), np.cos(psi))
+        # return x, y, np.arctan2(np.sin(psi), np.cos(psi))
+        return x, y, (psi + np.pi) % (2 * np.pi) - np.pi  # wrap to [-pi, pi]
 
     def cartesian_to_frenet(self, x, y, psi, use_raceline=False, s_guess=None, use_s_guess=True):
         """
@@ -454,6 +455,7 @@ class Track:
         line = self.raceline if use_raceline else self.centerline
         if s_guess is None:
             s_guess = self.s_guess
+        # use_s_guess = False
         
         if use_s_guess and s_guess is not None:
             s_inds = line.spline.find_segment_for_s(s_guess)
@@ -479,4 +481,5 @@ class Track:
         ey = ey * distance_sign
 
         psi = psi - yaw
-        return s, ey, np.arctan2(np.sin(psi), np.cos(psi))
+        # return s, ey, np.arctan2(np.sin(psi), np.cos(psi))
+        return s, ey, (psi + np.pi) % (2 * np.pi) - np.pi
