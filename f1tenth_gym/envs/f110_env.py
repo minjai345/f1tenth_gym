@@ -98,7 +98,7 @@ class F110Env(gym.Env):
         self.model = DynamicModel.from_string(self.config["model"])
         self.observation_config = self.config["observation_config"]
         self.action_type = CarAction(self.config["control_input"], params=self.params)
-
+        
         # env states
         self.poses_x = []
         self.poses_y = []

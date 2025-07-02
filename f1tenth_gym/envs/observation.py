@@ -78,7 +78,6 @@ class DirectObservation(Observation):
         for i, agent_id in enumerate(self.env.unwrapped.agent_ids):
             scan = self.env.unwrapped.sim.agent_scans[i]
             agent = self.env.unwrapped.sim.agents[i]
-
             # create agent's observation dict
             agent_obs = {
                 "scan": scan.copy(),

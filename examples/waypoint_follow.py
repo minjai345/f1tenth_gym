@@ -305,7 +305,7 @@ def main():
     work = {
         "mass": 3.463388126201571,
         "lf": 0.15597534362552312,
-        "tlad": 0.82461887897713965 * 2,
+        "tlad": 0.82461887897713965 * 8,
         "vgain": 1.,
     }
     num_agents = 1
@@ -318,10 +318,10 @@ def main():
             "integrator_timestep": 0.01,
             "integrator": "rk4",
             "control_input": ["speed", "steering_angle"],
-            "model": "st", # "ks", "st", "mb"
+            "model": 'mb', # "ks", "st", "mb"
             "observation_config": {"type": "direct"},
-            "params": F110Env.f1tenth_vehicle_params(),
-            # "params": F110Env.fullscale_vehicle_params(),
+            # "params": F110Env.f1tenth_vehicle_params(),
+            "params": F110Env.fullscale_vehicle_params(),
             "reset_config": {"type": "rl_random_static"},
             "map_scale": 1.0,
             "enable_rendering": 1,
@@ -338,10 +338,10 @@ def main():
     planner = PurePursuitPlanner(
         track=track,
         wb=(
-            F110Env.f1tenth_vehicle_params()["lf"]
-            + F110Env.f1tenth_vehicle_params()["lr"]
-            # F110Env.fullscale_vehicle_params()["lf"]
-            # + F110Env.fullscale_vehicle_params()["lr"]
+            # F110Env.f1tenth_vehicle_params()["lf"]
+            # + F110Env.f1tenth_vehicle_params()["lr"]
+            F110Env.fullscale_vehicle_params()["lf"]
+            + F110Env.fullscale_vehicle_params()["lr"]
         ),
     )
 

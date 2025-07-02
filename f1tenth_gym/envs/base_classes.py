@@ -107,17 +107,7 @@ class RaceCar(object):
         self.action_type = action_type
         self.model = model
         self.track = track
-        if self.model == DynamicModel.MB:
-            from .dynamic_models.multi_body.multi_body import sequential_param_keys
-            self.sequential_param_keys = sequential_param_keys
-        else:
-            self.sequential_param_keys = None
         self.standard_state_fn = self.model.get_standardized_state_fn()
-
-        # state of the vehicle
-        self.state = self.model.get_initial_state(params=self.params)
-        if self.config['compute_frenet'] and self.track is not None:
-            self.frenet_pose = self.track.cartesian_to_frenet(self.state[0], self.state[1], self.state[4], use_s_guess=False)
 
         # pose of opponents in the world
         self.opp_poses = None
@@ -134,6 +124,36 @@ class RaceCar(object):
 
         # collision threshold for iTTC to environment
         self.ttc_thresh = 0.005
+        
+        if self.config["model"] in ['st', 'ks']:
+            self.sequential_params = ['mu', 'C_Sf', 'C_Sr', 'lf', 'lr', 'h', 'm', 'I',
+                                        's_min', 's_max', 'sv_min', 'sv_max', 'v_switch', 
+                                        'a_max', 'v_min', 'v_max', 'width', 'length']
+        elif self.config["model"] == 'mb':
+            self.sequential_params = ['mu', 'C_Sf', 'C_Sr', 'lf', 'lr', 'h', 'm', 'I', 
+                            's_min', 's_max', 'sv_min', 'sv_max', 'v_switch', 'a_max', 
+                            'v_min', 'v_max', 'width', 'length', 'kappa_dot_max', 
+                            'kappa_dot_dot_max', 'j_max', 'j_dot_max', 'm_s', 'm_uf', 
+                            'm_ur', 'I_Phi_s', 'I_y_s', 'I_z', 'I_xz_s', 'K_sf', 
+                            'K_sdf', 'K_sr', 'K_sdr', 'T_f', 'T_r', 'K_ras', 'K_tsf', 
+                            'K_tsr', 'K_rad', 'K_zt', 'h_cg', 'h_raf', 'h_rar', 'h_s', 
+                            'I_uf', 'I_ur', 'I_y_w', 'K_lt', 'R_w', 'T_sb', 'T_se', 
+                            'D_f', 'D_r', 'E_f', 'E_r', 'tire_p_cx1', 'tire_p_dx1', 
+                            'tire_p_dx3', 'tire_p_ex1', 'tire_p_kx1', 'tire_p_hx1', 
+                            'tire_p_vx1', 'tire_r_bx1', 'tire_r_bx2', 'tire_r_cx1', 
+                            'tire_r_ex1', 'tire_r_hx1', 'tire_p_cy1', 'tire_p_dy1', 
+                            'tire_p_dy3', 'tire_p_ey1', 'tire_p_ky1', 'tire_p_hy1', 
+                            'tire_p_hy3', 'tire_p_vy1', 'tire_p_vy3', 'tire_r_by1', 
+                            'tire_r_by2', 'tire_r_by3', 'tire_r_cy1', 'tire_r_ey1', 
+                            'tire_r_hy1', 'tire_r_vy1', 'tire_r_vy3', 'tire_r_vy4', 
+                            'tire_r_vy5', 'tire_r_vy6']
+        self.update_params(params)
+        
+        # state of the vehicle
+        self.state = self.model.get_initial_state(params=self.params_arr)
+        if self.config['compute_frenet'] and self.track is not None:
+            self.frenet_pose = self.track.cartesian_to_frenet(self.state[0], self.state[1], self.state[4], use_s_guess=False)
+
 
         # initialize scan sim
         if RaceCar.scan_simulator is None:
@@ -190,6 +210,7 @@ class RaceCar(object):
             None
         """
         self.params = params
+        self.params_arr = np.array([self.params[p] for p in self.sequential_params])
 
     def set_map(self, map: str | Track, map_scale: float = 1.0):
         """
@@ -218,7 +239,7 @@ class RaceCar(object):
         self.in_collision = False
         if option == 'pose':
             # init state from pose
-            self.state = self.model.get_initial_state(pose=pose, params=self.params)
+            self.state = self.model.get_initial_state(pose=pose, params=self.params_arr)
         elif option == 'state':
             self.state = pose
         if self.config['compute_frenet'] and self.track is not None:
@@ -324,31 +345,9 @@ class RaceCar(object):
         u_np = np.array([sv, accl])
 
         f_dynamics = self.model.f_dynamics
-        if self.model == DynamicModel.MB:
-            self.state = self.integrator.integrate(
-                f_dynamics, self.state, u_np, [self.params[key] for key in self.sequential_param_keys]
-            )
-        else:
-            self.state = self.integrator.integrate(
-                f_dynamics, self.state, u_np, self.params['mu'],
-                                                self.params['C_Sf'],
-                                                self.params['C_Sr'],
-                                                self.params['lf'],
-                                                self.params['lr'],
-                                                self.params['h'],
-                                                self.params['m'],
-                                                self.params['I'],
-                                                self.params['s_min'],
-                                                self.params['s_max'],
-                                                self.params['sv_min'],
-                                                self.params['sv_max'],
-                                                self.params['v_switch'],
-                                                self.params['a_max'],
-                                                self.params['v_min'],
-                                                self.params['v_max'],
-                                                self.params['width'],
-                                                self.params['length']
-            )
+        self.state = self.integrator.integrate(
+            f_dynamics, self.state, u_np, self.params_arr
+        )
 
         # bound yaw angle
         # self.state[4] = (self.state[4] + 2 * np.pi) % (2 * np.pi)
