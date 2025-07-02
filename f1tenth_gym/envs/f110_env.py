@@ -233,8 +233,6 @@ class F110Env(gym.Env):
             "h": 0.557,
             "m": 1225.8878467253344,
             "I": 1538.8533713561394,
-            "width": 1.674,
-            "length": 4.298,
             # steering constraints
             "s_min": -0.91,
             "s_max": 0.91,
@@ -245,6 +243,8 @@ class F110Env(gym.Env):
             "a_max": 11.5,
             "v_min": -13.9,
             "v_max": 45.8,
+            "width": 1.674,
+            "length": 4.298,
             # maximum curvature change
             "kappa_dot_max": 0.4,
             # maximum curvature rate rate
