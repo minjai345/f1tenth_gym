@@ -266,15 +266,15 @@ class F110Env(gym.Env):
             "s_max": 0.91,
             "sv_min": -0.4,
             "sv_max": 0.4,
-            # maximum curvature change
-            "kappa_dot_max": 0.4,
-            # maximum curvature rate rate
-            "kappa_dot_dot_max": 20.0,
             # Longitudinal constraints
             "v_switch": 4.755,
             "a_max": 11.5,
             "v_min": -13.9,
             "v_max": 45.8,
+            # maximum curvature change
+            "kappa_dot_max": 0.4,
+            # maximum curvature rate rate
+            "kappa_dot_dot_max": 20.0,
             # maximum longitudinal jerk [m/s^3]
             "j_max": 10.0e3,
             # maximum longitudinal jerk change [m/s^4]
