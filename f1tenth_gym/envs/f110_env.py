@@ -221,32 +221,6 @@ class F110Env(gym.Env):
             "collision_check_method": "lidar_scan", # "lidar_scan", "bounding_box"
             "loop_counting_method": "frenet_based", # "toggle", "frenet_based", "winding_angle"
         }
-
-    @classmethod
-    def fullscale_vehicle_params_st(cls) -> dict:
-        params = {
-            "mu": 1.0489,
-            "C_Sf": 20.89,
-            "C_Sr": 20.89,
-            "lf": 0.88392,
-            "lr": 1.50876,
-            "h": 0.557,
-            "m": 1225.8878467253344,
-            "I": 1538.8533713561394,
-            "width": 1.674,
-            "length": 4.298,
-            # steering constraints
-            "s_min": -0.91,
-            "s_max": 0.91,
-            "sv_min": -0.4,
-            "sv_max": 0.4,
-            # Longitudinal constraints
-            "v_switch": 4.755,
-            "a_max": 11.5,
-            "v_min": -13.9,
-            "v_max": 45.8,
-        }
-        return params
     
     @classmethod
     def fullscale_vehicle_params(cls) -> dict:
