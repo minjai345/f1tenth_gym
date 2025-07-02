@@ -116,17 +116,20 @@ class F110Env(gym.Env):
             self.lap_times_finish = np.zeros((self.num_agents, ))
             self.lap_counts = np.zeros((self.num_agents, ))
             self.sim_time = 0.0
-        
-        if '/' in self.map or '\\' in self.map:
-            self.track = Track.from_track_path(
-                self.map,
-                track_scale=self.config["map_scale"],
-            )
+
+        if type(self.map) is not Track:
+            if '/' in self.map or '\\' in self.map:
+                self.track = Track.from_track_path(
+                    self.map,
+                    track_scale=self.config["map_scale"],
+                )
+            else:
+                self.track = Track.from_track_name(
+                    self.map,
+                    track_scale=self.config["map_scale"],
+                )  # load track in gym env for convenience
         else:
-            self.track = Track.from_track_name(
-                self.map,
-                track_scale=self.config["map_scale"],
-            )  # load track in gym env for convenience
+            self.track = self.map  # use the track directly
         
         # initiate stuff
         self.sim = Simulator(

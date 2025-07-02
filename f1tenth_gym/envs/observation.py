@@ -294,12 +294,12 @@ class FeaturesObservation(Observation):
 
             std_state = agent.standard_state
 
-            x, y, theta = std_state["x"], std_state["y"], std_state["yaw"]
-            delta = std_state["delta"]
-            beta = std_state["slip"]
-            vx = std_state["v_x"]
-            vy = std_state["v_y"]
-            angvel = std_state["yaw_rate"]
+            x, y, theta = std_state[0], std_state[1], std_state[4]
+            delta = std_state[2]
+            beta = std_state[6]
+            vx = std_state[4] * np.cos(std_state[6])
+            vy = std_state[4] * np.sin(std_state[6])
+            angvel = std_state[5]
 
             # create agent's observation dict
             agent_obs = {

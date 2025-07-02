@@ -265,8 +265,8 @@ class Track:
         resolution = 0.05
         margin_perc = 0.1
 
-        spline = CubicSpline2D(x=x, y=y)
-        ss, xs, ys, yaws, ks, vxs = spline.ss, spline.xs, spline.ys, spline.psis, spline.ks, velx
+        spline = CubicSpline2D(x=x, y=y, vxs=velx)
+        ss, xs, ys, yaws, ks, vxs = spline.ss, spline.xs, spline.ys, spline.psis, spline.ks, spline.vxs
 
         refline = Raceline(
             ss=np.array(ss).astype(np.float32),
