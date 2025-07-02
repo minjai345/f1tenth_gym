@@ -209,7 +209,7 @@ class PurePursuitPlanner:
             points = self.lookahead_point[:2][None]  # shape (1, 2)~
             if self.lookahead_point_render is None:
                 self.lookahead_point_render = e.get_points_renderer(
-                    points, color=(200, 0, 0), size=10
+                    points, color=(228, 26, 28), size=10
                 )
             else:
                 self.lookahead_point_render.update(points)
@@ -222,7 +222,7 @@ class PurePursuitPlanner:
             points = self.waypoints[self.current_index : self.current_index + 10, :2]
             if self.local_plan_render is None:
                 self.local_plan_render = e.get_lines_renderer(
-                    points, color=(0, 128, 0), size=5
+                    points, color=(255, 255, 51), size=5
                 )
             else:
                 self.local_plan_render.update(points)
@@ -305,7 +305,7 @@ def main():
     work = {
         "mass": 3.463388126201571,
         "lf": 0.15597534362552312,
-        "tlad": 0.82461887897713965 * 8,
+        "tlad": 0.82461887897713965 * 2,
         "vgain": 1.,
     }
     num_agents = 1
@@ -318,10 +318,10 @@ def main():
             "integrator_timestep": 0.01,
             "integrator": "rk4",
             "control_input": ["speed", "steering_angle"],
-            "model": 'mb', # "ks", "st", "mb"
+            "model": 'ks', # "ks", "st", "mb"
             "observation_config": {"type": "direct"},
-            # "params": F110Env.f1tenth_vehicle_params(),
-            "params": F110Env.fullscale_vehicle_params(),
+            "params": F110Env.f1tenth_vehicle_params(),
+            # "params": F110Env.fullscale_vehicle_params(),
             "reset_config": {"type": "rl_random_static"},
             "map_scale": 1.0,
             "enable_rendering": 1,
@@ -338,10 +338,10 @@ def main():
     planner = PurePursuitPlanner(
         track=track,
         wb=(
-            # F110Env.f1tenth_vehicle_params()["lf"]
-            # + F110Env.f1tenth_vehicle_params()["lr"]
-            F110Env.fullscale_vehicle_params()["lf"]
-            + F110Env.fullscale_vehicle_params()["lr"]
+            F110Env.f1tenth_vehicle_params()["lf"]
+            + F110Env.f1tenth_vehicle_params()["lr"]
+            # F110Env.fullscale_vehicle_params()["lf"]
+            # + F110Env.fullscale_vehicle_params()["lr"]
         ),
     )
 

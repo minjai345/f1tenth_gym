@@ -113,7 +113,7 @@ class LinesRenderer(ObjectRenderer):
         points: list | np.ndarray, 
         color: Optional[tuple[int, int, int]] = (0, 0, 255), 
         size: Optional[int] = 1,
-        z_offset: float = 0.01
+        z_offset: float = 0.02
         ):
         # Convert to 3D (z=0)
         self.z_offset = z_offset
@@ -184,7 +184,7 @@ class PointsRenderer(ObjectRenderer):
         points: np.ndarray,
         color: tuple[int, int, int] = (0, 0, 255),
         size: int = 5,
-        z_offset: float = 0.01
+        z_offset: float = 0.03
     ):
         self.z_offset = z_offset
         # Normalize color to (0–1)

@@ -19,3 +19,7 @@ vehicle_palette:      # [list] cyclic list of colors for the vehicles
   - "#888888"
   - "#a6cee3"
   - "#b2df8a"
+frame_output_method: "offscreen" # [str] method to output frames. Options: "xcb", "offscreen"
+# NOTE: "xcb" is slower, requires a display server, but with higher quality, 
+#       "offscreen" is faster, works without a display server, but with lower quality
+frame_output_info_label: True # [bool] it toggles the visualization of the frame output label
