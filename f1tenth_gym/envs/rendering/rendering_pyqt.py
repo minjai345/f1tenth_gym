@@ -12,16 +12,12 @@ import pyqtgraph as pg
 from pyqtgraph.exporters import ImageExporter
 from PIL import ImageColor
 
-from .pyqt_objects import (
-    Car,
-    TextObject,
-)
+from .pyqt_objects import *
 from ..track import Track
-from .renderer import EnvRenderer, RenderSpec
+from .renderer import EnvRenderer, ObjectRenderer, RenderSpec
 
 # one-line instructions visualized at the top of the screen (if show_info=True)
 INSTRUCTION_TEXT = "Mouse click (L/M/R): Change POV - 'S' key: On/Off"
-
 
 # Replicated from pyqtgraphs' example utils for ci pipelines to pass
 from time import perf_counter
@@ -77,7 +73,7 @@ class PyQtEnvRenderer(EnvRenderer):
         render_spec : RenderSpec
             rendering specification
         render_mode : str
-            rendering mode in ["human", "human_fast", "rgb_array"]
+            rendering mode in ["human", "human_fast", 'unlimited', "rgb_array"]
         render_fps : int
             number of frames per second
         """
@@ -93,7 +89,7 @@ class PyQtEnvRenderer(EnvRenderer):
         self.render_spec = render_spec
         self.render_mode = render_mode
         self.render_fps = render_fps
-
+        
         # create the canvas
         self.app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
         self.window = pg.GraphicsLayoutWidget()
@@ -104,7 +100,7 @@ class PyQtEnvRenderer(EnvRenderer):
         self.canvas: pg.PlotItem = self.window.addPlot()
 
         # Disable interactivity
-        self.canvas.setMouseEnabled(x=False, y=False)  # Disable mouse panning & zooming
+        self.canvas.setMouseEnabled(x=True, y=True)  # Disable mouse panning & zooming
         self.canvas.hideButtons()  # Disable corner auto-scale button
         self.canvas.setMenuEnabled(False)  # Disable right-click context menu
 
@@ -125,14 +121,14 @@ class PyQtEnvRenderer(EnvRenderer):
 
         # fps and time renderer
         self.clock = FrameCounter()
-        self.fps_renderer = TextObject(parent=self.canvas, position="bottom_left")
-        self.time_renderer = TextObject(parent=self.canvas, position="bottom_right")
-        self.bottom_info_renderer = TextObject(
+        self.fps_renderer = TextRenderer(parent=self.canvas, position="bottom_left")
+        self.time_renderer = TextRenderer(parent=self.canvas, position="bottom_right")
+        self.bottom_info_renderer = TextRenderer(
             parent=self.canvas, position="bottom_center"
         )
-        self.top_info_renderer = TextObject(parent=self.canvas, position="top_center")
+        self.top_info_renderer = TextRenderer(parent=self.canvas, position="top_center")
 
-        if self.render_mode in ["human", "human_fast"]:
+        if self.render_mode in ["human", "human_fast", 'unlimited']:
             self.clock.sigFpsUpdate.connect(
                 lambda fps: self.fps_renderer.render(f"FPS: {fps:.1f}")
             )
@@ -185,23 +181,23 @@ class PyQtEnvRenderer(EnvRenderer):
             self.follow_agent_flag: bool = False
             self.agent_to_follow: int = None
 
-        if self.render_mode in ["human", "human_fast"]:
+        if self.render_mode in ["human", "human_fast", 'unlimited']:
             signal.signal(signal.SIGINT, signal.SIG_DFL)
             self.window.show()
         elif self.render_mode == "rgb_array":
             self.exporter = ImageExporter(self.canvas)
 
-    def update(self, state: dict) -> None:
+    def update(self, obs: dict) -> None:
         """
-        Update the simulation state to be rendered.
+        Update the simulation obs to be rendered.
 
         Parameters
         ----------
-            state: simulation state as dictionary
+            obs: simulation obs as dictionary
         """
         if self.cars is None:
             self.cars = [
-                Car(
+                CarRenderer(
                     car_length=self.params["length"],
                     car_width=self.params["width"],
                     color=self.car_colors[ic],
@@ -213,12 +209,12 @@ class PyQtEnvRenderer(EnvRenderer):
                 for ic in range(len(self.agent_ids))
             ]
 
-        # update cars state and zoom level (updating points-per-unit)
-        for i in range(len(self.agent_ids)):
-            self.cars[i].update(state, i)
+        # update cars obs and zoom level (updating points-per-unit)
+        for i, id in enumerate(self.agent_ids):
+            self.cars[i].update(obs, id)
 
         # update time
-        self.sim_time = state["sim_time"]
+        self.sim_time = obs[self.agent_ids[0]]["sim_time"]
 
     def add_renderer_callback(self, callback_fn: Callable[[EnvRenderer], None]) -> None:
         """
@@ -244,7 +240,7 @@ class PyQtEnvRenderer(EnvRenderer):
         if event.key() == QtCore.Qt.Key.Key_S:
             logging.debug("Pressed S key -> Enable/disable rendering")
             self.draw_flag = not self.draw_flag
-            self.draw_flag_changed = True
+            # self.draw_flag_changed = True
 
     def mouse_clicked(self, event: QtGui.QMouseEvent) -> None:
         """
@@ -293,136 +289,98 @@ class PyQtEnvRenderer(EnvRenderer):
         Optional[np.ndarray]
             if render_mode is "rgb_array", returns the rendered frame as an array
         """
-        # draw cars
-        for i in range(len(self.agent_ids)):
-            self.cars[i].render()
+        if self.draw_flag:
+            # call callbacks
+            for callback_fn in self.callbacks:
+                callback_fn(self)
+            
+            # draw cars
+            for i in range(len(self.agent_ids)):
+                self.cars[i].render()
 
-        # call callbacks
-        for callback_fn in self.callbacks:
-            callback_fn(self)
+            if self.follow_agent_flag:
+                ego_x, ego_y = self.cars[self.agent_to_follow].pose[:2]
+                self.canvas.setXRange(ego_x - 10 / self.render_spec.zoom_in_factor, ego_x + 10 / self.render_spec.zoom_in_factor)
+                self.canvas.setYRange(ego_y - 10 / self.render_spec.zoom_in_factor, ego_y + 10 / self.render_spec.zoom_in_factor)
+            else:
+                self.canvas.autoRange()
+                
+            agent_to_follow_id = (
+                self.agent_ids[self.agent_to_follow]
+                if self.agent_to_follow is not None
+                else None
+            )
+            self.bottom_info_renderer.render(
+                text=f"Focus on: {agent_to_follow_id}"
+            )
 
-        if self.follow_agent_flag:
-            ego_x, ego_y = self.cars[self.agent_to_follow].pose[:2]
-            self.canvas.setXRange(ego_x - 10, ego_x + 10)
-            self.canvas.setYRange(ego_y - 10, ego_y + 10)
+            if self.render_spec.show_info:
+                self.top_info_renderer.render(text=INSTRUCTION_TEXT)
+
+            self.time_renderer.render(text=f"{self.sim_time:.2f}")
+            self.clock.update()
+            self.app.processEvents()
+
+            if self.render_mode in ["human", "human_fast", 'unlimited']:
+                assert self.window is not None
+
+            else:  
+                # rgb_array mode => extract the frame from the canvas
+                qImage = self.exporter.export(toBytes=True)
+
+                width = qImage.width()
+                height = qImage.height()
+
+                ptr = qImage.bits()
+                ptr.setsize(height * width * 4)
+                frame = np.array(ptr).reshape(height, width, 4)  #  Copies the data
+                
+                return frame[:, :, :3] # remove alpha channel
         else:
-            self.canvas.autoRange()
-            
-        agent_to_follow_id = (
-            self.agent_ids[self.agent_to_follow]
-            if self.agent_to_follow is not None
-            else None
-        )
-        self.bottom_info_renderer.render(
-            text=f"Focus on: {agent_to_follow_id}"
-        )
+            self.clock.update()
+            self.app.processEvents()
 
-        if self.render_spec.show_info:
-            self.top_info_renderer.render(text=INSTRUCTION_TEXT)
+            # if draw_flag is False, we just return the current frame without rendering anything
+            if self.render_mode == "rgb_array":
+                qImage = self.exporter.export(toBytes=True)
 
-        self.time_renderer.render(text=f"{self.sim_time:.2f}")
-        self.clock.update()
-        self.app.processEvents()
+                width = qImage.width()
+                height = qImage.height()
 
-        if self.render_mode in ["human", "human_fast"]:
-            assert self.window is not None
+                ptr = qImage.bits()
+                ptr.setsize(height * width * 4)
+                frame = np.array(ptr).reshape(height, width, 4)
+                return frame[:, :, :3]  # remove alpha channel
 
-        else:  
-            # rgb_array mode => extract the frame from the canvas
-            qImage = self.exporter.export(toBytes=True)
-
-            width = qImage.width()
-            height = qImage.height()
-
-            ptr = qImage.bits()
-            ptr.setsize(height * width * 4)
-            frame = np.array(ptr).reshape(height, width, 4)  #  Copies the data
-            
-            return frame[:, :, :3] # remove alpha channel
-
-    def render_points(
+    def get_points_renderer(
         self,
         points: list | np.ndarray,
         color: Optional[tuple[int, int, int]] = (0, 0, 255),
         size: Optional[int] = 1,
-    ) -> pg.PlotDataItem:
-        """
-        Render a sequence of xy points on screen.
+    ) -> ObjectRenderer:
+        return PointsRenderer(self, points, color, size)
 
-        Parameters
-        ----------
-        points : list | np.ndarray
-            list of points to render
-        color : Optional[tuple[int, int, int]], optional
-            color as rgb tuple, by default blue (0, 0, 255)
-        size : Optional[int], optional
-            size of the points in pixels, by default 1
-        """
-        return self.canvas.plot(
-            points[:, 0],
-            points[:, 1],
-            pen=None,
-            symbol="o",
-            symbolPen=pg.mkPen(color=color, width=0),
-            symbolBrush=pg.mkBrush(color=color, width=0),
-            symbolSize=size,
-        )
-
-    def render_lines(
+    def get_lines_renderer(
         self,
         points: list | np.ndarray,
         color: Optional[tuple[int, int, int]] = (0, 0, 255),
         size: Optional[int] = 1,
-    ) -> pg.PlotDataItem:
-        """
-        Render a sequence of lines segments.
+    ) -> ObjectRenderer:
+        return LinesRenderer(self, points, color, size)
 
-        Parameters
-        ----------
-        points : list | np.ndarray
-            list of points to render
-        color : Optional[tuple[int, int, int]], optional
-            color as rgb tuple, by default blue (0, 0, 255)
-        size : Optional[int], optional
-            size of the line, by default 1
-        """
-        pen = pg.mkPen(color=pg.mkColor(*color), width=size)
-        return self.canvas.plot(
-            points[:, 0], points[:, 1], pen=pen, fillLevel=None, antialias=True
-        )  ## setting pen=None disables line drawing
-
-    def render_closed_lines(
+    def get_closed_lines_renderer(
         self,
         points: list | np.ndarray,
         color: Optional[tuple[int, int, int]] = (0, 0, 255),
         size: Optional[int] = 1,
-    ) -> pg.PlotDataItem:
-        """
-        Render a sequence of lines segments forming a closed loop (draw a line between the last and the first point).
-
-        Parameters
-        ----------
-        points : list | np.ndarray
-            list of 2d points to render
-        color : Optional[tuple[int, int, int]], optional
-            color as rgb tuple, by default blue (0, 0, 255)
-        size : Optional[int], optional
-            size of the line, by default 1
-        """
-        # Append the first point to the end to close the loop
-        points = np.vstack([points, points[0]])
-
-        pen = pg.mkPen(color=pg.mkColor(*color), width=size)
-        pen.setCapStyle(pg.QtCore.Qt.PenCapStyle.RoundCap)
-        pen.setJoinStyle(pg.QtCore.Qt.PenJoinStyle.RoundJoin)
-
-        return self.canvas.plot(
-            points[:, 0], points[:, 1], pen=pen, cosmetic=True, antialias=True
-        )  ## setting pen=None disables line drawing
+    ) -> ObjectRenderer:
+        return ClosedLinesRenderer(self, points, color, size)
 
     def close(self) -> None:
         """
         Close the rendering environment.
         """
         self.app.exit()
+        
+
         
