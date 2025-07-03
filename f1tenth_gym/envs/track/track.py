@@ -265,7 +265,7 @@ class Track:
         resolution = 0.05
         margin_perc = 0.1
 
-        spline = CubicSpline2D(x=x, y=y, vxs=velx)
+        spline = CubicSplineND(x=x, y=y, vxs=velx)
         ss, xs, ys, yaws, ks, vxs = spline.ss, spline.xs, spline.ys, spline.psis, spline.ks, spline.vxs
 
         refline = Raceline(

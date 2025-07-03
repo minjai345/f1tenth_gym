@@ -370,13 +370,7 @@ def main():
                 work["vgain"],
             )
             action[i] = np.array([steer, speed])
-        t1 = time.time()
         obs, step_reward, done, truncated, info = env.step(action)
-        
-        times.append(1/(time.time() - t1))
-        if len(times) > 2000:
-            print("FPS:", np.mean(times))
-            times = []
         laptime += step_reward
         frame = env.render()
 

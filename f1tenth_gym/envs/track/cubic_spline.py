@@ -47,8 +47,8 @@ class CubicSplineND:
         else:
             self.points[-1] = self.points[0]
         self.s = ss if ss is not None else self.__calc_s(self.points[:, 0], self.points[:, 1])
-        self.xs, self.ys, self.ss, self.psis, self.ks, self.vxs = \
-            self.points[:, 0], self.points[:, 1], self.s, np.arctan2(self.points[:, 3], self.points[:, 2]), self.points[:, 4], self.points[:, 5]
+        self.xs, self.ys, self.ss, self.psis, self.ks, self.vxs , self.axs = \
+            self.points[:, 0], self.points[:, 1], self.s, np.arctan2(self.points[:, 3], self.points[:, 2]), self.points[:, 4], self.points[:, 5], self.points[:, 6]
         self.s_interval = (self.s[-1] - self.s[0]) / len(self.s)
         self.s_frame_max = self.s[-1]
 
