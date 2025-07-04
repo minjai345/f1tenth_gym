@@ -151,6 +151,7 @@ class RaceCar(object):
         
         # state of the vehicle
         self.state = self.model.get_initial_state(params=self.params_arr)
+        self.control = np.zeros((self.model.control_dim,), dtype=np.float32)
         if self.config['compute_frenet'] and self.track is not None:
             self.frenet_pose = self.track.cartesian_to_frenet(self.state[0], self.state[1], self.state[4], use_s_guess=False)
 
@@ -244,7 +245,7 @@ class RaceCar(object):
             self.state = pose
         if self.config['compute_frenet'] and self.track is not None:
             self.frenet_pose = self.track.cartesian_to_frenet(self.state[0], self.state[1], self.state[4], use_s_guess=False)
-
+        self.control = np.zeros((self.model.control_dim,), dtype=np.float32)
         self.steer_buffer = deque(maxlen=self.config['steer_delay_buffer_size'])
         # reset scan random generator
         self.scan_rng = np.random.default_rng(seed=self.seed)
@@ -342,11 +343,11 @@ class RaceCar(object):
             action=(vel, steer), state=self.state, params=self.params
         )
 
-        u_np = np.array([sv, accl])
+        self.control = np.array([sv, accl])
 
         f_dynamics = self.model.f_dynamics
         self.state = self.integrator.integrate(
-            f_dynamics, self.state, u_np, self.params_arr
+            f_dynamics, self.state, self.control, self.params_arr
         )
 
         # bound yaw angle

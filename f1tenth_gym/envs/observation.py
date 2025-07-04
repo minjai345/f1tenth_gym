@@ -48,6 +48,9 @@ class DirectObservation(Observation):
                 "state": gym.spaces.Box(
                     low=-large_num, high=large_num, shape=(int(self.env.model.state_dim),), dtype=np.float32
                 ),
+                "control": gym.spaces.Box(
+                    low=-large_num, high=large_num, shape=(int(self.env.model.control_dim),), dtype=np.float32
+                ),
                 "collision": gym.spaces.Box(
                     low=0.0, high=1.0, shape=(), dtype=np.float32
                 ),
@@ -83,6 +86,7 @@ class DirectObservation(Observation):
                 "scan": scan.copy(),
                 "std_state": agent.standard_state.copy(),
                 "state": agent.state.copy(),
+                "control": agent.control.copy(),
                 "collision": agent.in_collision,
                 "lap_time": self.env.unwrapped.lap_times[i],
                 "lap_count": self.env.unwrapped.lap_counts[i],

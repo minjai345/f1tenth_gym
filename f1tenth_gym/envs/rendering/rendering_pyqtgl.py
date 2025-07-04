@@ -1,12 +1,14 @@
 import time, logging
 import os
 import numpy as np
+import pyqtgraph as pg
 import pyqtgraph.opengl as gl
 from PyQt6 import QtWidgets, QtCore, QtGui
 from typing import Any, Optional
 from PIL import ImageColor
 from PyQt6.QtGui import QImage
 import OpenGL.GL as gl_module
+from collections import deque
 
 from ..track import Track
 from .renderer import EnvRenderer, RenderSpec, ObjectRenderer
@@ -28,7 +30,7 @@ class PyQtEnvRendererGL(EnvRenderer):
         super().__init__()
         if render_mode == "rgb_array":
             os.environ["QT_QPA_PLATFORM"] = render_spec.frame_output_method
-        self.camera_free_rotation = 0
+        
         self.params = params
         self.agent_ids = agent_ids
         self.render_spec = render_spec
@@ -45,6 +47,11 @@ class PyQtEnvRendererGL(EnvRenderer):
         self.zoom_level = 1.0
         self.azimuth = -90
         self.init = True
+        self.add_2d_plots = True
+        self.curves_2d = None
+        self.lock_camera = 0
+        self.camera_free_rotation = 0
+        
         # self.timer = utilsuite.Timer()
         
         fmt = QtGui.QSurfaceFormat()
@@ -55,16 +62,56 @@ class PyQtEnvRendererGL(EnvRenderer):
         self.view = gl.GLViewWidget()
         self.view.setCameraPosition(pos=QtGui.QVector3D(0, 0, 0), distance=self.default_camera_dist, elevation=90, azimuth=self.azimuth)
         self.view.setBackgroundColor((25, 25, 25))
-        self.view.resize(self.render_spec.window_size, self.render_spec.window_size)        
+        self.view.resize(self.render_spec.window_size, self.render_spec.window_size)
+        self.control_recording = deque(maxlen=200)
 
         if self.render_mode != "rgb_array":
+            # Create central widget and horizontal layout
+            central_widget = QtWidgets.QWidget()
+            layout = QtWidgets.QHBoxLayout(central_widget)
+            layout.setContentsMargins(0, 0, 0, 0)
+
+            # Add 3D view
+            layout.addWidget(self.view, stretch=2)
+
+            if self.add_2d_plots:
+                # Create container for 2D plots stacked vertically
+                self.render_spec.num_2d_plots = 2
+                pg.setConfigOption('background', '#191919')
+                pg.setConfigOption('foreground', 'w')
+                self.plots_2d = []
+
+                plot_container = QtWidgets.QWidget()
+                plot_layout = QtWidgets.QVBoxLayout(plot_container)
+                plot_layout.setContentsMargins(0, 0, 0, 0)
+
+                for i in range(self.render_spec.num_2d_plots):
+                    plot_widget = pg.GraphicsLayoutWidget()
+                    plot = plot_widget.addPlot()
+                    plot.setXRange(0, 200)
+                    plot.enableAutoRange('x', False)
+                    self.plots_2d.append(plot)
+                    plot_layout.addWidget(plot_widget)
+
+                layout.addWidget(plot_container, stretch=1)
+
+            # Set layout into window
             self.window = QtWidgets.QMainWindow()
-            self.window.setCentralWidget(self.view)
+            self.window.setCentralWidget(central_widget)
             self.window.setWindowTitle("F1Tenth Gym - OpenGL")
             self.window.setGeometry(0, 0, self.render_spec.window_size, self.render_spec.window_size)
+
+
+        
         
         if self.render_spec.car_model == "2d":
             if not self.camera_free_rotation: self._enable_pan_only()
+        if self.lock_camera:
+            self.view.setCameraPosition(pos=QtGui.QVector3D(6.66419792175293, 43.9409294128418, 98.36193084716797), 
+                                        distance=14, elevation=90, azimuth=self.azimuth)
+            self.focused = False
+            self.window.show()
+        else:
             self.focused = True
         self._init_map(track)
         
@@ -101,6 +148,7 @@ class PyQtEnvRendererGL(EnvRenderer):
         self.sim_time = None
         self.callbacks = []
         self.draw_flag = True
+        self.offset = 0
         
         # Colors
         self.car_colors = [
@@ -171,30 +219,36 @@ class PyQtEnvRendererGL(EnvRenderer):
         self.view.pan_start = QtCore.QPoint()
 
         def mousePressEvent(event):
-            if event.button() == QtCore.Qt.MouseButton.LeftButton: # NOTE: left button is used for panning
-                self.view.pan_active = True
-                self.view.pan_start = event.pos()
-                event.accept()
-                self.focused = False
-            if event.button() == QtCore.Qt.MouseButton.RightButton:
-                logging.debug("Pressed right button -> Follow Next agent")
-                if self.agent_to_follow is None:
-                    self.agent_to_follow = 0
-                else:
-                    self.agent_to_follow = (self.agent_to_follow + 1) % len(self.agent_ids)
-                self.zoom_level = 1.0
-                self._center_camera_on_car(self.agent_to_follow, distance_reset=True)
-                self.focused = True
-            elif event.button() == QtCore.Qt.MouseButton.MiddleButton:
-                logging.debug("Pressed middle button -> Change to Map View")
-                self._center_camera_on_map()
-                self.agent_to_follow = None
+            if not self.lock_camera:
+                if event.button() == QtCore.Qt.MouseButton.LeftButton: # NOTE: left button is used for panning
+                    self.view.pan_active = True
+                    self.view.pan_start = event.pos()
+                    event.accept()
+                    self.focused = False
+                if event.button() == QtCore.Qt.MouseButton.RightButton:
+                    logging.debug("Pressed right button -> Follow Next agent")
+                    if self.agent_to_follow is None:
+                        self.agent_to_follow = 0
+                    else:
+                        self.agent_to_follow = (self.agent_to_follow + 1) % len(self.agent_ids)
+                    self.zoom_level = 1.0
+                    self._center_camera_on_car(self.agent_to_follow, distance_reset=True)
+                    self.focused = True
+                elif event.button() == QtCore.Qt.MouseButton.MiddleButton:
+                    logging.debug("Pressed middle button -> Change to Map View")
+                    self._center_camera_on_map()
+                    self.agent_to_follow = None
+                
+            else:
+                print("Camera is locked, ignoring mouse press event")
+                event.ignore()
+
 
         def mouseMoveEvent(event):
-            if self.view.pan_active:
+            if self.view.pan_active and not self.lock_camera:
                 delta = event.pos() - self.view.pan_start
-                dx = -delta.y() * 0.08
-                dy = -delta.x() * 0.08
+                dx = -delta.x() * 0.08
+                dy = delta.y() * 0.08
                 self.view.pan(dx, dy, 0)
                 self.view.pan_start = event.pos()
                 event.accept()
@@ -202,14 +256,27 @@ class PyQtEnvRendererGL(EnvRenderer):
                 event.ignore()
                 
         def wheelEvent(event):
-            delta = event.angleDelta().y()
-            factor = 0.85 if delta > 0 else 1.15
-            self.zoom_level *= factor
-            event.accept()
+            if not self.lock_camera:
+                delta = event.angleDelta().y()
+                factor = 0.85 if delta > 0 else 1.15
+                self.zoom_level *= factor
+                self.view.setCameraPosition(
+                    distance=self.default_camera_dist * self.zoom_level,  # zoom level
+                )
+                event.accept()
+            else:
+                event.ignore()
 
         def mouseReleaseEvent(event):
-            self.view.pan_active = False
-            event.accept()
+            if not self.lock_camera:
+                self.view.pan_active = False
+                event.accept()
+                print("Camera position:", self.view.cameraPosition(), "Zoom level:", self.zoom_level,
+                  "Distance:", self.view.opts['distance'])
+            else:
+                event.ignore()
+        
+
 
         self.view.mousePressEvent = mousePressEvent
         self.view.mouseMoveEvent = mouseMoveEvent
@@ -251,6 +318,38 @@ class PyQtEnvRendererGL(EnvRenderer):
         # update cars obs and zoom level (updating points-per-unit)
         for i, id in enumerate(self.agent_ids):
             self.cars[i].update(obs, id)
+        self.control_recording.append(obs[self.agent_ids[0]]["control"])
+        
+        
+        if self.curves_2d is None:
+            self.curves_2d = []
+            self.curves_2d.append(self.plots_2d[0].plot(
+                x=np.arange(len(self.control_recording)),
+                y=np.asarray(self.control_recording)[:, 0],
+                pen=pg.mkPen(color=(255, 0, 0), width=1),
+                clear=True
+            ))
+            self.plots_2d[0].setLabel("left", "Steering Speed (rad/s)")
+            self.plots_2d[0].setLabel("bottom", "Time Step")
+            self.curves_2d.append(self.plots_2d[1].plot(
+                x=np.arange(len(self.control_recording)),
+                y=np.asarray(self.control_recording)[:, 1],
+                pen=pg.mkPen(color=(0, 255, 0), width=1),
+                clear=True
+            ))
+            self.plots_2d[1].setLabel("left", "Acceleration (m/s^2)")
+            self.plots_2d[1].setLabel("bottom", "Time Step")
+        else:
+            if len(self.control_recording) > self.control_recording.maxlen:
+                self.control_recording.popleft()  # Remove oldest if exceeded maxlen
+            self.curves_2d[0].setData(
+                x=np.arange(len(self.control_recording)),
+                y=np.asarray(self.control_recording)[:, 0]
+            )
+            self.curves_2d[1].setData(
+                x=np.arange(len(self.control_recording)),
+                y=np.asarray(self.control_recording)[:, 1]
+            )
 
         # update time
         self.sim_time = obs[self.agent_ids[0]]["sim_time"]
