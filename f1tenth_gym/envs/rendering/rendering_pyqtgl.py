@@ -193,8 +193,8 @@ class PyQtEnvRendererGL(EnvRenderer):
         def mouseMoveEvent(event):
             if self.view.pan_active:
                 delta = event.pos() - self.view.pan_start
-                dx = -delta.y() * 0.08
-                dy = -delta.x() * 0.08
+                dx = -delta.x() * 0.08
+                dy = delta.y() * 0.08
                 self.view.pan(dx, dy, 0)
                 self.view.pan_start = event.pos()
                 event.accept()
