@@ -319,7 +319,7 @@ def main():
             "integrator": "rk4",
             "control_input": ["speed", "steering_angle"],
             "model": 'ks', # "ks", "st", "mb"
-            "observation_config": {"type": "direct"},
+            "observation_config": {"type": "kinematic_state"},
             "params": F110Env.f1tenth_vehicle_params(),
             # "params": F110Env.fullscale_vehicle_params(),
             "reset_config": {"type": "rl_random_static"},
@@ -363,9 +363,9 @@ def main():
         action = env.action_space.sample()
         for i, agent_id in enumerate(obs.keys()):
             speed, steer = planner.plan(
-                obs[agent_id]["std_state"][0],
-                obs[agent_id]["std_state"][1],
-                obs[agent_id]["std_state"][4],
+                obs[agent_id]["pose_x"],
+                obs[agent_id]["pose_y"],
+                obs[agent_id]["pose_theta"],
                 work["tlad"],
                 work["vgain"],
             )

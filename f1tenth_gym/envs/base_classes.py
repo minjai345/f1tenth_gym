@@ -56,12 +56,6 @@ class RaceCar(object):
         in_collision (bool): collision indicator
     """
 
-    # static objects that don't need to be stored in class instances
-    scan_simulator = None
-    cosines = None
-    scan_angles = None
-    side_distances = None
-
     def __init__(
         self,
         config,
@@ -92,7 +86,10 @@ class RaceCar(object):
         Returns:
             None
         """
-
+        self.scan_simulator = None
+        self.cosines = None
+        self.scan_angles = None
+        self.side_distances = None
         # initialization
         self.params = params
         self.config = config
@@ -156,47 +153,47 @@ class RaceCar(object):
 
 
         # initialize scan sim
-        if RaceCar.scan_simulator is None:
+        if self.scan_simulator is None:
             self.scan_rng = np.random.default_rng(seed=self.seed)
-            RaceCar.scan_simulator = ScanSimulator2D(self.num_beams, self.fov, std_dev=self.lidar_noise, max_range=self.lidar_max_range)
+            self.scan_simulator = ScanSimulator2D(self.num_beams, self.fov, std_dev=self.lidar_noise, max_range=self.lidar_max_range)
 
-            scan_ang_incr = RaceCar.scan_simulator.get_increment()
+            scan_ang_incr = self.scan_simulator.get_increment()
 
             # angles of each scan beam, distance from lidar to edge of car at each beam, and precomputed cosines of each angle
-            RaceCar.cosines = np.zeros((self.num_beams,))
-            RaceCar.scan_angles = np.zeros((self.num_beams,))
-            RaceCar.side_distances = np.zeros((self.num_beams,))
+            self.cosines = np.zeros((self.num_beams,))
+            self.scan_angles = np.zeros((self.num_beams,))
+            self.side_distances = np.zeros((self.num_beams,))
 
             dist_sides = params["width"] / 2.0
             dist_fr = (params["lf"] + params["lr"]) / 2.0
 
             for i in range(self.num_beams):
                 angle = -self.fov / 2.0 + i * scan_ang_incr
-                RaceCar.scan_angles[i] = angle
-                RaceCar.cosines[i] = np.cos(angle)
+                self.scan_angles[i] = angle
+                self.cosines[i] = np.cos(angle)
 
                 if angle > 0:
                     if angle < np.pi / 2:
                         # between 0 and pi/2
                         to_side = dist_sides / np.sin(angle)
                         to_fr = dist_fr / np.cos(angle)
-                        RaceCar.side_distances[i] = min(to_side, to_fr)
+                        self.side_distances[i] = min(to_side, to_fr)
                     else:
                         # between pi/2 and pi
                         to_side = dist_sides / np.cos(angle - np.pi / 2.0)
                         to_fr = dist_fr / np.sin(angle - np.pi / 2.0)
-                        RaceCar.side_distances[i] = min(to_side, to_fr)
+                        self.side_distances[i] = min(to_side, to_fr)
                 else:
                     if angle > -np.pi / 2:
                         # between 0 and -pi/2
                         to_side = dist_sides / np.sin(-angle)
                         to_fr = dist_fr / np.cos(-angle)
-                        RaceCar.side_distances[i] = min(to_side, to_fr)
+                        self.side_distances[i] = min(to_side, to_fr)
                     else:
                         # between -pi/2 and -pi
                         to_side = dist_sides / np.cos(-angle - np.pi / 2)
                         to_fr = dist_fr / np.sin(-angle - np.pi / 2)
-                        RaceCar.side_distances[i] = min(to_side, to_fr)
+                        self.side_distances[i] = min(to_side, to_fr)
 
     def update_params(self, params):
         """
@@ -220,7 +217,7 @@ class RaceCar(object):
             map (str | Track): name of the map, or Track object
             map_scale (float, default=1.0): scale of the map, larger scale means larger map
         """
-        RaceCar.scan_simulator.set_map(map, map_scale)
+        self.scan_simulator.set_map(map, map_scale)
 
     def reset(self, pose, option='pose'):
         """
@@ -355,7 +352,7 @@ class RaceCar(object):
 
         if self.config['enable_scan']:
             # update scan
-            current_scan = RaceCar.scan_simulator.scan(
+            current_scan = self.scan_simulator.scan(
                 np.append(self.state[0:2], self.state[4]), self.scan_rng
             )
         else:
