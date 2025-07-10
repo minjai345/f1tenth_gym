@@ -27,7 +27,7 @@ def main():
             "observation_config": {"type": "kinematic_state"},
             "reset_config": {"type": "rl_random_static"},
         },
-        render_mode="human",
+        render_mode="unlimited",
     )
     planner = PurePursuitPlanner(track=track, wb=0.17145 + 0.15875)
 

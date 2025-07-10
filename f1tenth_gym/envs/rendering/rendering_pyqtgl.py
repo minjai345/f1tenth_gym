@@ -1,3 +1,4 @@
+import signal
 import time, logging
 import os
 import numpy as np
@@ -12,8 +13,8 @@ from ..track import Track
 from .renderer import EnvRenderer, RenderSpec, ObjectRenderer
 from .pyqtgl_objects import PointsRenderer, LinesRenderer, ClosedLinesRenderer, CarRenderer
 from .mesh_renderer import MeshRenderer
-# import utilsuite
 from PIL import Image, ImageDraw, ImageFont
+import cv2
 
 class PyQtEnvRendererGL(EnvRenderer):
     def __init__(
@@ -26,8 +27,6 @@ class PyQtEnvRendererGL(EnvRenderer):
         render_fps: int,
     ):
         super().__init__()
-        if render_mode == "rgb_array":
-            os.environ["QT_QPA_PLATFORM"] = render_spec.frame_output_method
         self.camera_free_rotation = 0
         self.params = params
         self.agent_ids = agent_ids
@@ -44,24 +43,24 @@ class PyQtEnvRendererGL(EnvRenderer):
         self.obs = None
         self.zoom_level = 1.0
         self.init = True
-        # self.timer = utilsuite.Timer()
         
         fmt = QtGui.QSurfaceFormat()
         fmt.setSwapInterval(0)  # 0 = no vsync, 1 = vsync
         QtGui.QSurfaceFormat.setDefaultFormat(fmt)
         
         self.app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
-        self.view = gl.GLViewWidget()
-        # self._apply_view_flip()
-        self.view.setCameraPosition(pos=QtGui.QVector3D(0, 0, 0), distance=self.default_camera_dist, elevation=90, azimuth=0)
-        self.view.setBackgroundColor((25, 25, 25))
-        self.view.resize(self.render_spec.window_size, self.render_spec.window_size)        
+        self.view = gl.GLViewWidget() 
 
-        if self.render_mode != "rgb_array":
-            self.window = QtWidgets.QMainWindow()
-            self.window.setCentralWidget(self.view)
-            self.window.setWindowTitle("F1Tenth Gym - OpenGL")
-            self.window.setGeometry(0, 0, self.render_spec.window_size, self.render_spec.window_size)
+        self.view.setCameraPosition(pos=QtGui.QVector3D(0, 0, 0), distance=self.default_camera_dist, elevation=90, azimuth=0)
+        self.view.setBackgroundColor("w")
+        self.view.resize(self.render_spec.window_size, self.render_spec.window_size) 
+        self.prealloc_frame = np.zeros(
+            (self.render_spec.window_size, self.render_spec.window_size, 3), dtype=np.uint8
+        )
+
+        self.window = QtWidgets.QMainWindow()
+        self.window.setWindowTitle("F1Tenth Gym - OpenGL")
+        self.window.setGeometry(0, 0, self.render_spec.window_size, self.render_spec.window_size)
         
         if self.render_spec.car_model == "2d":
             if not self.camera_free_rotation: self._enable_pan_only()
@@ -69,8 +68,9 @@ class PyQtEnvRendererGL(EnvRenderer):
         self._init_map(track)
         
         # FPS label
-        text_rgb = (140, 140, 140)
-        if self.render_spec.frame_output_info_label or self.render_mode != "rgb_array":
+        text_rgb = (125, 125, 125)
+
+        if self.render_spec.frame_output_info_label:
             self.lap_label = QtWidgets.QLabel(self.view)
             font = QtGui.QFont("Arial", 14)
             self.lap_label.setFont(font)
@@ -81,7 +81,7 @@ class PyQtEnvRendererGL(EnvRenderer):
             self.lap_label.resize(220, 30)
             self.lap_label.setAttribute(QtCore.Qt.WidgetAttribute.WA_TransparentForMouseEvents)
             self.lap_label.show()
-        if self.render_mode != "rgb_array":
+            
             self.fps_label = QtWidgets.QLabel(self.view)
             font = QtGui.QFont("Arial", 14)
             self.fps_label.setFont(font)
@@ -106,7 +106,14 @@ class PyQtEnvRendererGL(EnvRenderer):
         self.car_colors = [
             tuple(ImageColor.getcolor(c, "RGB")) for c in render_spec.vehicle_palette
         ]
-        
+
+        if self.render_mode in ["human", "human_fast", 'unlimited']:
+            signal.signal(signal.SIGINT, signal.SIG_DFL)
+            self.window.setCentralWidget(self.view)
+            self.window.show()
+        elif self.render_mode == "rgb_array":
+            self.window.hide()
+
     def _apply_view_flip(self):
         """Apply a vertical flip transformation to the OpenGL view."""
         # Override the paintGL method to apply a Y-axis flip transformation
@@ -278,10 +285,8 @@ class PyQtEnvRendererGL(EnvRenderer):
                 else:
                     self.font = ImageFont.truetype("arial.ttf", 20)
                 self.init = False
-            
-            if self.obs is not None and \
-                (self.render_mode != "rgb_array" or \
-                    self.render_spec.frame_output_info_label):
+            self.window.update()
+            if self.obs is not None and self.render_spec.frame_output_info_label:
                 self.lap_label.setText(f"Lap Time {self.obs[self.agent_ids[0]]['lap_time']:.2f}, " + 
                     f"Lap {int(self.obs[self.agent_ids[0]]['lap_count']):d}")
             start_time = time.time()
@@ -299,22 +304,15 @@ class PyQtEnvRendererGL(EnvRenderer):
                 self.cars[i].render(self.car_scale)
             self.app.processEvents()
             
-            if self.render_mode in ["human", "human_fast", 'unlimited']:
-                self._update_fps()
-                if self.render_fps < float('inf'):
-                    elapsed = time.time() - start_time
-                    sleep_time = max(0.0, 1/self.render_fps - elapsed)
-                    time.sleep(sleep_time)
-            elif self.render_mode == "rgb_array":
-                # Option 1: Use ImageExporter (captures Qt widgets if any are in the scene)
-                # self.timer.tic("render", num=50)
-                if self.render_spec.frame_output_method == "xcb":
-                    frame = self.grab_frame_with_exporter()
+            self._update_fps()
+            if self.render_fps < float('inf'):
+                elapsed = time.time() - start_time
+                sleep_time = max(0.0, 1/self.render_fps - elapsed)
+                time.sleep(sleep_time)
                 
-                # Option 2: Use direct OpenGL framebuffer grab (current method)
-                if self.render_spec.frame_output_method == "offscreen":
-                    frame = self.grab_frame_as_rgb()
-                # self.timer.toc("render", Hz=1)
+            if self.render_mode == "rgb_array":
+                # Use direct OpenGL framebuffer grab (current method)
+                frame = self.grab_frame_as_rgb()
                 return frame
 
     def grab_frame_as_rgb(self) -> np.ndarray:
@@ -383,30 +381,24 @@ class PyQtEnvRendererGL(EnvRenderer):
         """
 
         height, width = img_array.shape[:2]
-        
-        # Convert numpy array to PIL Image
-        pil_img = Image.fromarray(img_array)
-        draw = ImageDraw.Draw(pil_img)
-        
-        # Text color (RGB format for PIL)
         color = (140, 140, 140)
-        
-        # Lap information text (top-right)
         if self.obs is not None:
             lap_time = self.obs[self.agent_ids[0]]['lap_time']
             lap_count = int(self.obs[self.agent_ids[0]]['lap_count'])
             lap_text = f"Lap Time: {lap_time:.2f}, Lap: {lap_count}"
-            
+
+            # Choose font and scale
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            font_scale = 0.7
+            thickness = 2
+
             # Get text size for positioning
-            bbox = draw.textbbox((0, 0), lap_text, font=self.font)
-            text_width = bbox[2] - bbox[0]
+            (text_width, text_height), baseline = cv2.getTextSize(lap_text, font, font_scale, thickness)
             x_pos = width - text_width - 10
-            
-            # Draw text
-            draw.text((x_pos, 10), lap_text, font=self.font, fill=color)
-        
-        # Convert back to numpy array
-        img_array[:] = np.array(pil_img)
+            y_pos = 10 + text_height
+
+            # Draw text directly on the numpy array (OpenCV uses BGR, so reverse color)
+            cv2.putText(img_array, lap_text, (x_pos, y_pos), font, font_scale, color[::-1], thickness, cv2.LINE_AA)
 
         
     def add_renderer_callback(self, callback_fn):

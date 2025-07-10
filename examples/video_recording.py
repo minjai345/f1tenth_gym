@@ -11,7 +11,7 @@ def main():
     work = {
         "mass": 3.463388126201571,
         "lf": 0.15597534362552312,
-        "tlad": 0.82461887897713965 * 2,
+        "tlad": 0.82461887897713965,
         "vgain": 1,
     }
 
@@ -26,11 +26,9 @@ def main():
             "model": "st",
             "params": F110Env.f1tenth_vehicle_params(),
             "observation_config": {"type": "kinematic_state"},
-            "params": {"mu": 1.0},
             "reset_config": {"type": "rl_random_static"},
         },
         render_mode="rgb_array",
-        # render_mode="unlimited",
     )
     env = gymnasium.wrappers.RecordVideo(env, f"video_{time.time()}")
     track = env.unwrapped.track
@@ -77,6 +75,7 @@ def main():
 
     print("Sim elapsed time:", laptime, "Real elapsed time:", time.time() - start)
 
+    # close env to trigger video saving
     env.close()
 
 
