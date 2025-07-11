@@ -285,7 +285,6 @@ class PyQtEnvRendererGL(EnvRenderer):
                 else:
                     self.font = ImageFont.truetype("arial.ttf", 20)
                 self.init = False
-            self.window.update()
             if self.obs is not None and self.render_spec.frame_output_info_label:
                 self.lap_label.setText(f"Lap Time {self.obs[self.agent_ids[0]]['lap_time']:.2f}, " + 
                     f"Lap {int(self.obs[self.agent_ids[0]]['lap_count']):d}")
