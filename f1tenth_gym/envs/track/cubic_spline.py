@@ -8,7 +8,7 @@ import math
 import numpy as np
 from scipy import interpolate
 from typing import Union, Optional
-# import scipy.optimize as so
+import scipy.optimize as so
 from f1tenth_gym.envs.track.utils import nearest_point_on_trajectory
 from numba import njit
 
@@ -199,36 +199,36 @@ class CubicSplineND:
         yaw = np.arctan2(sin, cos)
         return yaw
 
-    # def calc_arclength(
-    #     self, x: float, y: float, s_guess: float = 0.0
-    # ) -> tuple[float, float]:
-    #     """
-    #     Calculate arclength for a given point (x, y) on the trajectory.
+    def calc_arclength_slow(
+        self, x: float, y: float, s_guess: float = 0.0
+    ) -> tuple[float, float]:
+        """
+        Calculate arclength for a given point (x, y) on the trajectory.
 
-    #     Parameters
-    #     ----------
-    #     x : float
-    #         x position.
-    #     y : float
-    #         y position.
-    #     s_guess : float
-    #         initial guess for s.
-    #     Returns
-    #     -------
-    #     s : float
-    #         distance from the start point for given x, y.
-    #     ey : float
-    #         lateral deviation for given x, y.
-    #     """
-    #     def distance_to_spline(s):
-    #         x_eval, y_eval = self.spline(s)[0, :2]
-    #         return np.sqrt((x - x_eval) ** 2 + (y - y_eval) ** 2)
-    #     output = so.fmin(distance_to_spline, s_guess, full_output=True, disp=False)
-    #     closest_s = float(output[0][0])
-    #     absolute_distance = output[1]
-    #     return closest_s, absolute_distance
+        Parameters
+        ----------
+        x : float
+            x position.
+        y : float
+            y position.
+        s_guess : float
+            initial guess for s.
+        Returns
+        -------
+        s : float
+            distance from the start point for given x, y.
+        ey : float
+            lateral deviation for given x, y.
+        """
+        def distance_to_spline(s):
+            x_eval, y_eval = self.spline(s)[0, :2]
+            return np.sqrt((x - x_eval) ** 2 + (y - y_eval) ** 2)
+        output = so.fmin(distance_to_spline, s_guess, full_output=True, disp=False)
+        closest_s = float(output[0][0])
+        absolute_distance = output[1]
+        return closest_s, absolute_distance
 
-    def calc_arclength_inaccurate(self, x: float, y: float, s_inds=None) -> tuple[float, float]:
+    def calc_arclength(self, x: float, y: float, s_inds: np.ndarray = None) -> tuple[float, float]:
         """
         Fast calculation of arclength for a given point (x, y) on the trajectory.
         Less accuarate and less smooth than calc_arclength but much faster.
@@ -240,6 +240,8 @@ class CubicSplineND:
             x position.
         y : float
             y position.
+        s_inds : np.ndarray, optional
+            Indices of the points to consider for the calculation.
 
         Returns
         -------

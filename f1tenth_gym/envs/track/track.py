@@ -464,7 +464,7 @@ class Track:
         else:
             s_inds = None
         # print(max(line.spline.s[s_inds]), min(line.spline.s[s_inds]))
-        s, ey = line.spline.calc_arclength_inaccurate(x, y, s_inds) # inaccurate, but much faster
+        s, ey = line.spline.calc_arclength(x, y, s_inds) # inaccurate, but much faster
         # s, ey = line.spline.calc_arclength(x, y, s_guess)
         # Wrap around
         s = s % line.spline.s[-1]
