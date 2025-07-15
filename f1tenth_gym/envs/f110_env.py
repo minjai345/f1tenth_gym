@@ -207,7 +207,7 @@ class F110Env(gym.Env):
             "timestep": 0.01,
             "integrator_timestep": 0.01,
             "ego_idx": 0,
-            "max_laps": 'inf',  # 'inf' for infinite laps, or a positive integer
+            "max_laps": 1,  # 'inf' for infinite laps, or a positive integer
             "integrator": "rk4",
             "model": "st", # "ks", "st", "mb"
             "control_input": ["speed", "steering_angle"], # ["speed", "steering_angle"], ["accl", "steering_speed"]
