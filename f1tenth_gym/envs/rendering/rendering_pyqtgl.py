@@ -114,6 +114,12 @@ class PyQtEnvRendererGL(EnvRenderer):
         elif self.render_mode == "rgb_array":
             self.window.hide()
 
+    def update_params(self, params: dict[str, Any]) -> None:
+        self.params.update(params)
+        if self.cars is not None:
+            for car in self.cars:
+                car.update_params(params)
+
     def _apply_view_flip(self):
         """Apply a vertical flip transformation to the OpenGL view."""
         # Override the paintGL method to apply a Y-axis flip transformation

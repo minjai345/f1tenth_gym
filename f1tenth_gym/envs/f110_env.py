@@ -420,6 +420,11 @@ class F110Env(gym.Env):
             if hasattr(self, "sim"):
                 self.sim.update_params(self.config["params"])
 
+            if hasattr(self, "renderer"):
+                if self.renderer is not None:
+                    # if renderer exists, update the params
+                    self.renderer.update_params(self.params)
+
             if hasattr(self, "action_space"):
                 # if some parameters changed, recompute action space
                 self.action_type = CarAction(

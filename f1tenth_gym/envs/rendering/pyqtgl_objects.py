@@ -51,7 +51,8 @@ class CarRenderer(ObjectRenderer):
             drawEdges=False,
             edgeColor=(0, 0, 0, 1)
         )
-        env_renderer.view.addItem(self.mesh)
+        self.env_renderer = env_renderer
+        self.env_renderer.view.addItem(self.mesh)
 
         self.origin = map_origin
         self.resolution = resolution
@@ -64,7 +65,38 @@ class CarRenderer(ObjectRenderer):
         self.tire_width = 0.1
         self.tire_length = self.wheel_size
         
-    
+    def update_params(self, params: dict[str, Any]) -> None:
+        """
+        Update the parameters of the car renderer.
+        """
+        if "car_length" in params:
+            self.car_length = params["car_length"]
+        if "car_width" in params:
+            self.car_width = params["car_width"]
+        if "wheel_size" in params:
+            self.wheel_size = params["wheel_size"]
+        
+        # Recalculate base rectangle
+        hl = self.car_length / 2
+        hw = self.car_width / 2
+        self.base_rect = np.array([
+            [-hl, -hw, 0],
+            [ hl, -hw, 0],
+            [ hl,  hw, 0],
+            [-hl,  hw, 0],
+        ], dtype=np.float32)
+
+        self.env_renderer.view.removeItem(self.mesh)
+        self.mesh = gl.GLMeshItem(
+            vertexes=self.base_rect,
+            faces=self.faces,
+            faceColors=self.rgba,
+            smooth=False,
+            drawEdges=False,
+            edgeColor=(0, 0, 0, 1)
+        )
+        self.env_renderer.view.addItem(self.mesh)
+
     def apply_pose(self, pose, scale=1.0):
         x, y, yaw = pose
         c, s = np.cos(yaw), np.sin(yaw)

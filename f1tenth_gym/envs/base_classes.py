@@ -195,7 +195,7 @@ class RaceCar(object):
                         to_fr = dist_fr / np.sin(-angle - np.pi / 2)
                         self.side_distances[i] = min(to_side, to_fr)
 
-    def update_params(self, params):
+    def update_params(self, params: dict[str, float]) -> None:
         """
         Updates the physical parameters of the vehicle
         Note that does not need to be called at initialization of class anymore
@@ -208,6 +208,71 @@ class RaceCar(object):
         """
         self.params = params
         self.params_arr = np.array([self.params[p] for p in self.sequential_params])
+
+        # Check if any of 'lidar_num_beams', 'lidar_fov', or 'lidar_noise_std' has changed, if so, update the scan simulator
+        if (
+            "lidar_num_beams" in params
+            or "lidar_fov" in params
+            or "lidar_noise_std" in params
+            or "lidar_range" in params
+        ):
+            self.fov = params.get("lidar_fov", self.fov)
+            self.num_beams = params.get("lidar_num_beams", self.num_beams)
+            self.lidar_noise = params.get("lidar_noise_std", self.lidar_noise)
+            self.lidar_max_range = params.get("lidar_range", self.lidar_max_range)
+            self.scan_simulator = ScanSimulator2D(
+                self.num_beams,
+                self.fov,
+                std_dev=self.lidar_noise,
+                max_range=self.lidar_max_range,
+            )
+
+        # Check if any of "width", "lf", or "lr" has changed, if so, update the distances
+        if (
+            ("width" in params or "lf" in params or "lr" in params)
+            and self.scan_simulator is not None
+        ):
+            scan_ang_incr = self.scan_simulator.get_increment()
+            self.params["width"] = params.get("width", self.params["width"])
+            self.params["lf"] = params.get("lf", self.params["lf"])
+            self.params["lr"] = params.get("lr", self.params["lr"])
+
+            # angles of each scan beam, distance from lidar to edge of car at each beam, and precomputed cosines of each angle
+            self.cosines = np.zeros((self.num_beams,))
+            self.scan_angles = np.zeros((self.num_beams,))
+            self.side_distances = np.zeros((self.num_beams,))
+
+            dist_sides = params["width"] / 2.0
+            dist_fr = (params["lf"] + params["lr"]) / 2.0
+
+            scan_ang_incr = self.scan_simulator.get_increment()
+            for i in range(self.num_beams):
+                angle = -self.fov / 2.0 + i * scan_ang_incr
+                self.scan_angles[i] = angle
+                self.cosines[i] = np.cos(angle)
+
+                if angle > 0:
+                    if angle < np.pi / 2:
+                        # between 0 and pi/2
+                        to_side = dist_sides / np.sin(angle)
+                        to_fr = dist_fr / np.cos(angle)
+                        self.side_distances[i] = min(to_side, to_fr)
+                    else:
+                        # between pi/2 and pi
+                        to_side = dist_sides / np.cos(angle - np.pi / 2.0)
+                        to_fr = dist_fr / np.sin(angle - np.pi / 2.0)
+                        self.side_distances[i] = min(to_side, to_fr)
+                else:
+                    if angle > -np.pi / 2:
+                        # between 0 and -pi/2
+                        to_side = dist_sides / np.sin(-angle)
+                        to_fr = dist_fr / np.cos(-angle)
+                        self.side_distances[i] = min(to_side, to_fr)
+                    else:
+                        # between -pi/2 and -pi
+                        to_side = dist_sides / np.cos(-angle - np.pi / 2)
+                        to_fr = dist_fr / np.sin(-angle - np.pi / 2)
+                        self.side_distances[i] = min(to_side, to_fr)
 
     def set_map(self, map: str | Track, map_scale: float = 1.0):
         """
