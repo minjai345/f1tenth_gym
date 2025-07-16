@@ -46,7 +46,7 @@ class DirectObservation(Observation):
                     low=-large_num, high=large_num, shape=(7,), dtype=np.float32
                 ),
                 "state": gym.spaces.Box(
-                    low=-large_num, high=large_num, shape=(int(self.env.model.state_dim),), dtype=np.float32
+                    low=-large_num, high=large_num, shape=(int(self.env.unwrapped.model.state_dim),), dtype=np.float32
                 ),
                 "collision": gym.spaces.Box(
                     low=0.0, high=1.0, shape=(), dtype=np.float32
@@ -190,7 +190,7 @@ class OriginalObservation(Observation):
             "collisions": [],
             "lap_times": [],
             "lap_counts": [],
-            "sim_time": [],
+            "sim_time": self.env.unwrapped.sim_time,
         }
 
         for i, agent in enumerate(self.env.unwrapped.sim.agents):
@@ -215,7 +215,6 @@ class OriginalObservation(Observation):
             observations["collisions"].append(collision)
             observations["lap_times"].append(lap_time)
             observations["lap_counts"].append(lap_count)
-            observations["sim_time"].append(self.env.unwrapped.sim_time)
 
         # cast to match observation space
         for key in observations.keys():
