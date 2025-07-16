@@ -86,7 +86,7 @@ class DirectObservation(Observation):
                 "collision": agent.in_collision,
                 "lap_time": self.env.unwrapped.lap_times[i],
                 "lap_count": self.env.unwrapped.lap_counts[i],
-                "sim_time": self.env.unwrapped.sim_time,
+                "sim_time": np.array(self.env.unwrapped.sim_time, dtype=np.float32),
             }
             if self.env.unwrapped.config["compute_frenet"]:
                 agent_obs["frenet_pose"] = agent.frenet_pose if hasattr(agent, 'frenet_pose') else np.zeros(3)
@@ -190,7 +190,7 @@ class OriginalObservation(Observation):
             "collisions": [],
             "lap_times": [],
             "lap_counts": [],
-            "sim_time": self.env.unwrapped.sim_time,
+            "sim_time": np.array(self.env.unwrapped.sim_time, dtype=np.float32),
         }
 
         for i, agent in enumerate(self.env.unwrapped.sim.agents):
@@ -256,6 +256,9 @@ class FeaturesObservation(Observation):
                 "linear_vel_y": gym.spaces.Box(
                     low=-large_num, high=large_num, shape=(), dtype=np.float32
                 ),
+                "linear_vel_magnitude": gym.spaces.Box( # [AA] combined linear velocity, for ST observation
+                    low=-large_num, high=large_num, shape=(), dtype=np.float32
+                ),
                 "ang_vel_z": gym.spaces.Box(
                     low=-large_num, high=large_num, shape=(), dtype=np.float32
                 ),
@@ -306,6 +309,7 @@ class FeaturesObservation(Observation):
                 "pose_x": x,
                 "pose_y": y,
                 "pose_theta": theta,
+                "linear_vel_magnitude": std_state[3],
                 "linear_vel_x": vx,
                 "linear_vel_y": vy,
                 "ang_vel_z": angvel,
@@ -347,7 +351,7 @@ def observation_factory(env, type: str | None, **kwargs) -> Observation:
             "pose_x",
             "pose_y",
             "delta",
-            "linear_vel_x",
+            "linear_vel_magnitude",
             "pose_theta",
             "ang_vel_z",
             "beta",
