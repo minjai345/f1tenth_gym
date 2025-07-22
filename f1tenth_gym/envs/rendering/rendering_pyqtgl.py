@@ -4,7 +4,7 @@ import os
 import numpy as np
 import pyqtgraph.opengl as gl
 from PyQt6 import QtWidgets, QtCore, QtGui
-from typing import Any, Optional
+from typing import Any, Optional, Union
 from PIL import ImageColor
 from PyQt6.QtGui import QImage
 import OpenGL.GL as gl_module
@@ -431,7 +431,7 @@ class PyQtEnvRendererGL(EnvRenderer):
 
     def get_points_renderer(
         self,
-        points: list | np.ndarray,
+        points: Union[list, np.ndarray],
         color: Optional[tuple[int, int, int]] = (0, 0, 255),
         size: Optional[int] = 1,
         **kwargs
@@ -440,7 +440,7 @@ class PyQtEnvRendererGL(EnvRenderer):
 
     def get_lines_renderer(
         self,
-        points: list | np.ndarray,
+        points: Union[list, np.ndarray],
         color: Optional[tuple[int, int, int]] = (0, 0, 255),
         size: Optional[int] = 1, 
         **kwargs
@@ -449,7 +449,7 @@ class PyQtEnvRendererGL(EnvRenderer):
 
     def get_closed_lines_renderer(
         self,
-        points: list | np.ndarray,
+        points: Union[list, np.ndarray],
         color: Optional[tuple[int, int, int]] = (0, 0, 255),
         size: Optional[int] = 1,
         **kwargs

@@ -1,7 +1,7 @@
 from __future__ import annotations
 import logging
 import math
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Union
 import signal
 
 import cv2
@@ -354,7 +354,7 @@ class PyQtEnvRenderer(EnvRenderer):
 
     def get_points_renderer(
         self,
-        points: list | np.ndarray,
+        points: Union[list, np.ndarray],
         color: Optional[tuple[int, int, int]] = (0, 0, 255),
         size: Optional[int] = 1,
     ) -> ObjectRenderer:
@@ -362,7 +362,7 @@ class PyQtEnvRenderer(EnvRenderer):
 
     def get_lines_renderer(
         self,
-        points: list | np.ndarray,
+        points: Union[list, np.ndarray],
         color: Optional[tuple[int, int, int]] = (0, 0, 255),
         size: Optional[int] = 1,
     ) -> ObjectRenderer:
@@ -370,7 +370,7 @@ class PyQtEnvRenderer(EnvRenderer):
 
     def get_closed_lines_renderer(
         self,
-        points: list | np.ndarray,
+        points: Union[list, np.ndarray],
         color: Optional[tuple[int, int, int]] = (0, 0, 255),
         size: Optional[int] = 1,
     ) -> ObjectRenderer:

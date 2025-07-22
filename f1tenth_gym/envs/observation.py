@@ -1,6 +1,6 @@
 from __future__ import annotations
 from abc import abstractmethod
-from typing import List
+from typing import List, Optional
 
 import gymnasium as gym
 import numpy as np
@@ -334,7 +334,7 @@ class FeaturesObservation(Observation):
         return obs
 
 
-def observation_factory(env, type: str | None, **kwargs) -> Observation:
+def observation_factory(env, type: Optional[str], **kwargs) -> Observation:
     type = type or "original"
 
     if type == "original":

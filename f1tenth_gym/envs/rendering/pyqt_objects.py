@@ -7,7 +7,7 @@ import pyqtgraph as pg
 
 from .renderer import RenderSpec, EnvRenderer, ObjectRenderer
 from ..collision_models import get_vertices, get_trmtx
-from typing import Optional, Any
+from typing import Optional, Any, Union
 
 from numba import njit
 
@@ -16,7 +16,7 @@ class LinesRenderer(ObjectRenderer):
     def __init__(
         self, 
         env_renderer: EnvRenderer,
-        points: list | np.ndarray, 
+        points: Union[list, np.ndarray], 
         color: Optional[tuple[int, int, int]] = (0, 0, 255), 
         size: Optional[int] = 1
         ):
@@ -25,14 +25,14 @@ class LinesRenderer(ObjectRenderer):
             points[:, 0], points[:, 1], pen=pen, fillLevel=None, antialias=True
         )
         
-    def update(self, points: list | np.ndarray) -> None:
+    def update(self, points: Union[list, np.ndarray]) -> None:
         self.renderer.updateItems(points)
         
 class ClosedLinesRenderer(ObjectRenderer):
     def __init__(
         self, 
         env_renderer: EnvRenderer,
-        points: list | np.ndarray, 
+        points: Union[list, np.ndarray], 
         color: Optional[tuple[int, int, int]] = (0, 0, 255), 
         size: Optional[int] = 1
         ):
@@ -45,14 +45,14 @@ class ClosedLinesRenderer(ObjectRenderer):
             points[:, 0], points[:, 1], pen=pen, cosmetic=True, antialias=True
         ) ## setting pen=None disables line drawing
         
-    def update(self, points: list | np.ndarray) -> None:
+    def update(self, points: Union[list, np.ndarray]) -> None:
         self.renderer.updateItems(points)
 
 class PointsRenderer(ObjectRenderer):
     def __init__(
         self, 
         env_renderer: EnvRenderer,
-        points: list | np.ndarray, 
+        points: Union[list, np.ndarray], 
         color: Optional[tuple[int, int, int]] = (0, 0, 255), 
         size: Optional[int] = 1
         ):
@@ -66,7 +66,7 @@ class PointsRenderer(ObjectRenderer):
             symbolSize=size,
         )
         
-    def update(self, points: list | np.ndarray) -> None:
+    def update(self, points: Union[list, np.ndarray]) -> None:
         self.renderer.setData(points)
 
 
@@ -284,7 +284,7 @@ class CarRenderer(ObjectRenderer):
         resolution: float,
         car_length: float,
         car_width: float,
-        color: list[int] | None = None,
+        color: Optional[list[int]] = None,
         wheel_size: float = 0.2,
         parent: pg.PlotWidget = None,
     ):

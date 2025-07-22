@@ -1,6 +1,7 @@
 import sys
 import numpy as np
 from pathlib import Path
+from typing import Optional
 from pyqtgraph.opengl import MeshData, GLMeshItem
 
 from .renderer import RenderSpec, EnvRenderer, ObjectRenderer
@@ -13,7 +14,7 @@ class MeshRenderer(ObjectRenderer):
         resolution: float,
         car_length: float,
         car_width: float,
-        color: list[int] | None = None,
+        color: Optional[list[int]] = None,
         wheel_size: float = 0.2
         ):
         super().__init__()
