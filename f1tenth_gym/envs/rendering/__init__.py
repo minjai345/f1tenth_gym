@@ -41,7 +41,11 @@ def make_renderer(
             os.environ["QT_QPA_PLATFORM"] = "offscreen"
         from .rendering_pyqt import PyQtEnvRenderer as EnvRenderer
     elif render_spec.render_type == "pyqt6gl":
-        from .rendering_pyqtgl import PyQtEnvRendererGL as EnvRenderer
+        if render_mode in ["rgb_array", "rgb_array_list"]:
+            os.environ["QT_QPA_PLATFORM"] = "offscreen"
+            from .rendering_pyqt import PyQtEnvRenderer as EnvRenderer
+        else:
+            from .rendering_pyqtgl import PyQtEnvRendererGL as EnvRenderer
     else:
         raise ValueError(f"Unknown render type: {render_spec.render_type}")
 
