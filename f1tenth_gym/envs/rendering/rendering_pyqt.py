@@ -3,8 +3,8 @@ import logging
 import math
 from typing import Any, Callable, Optional, Union
 import signal
+from time import perf_counter
 
-import cv2
 import numpy as np
 from PyQt6 import QtWidgets, QtCore
 from PyQt6 import QtGui
@@ -16,11 +16,24 @@ from .pyqt_objects import *
 from ..track import Track
 from .renderer import EnvRenderer, ObjectRenderer, RenderSpec
 
+# Enable OpenGL backend for better performance
+pg.setConfigOptions(useOpenGL=True, antialias=False)
+
+try:
+    from pyqtgraph.widgets.RawImageWidget import RawImageGLWidget
+except ImportError:
+    RawImageGLWidget = None
+
+if RawImageGLWidget is not None:
+    # don't limit frame rate to vsync
+    sfmt = QtGui.QSurfaceFormat()
+    sfmt.setSwapInterval(0)
+    QtGui.QSurfaceFormat.setDefaultFormat(sfmt)
+
 # one-line instructions visualized at the top of the screen (if show_info=True)
 INSTRUCTION_TEXT = "Mouse click (L/M/R): Change POV - 'S' key: On/Off"
 
 # Replicated from pyqtgraphs' example utils for ci pipelines to pass
-from time import perf_counter
 class FrameCounter(QtCore.QObject):
     sigFpsUpdate = QtCore.pyqtSignal(object)
 
@@ -100,17 +113,16 @@ class PyQtEnvRenderer(EnvRenderer):
         self.canvas: pg.PlotItem = self.window.addPlot()
 
         # Disable interactivity
-        self.canvas.setMouseEnabled(x=True, y=True)  # Disable mouse panning & zooming
+        self.canvas.setMouseEnabled(x=False, y=False)  # Disable mouse panning & zooming
         self.canvas.hideButtons()  # Disable corner auto-scale button
         self.canvas.setMenuEnabled(False)  # Disable right-click context menu
 
-        legend = self.canvas.addLegend()  # This doesn't disable legend interaction
-        # Override both methods responsible for mouse events
-        legend.mouseDragEvent = lambda *args, **kwargs: None
-        legend.hoverEvent = lambda *args, **kwargs: None
-        # self.scene() is a pyqtgraph.GraphicsScene.GraphicsScene.GraphicsScene
-        self.window.scene().sigMouseClicked.connect(self.mouse_clicked)
+        self.window.scene().mousePressEvent = self.mouse_clicked
+        self.window.scene().mouseReleaseEvent = self.mouse_released
         self.window.keyPressEvent = self.key_pressed
+        self.window.scene().wheelEvent = self.mouse_wheel
+        self.left_clicked = False
+        self.window.scene().mouseMoveEvent = self.mouse_move
 
         # Remove axes
         self.canvas.hideAxis("bottom")
@@ -132,6 +144,10 @@ class PyQtEnvRenderer(EnvRenderer):
             self.clock.sigFpsUpdate.connect(
                 lambda fps: self.fps_renderer.render(f"FPS: {fps:.1f}")
             )
+            
+        # Cache for reducing string updates
+        self._last_fps_text = ""
+        self._last_time_text = ""
 
         colors_rgb = [
             [rgb for rgb in ImageColor.getcolor(c, "RGB")]
@@ -140,8 +156,6 @@ class PyQtEnvRenderer(EnvRenderer):
         self.car_colors = [
             colors_rgb[i % len(colors_rgb)] for i in range(len(self.agent_ids))
         ]
-
-        width, height = render_spec.window_size, render_spec.window_size
 
         # map metadata
         self.map_origin = track.spec.origin
@@ -158,6 +172,8 @@ class PyQtEnvRenderer(EnvRenderer):
         track_map = np.flip(track_map, axis=0)  # flip vertically
 
         self.image_item = pg.ImageItem(track_map)
+        # Performance optimization: set levels for faster rendering
+        self.image_item.setLevels([0, 255])
         # Example: Transformed display of ImageItem
         tr = QtGui.QTransform()  # prepare ImageItem transformation:
         # Translate image by the origin of the map
@@ -174,11 +190,9 @@ class PyQtEnvRenderer(EnvRenderer):
         self.draw_flag: bool = True
         if render_spec.focus_on:
             self.active_map_renderer = "car"
-            self.follow_agent_flag: bool = True
             self.agent_to_follow: int = self.agent_ids.index(render_spec.focus_on)
         else:
             self.active_map_renderer = "map"
-            self.follow_agent_flag: bool = False
             self.agent_to_follow: int = None
 
         if self.render_mode in ["human", "human_fast", 'unlimited']:
@@ -186,6 +200,9 @@ class PyQtEnvRenderer(EnvRenderer):
             self.window.show()
         elif self.render_mode == "rgb_array":
             self.exporter = ImageExporter(self.canvas)
+            # Performance optimization: set export parameters
+            self.exporter.parameters()['width'] = self.render_spec.window_size
+            self.exporter.parameters()['height'] = self.render_spec.window_size
 
     def update(self, obs: dict) -> None:
         """
@@ -242,42 +259,72 @@ class PyQtEnvRenderer(EnvRenderer):
             self.draw_flag = not self.draw_flag
             # self.draw_flag_changed = True
 
-    def mouse_clicked(self, event: QtGui.QMouseEvent) -> None:
+    def mouse_wheel(self, event: QtWidgets.QGraphicsSceneWheelEvent) -> None:
         """
-        Handle mouse click events.
+        Handle mouse wheel events for zooming in and out.
 
         Parameters
         ----------
-        event : QtGui.QMouseEvent
+        event : QtWidgets.QGraphicsSceneWheelEvent
+            wheel event
+        """
+        self.render_spec.zoom_in_factor *= 1.1 if event.delta() > 0 else 0.9
+        self.render_spec.zoom_in_factor = max(0.1, self.render_spec.zoom_in_factor)
+        
+    def mouse_released(self, event: QtWidgets.QGraphicsSceneMouseEvent) -> None:
+        """
+        Handle mouse release events to stop panning.
+
+        Parameters
+        ----------
+        event : QtWidgets.QGraphicsSceneMouseEvent
             mouse event
         """
-        if event.button() == QtCore.Qt.MouseButton.LeftButton:
-            logging.debug("Pressed left button -> Follow Next agent")
+        if self.left_clicked:
+            logging.debug("Left mouse button released -> Stopping panning")
+            self.left_clicked = False
 
-            self.follow_agent_flag = True
+    def mouse_clicked(self, event: QtWidgets.QGraphicsSceneMouseEvent) -> None:
+        """Handle mouse clicks for agent switching and map view"""
+        # Right click: cycle to next agent
+        if event.button() == QtCore.Qt.MouseButton.RightButton:
+            self.active_map_renderer = "car"
             if self.agent_to_follow is None:
                 self.agent_to_follow = 0
             else:
                 self.agent_to_follow = (self.agent_to_follow + 1) % len(self.agent_ids)
-
-            self.active_map_renderer = "car"
-        elif event.button() == QtCore.Qt.MouseButton.RightButton:
-            logging.debug("Pressed right button -> Follow Previous agent")
-
-            self.follow_agent_flag = True
-            if self.agent_to_follow is None:
-                self.agent_to_follow = 0
-            else:
-                self.agent_to_follow = (self.agent_to_follow - 1) % len(self.agent_ids)
-
-            self.active_map_renderer = "car"
+        
+        # Middle click: switch to map view
         elif event.button() == QtCore.Qt.MouseButton.MiddleButton:
-            logging.debug("Pressed middle button -> Change to Map View")
+            logging.debug("Pressed middle button -> Toggling Map View")
+            if self.active_map_renderer == "map":
+                self.active_map_renderer = "car"
+                if self.agent_to_follow is None:
+                    self.agent_to_follow = 0
+            else:
+                self.agent_to_follow = None
+                self.active_map_renderer = "map"
 
-            self.follow_agent_flag = False
-            self.agent_to_follow = None
+        elif event.button() == QtCore.Qt.MouseButton.LeftButton:
+            logging.debug("Pressed left button -> Panning")
+            self.left_clicked = True
+    
+    def mouse_move(self, event: QtWidgets.QGraphicsSceneMouseEvent) -> None:
+        """
+        Handle mouse move events for panning.
 
-            self.active_map_renderer = "map"
+        Parameters
+        ----------
+        event : QtWidgets.QGraphicsSceneMouseEvent
+            mouse event
+        """
+        if self.left_clicked:
+            logging.debug("Left mouse button dragged -> Panning")
+            # Flip up-down movement
+            delta_pos = event.lastScenePos() - event.scenePos()
+            delta_pos = QtCore.QPointF(delta_pos.x(), -delta_pos.y())
+            self.camera_pos += (delta_pos / (4 * self.render_spec.zoom_in_factor))
+            self.active_map_renderer = "pan"
 
     def render(self) -> Optional[np.ndarray]:
         """
@@ -298,12 +345,19 @@ class PyQtEnvRenderer(EnvRenderer):
             for i in range(len(self.agent_ids)):
                 self.cars[i].render()
 
-            if self.follow_agent_flag:
-                ego_x, ego_y = self.cars[self.agent_to_follow].pose[:2]
-                self.canvas.setXRange(ego_x - 10 / self.render_spec.zoom_in_factor, ego_x + 10 / self.render_spec.zoom_in_factor)
-                self.canvas.setYRange(ego_y - 10 / self.render_spec.zoom_in_factor, ego_y + 10 / self.render_spec.zoom_in_factor)
-            else:
+            if self.active_map_renderer == "car":
+                pos = self.cars[self.agent_to_follow].pose[:2]
+                self.camera_pos = QtCore.QPointF(float(pos[0]), float(pos[1]))
+                self.canvas.setXRange(self.camera_pos.x() - 10 / self.render_spec.zoom_in_factor, self.camera_pos.x() + 10 / self.render_spec.zoom_in_factor)
+                self.canvas.setYRange(self.camera_pos.y() - 10 / self.render_spec.zoom_in_factor, self.camera_pos.y() + 10 / self.render_spec.zoom_in_factor)
+            elif self.active_map_renderer == "pan":
+                self.canvas.setXRange(self.camera_pos.x() - 10 / self.render_spec.zoom_in_factor, self.camera_pos.x() + 10 / self.render_spec.zoom_in_factor)
+                self.canvas.setYRange(self.camera_pos.y() - 10 / self.render_spec.zoom_in_factor, self.camera_pos.y() + 10 / self.render_spec.zoom_in_factor)
+            elif self.active_map_renderer == "map":
                 self.canvas.autoRange()
+                self.camera_pos = self.canvas.viewRect().center()
+            else:
+                raise ValueError(f"Unknown active_map_renderer: {self.active_map_renderer}")
                 
             agent_to_follow_id = (
                 self.agent_ids[self.agent_to_follow]
