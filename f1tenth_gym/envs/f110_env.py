@@ -243,7 +243,8 @@ class F110Env(gym.Env):
             "sv_max": 0.4,
             # Longitudinal constraints
             "v_switch": 4.755,
-            "a_max": 11.5,
+            # "a_max": 11.5,
+            "a_max": 3.5, # be consistent with earlier experiments
             "v_min": -13.9,
             "v_max": 45.8,
             "width": 1.674,
