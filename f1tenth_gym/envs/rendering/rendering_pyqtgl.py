@@ -43,6 +43,7 @@ class PyQtEnvRendererGL(EnvRenderer):
         self.default_camera_dist = self.params['width'] * 70
         self.obs = None
         self.zoom_level = 1.0
+        self.azimuth = -90
         self.init = True
         # self.timer = utilsuite.Timer()
         
@@ -52,8 +53,7 @@ class PyQtEnvRendererGL(EnvRenderer):
         
         self.app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
         self.view = gl.GLViewWidget()
-        # self._apply_view_flip()
-        self.view.setCameraPosition(pos=QtGui.QVector3D(0, 0, 0), distance=self.default_camera_dist, elevation=90, azimuth=0)
+        self.view.setCameraPosition(pos=QtGui.QVector3D(0, 0, 0), distance=self.default_camera_dist, elevation=90, azimuth=self.azimuth)
         self.view.setBackgroundColor((25, 25, 25))
         self.view.resize(self.render_spec.window_size, self.render_spec.window_size)        
 
@@ -107,20 +107,6 @@ class PyQtEnvRendererGL(EnvRenderer):
             tuple(ImageColor.getcolor(c, "RGB")) for c in render_spec.vehicle_palette
         ]
         
-    def _apply_view_flip(self):
-        """Apply a vertical flip transformation to the OpenGL view."""
-        # Override the paintGL method to apply a Y-axis flip transformation
-        # This will flip the view vertically so it matches the output frame orientation
-        original_paintGL = self.view.paintGL
-        def flipped_paintGL():
-            gl_module.glPushMatrix()
-            # Apply the flip transformation (flip Y-axis)
-            gl_module.glScalef(-1.0, 1.0, 1.0)
-            # Call the original paintGL
-            original_paintGL()
-            gl_module.glPopMatrix()
-        self.view.paintGL = flipped_paintGL
-        
     def _init_map(self, track):
         map_image = track.occupancy_map
         map_image = np.rot90(map_image, k=1)
@@ -163,7 +149,7 @@ class PyQtEnvRendererGL(EnvRenderer):
             pos=QtGui.QVector3D(x, y, 1),             # camera position
             distance=extent * 0.8,  # zoom level
             elevation=90,                              # top-down
-            azimuth=0                                  # no rotation
+            azimuth=self.azimuth                                 # no rotation
         )
     
     def _center_camera_on_car(self, car_idx=0, distance_reset=False):
@@ -176,7 +162,7 @@ class PyQtEnvRendererGL(EnvRenderer):
         self.view.setCameraPosition(
             pos=QtGui.QVector3D(x, y, 1),             # camera position
             elevation=90,                              # top-down
-            azimuth=0                                  # no rotation
+            azimuth=self.azimuth                       # no rotation
         )
         
     def _enable_pan_only(self):
@@ -196,6 +182,7 @@ class PyQtEnvRendererGL(EnvRenderer):
                     self.agent_to_follow = 0
                 else:
                     self.agent_to_follow = (self.agent_to_follow + 1) % len(self.agent_ids)
+                self.zoom_level = 1.0
                 self._center_camera_on_car(self.agent_to_follow, distance_reset=True)
                 self.focused = True
             elif event.button() == QtCore.Qt.MouseButton.MiddleButton:
@@ -206,8 +193,8 @@ class PyQtEnvRendererGL(EnvRenderer):
         def mouseMoveEvent(event):
             if self.view.pan_active:
                 delta = event.pos() - self.view.pan_start
-                dx = -delta.y() * 0.08
-                dy = -delta.x() * 0.08
+                dx = -delta.x() * 0.08
+                dy = delta.y() * 0.08
                 self.view.pan(dx, dy, 0)
                 self.view.pan_start = event.pos()
                 event.accept()
@@ -458,6 +445,19 @@ class PyQtEnvRendererGL(EnvRenderer):
         **kwargs
     ) -> ObjectRenderer:
         return ClosedLinesRenderer(self, points, color, size, **kwargs)
+    
+    def add_xyz_axis_arrow(self, origin=(0, 0, 0), length=1.0):
+        ox, oy, oz = origin
+
+        # Define endpoints of each axis
+        x_axis = np.array([[ox, oy, oz], [ox + length, oy, oz]])  # Red
+        y_axis = np.array([[ox, oy, oz], [ox, oy + length, oz]])  # Green
+        z_axis = np.array([[ox, oy, oz], [ox, oy, oz + length]])  # Blue
+
+        # Add lines to the scene
+        self.get_lines_renderer(x_axis, color=(255, 0, 0), size=3)
+        self.get_lines_renderer(y_axis, color=(0, 255, 0), size=3)
+        self.get_lines_renderer(z_axis, color=(0, 0, 255), size=3)
 
     def close(self):
         if self.render_mode != "rgb_array":
