@@ -564,60 +564,6 @@ class ScanTests(unittest.TestCase):
         self.test_poses = np.zeros((self.num_test, 3))
         self.test_poses[:, 2] = np.linspace(-1.0, 1.0, num=self.num_test)
 
-        # # legacy gym data
-        # sample_scan = np.load('legacy_scan.npz')
-        # self.berlin_scan = sample_scan['berlin']
-        # self.skirk_scan = sample_scan['skirk']
-
-    # def test_map_berlin(self):
-    #     scan_rng = np.random.default_rng(seed=12345)
-    #     scan_sim = ScanSimulator2D(self.num_beams, self.fov)
-    #     new_berlin = np.empty((self.num_test, self.num_beams))
-    #     map_path = '../../../maps/Berlin_map.yaml'
-    #     map_ext = '.png'
-    #     scan_sim.set_map(map_path, map_ext)
-    #     # scan gen loop
-    #     for i in range(self.num_test):
-    #         test_pose = self.test_poses[i]
-    #         new_berlin[i,:] = scan_sim.scan(test_pose, scan_rng)
-    #     diff = self.berlin_scan - new_berlin
-    #     mse = np.mean(diff**2)
-    #     # print('Levine distance test, norm: ' + str(norm))
-
-    #     # plotting
-    #     import matplotlib.pyplot as plt
-    #     theta = np.linspace(-self.fov/2., self.fov/2., num=self.num_beams)
-    #     plt.polar(theta, new_berlin[1,:], '.', lw=0)
-    #     plt.polar(theta, self.berlin_scan[1,:], '.', lw=0)
-    #     plt.show()
-
-    #     self.assertLess(mse, 2.)
-
-    # def test_map_skirk(self):
-    #     scan_rng = np.random.default_rng(seed=12345)
-    #     scan_sim = ScanSimulator2D(self.num_beams, self.fov)
-    #     new_skirk = np.empty((self.num_test, self.num_beams))
-    #     map_path = '../../../maps/Skirk_map.yaml'
-    #     map_ext = '.png'
-    #     scan_sim.set_map(map_path, map_ext)
-    #     print('map set')
-    #     # scan gen loop
-    #     for i in range(self.num_test):
-    #         test_pose = self.test_poses[i]
-    #         new_skirk[i,:] = scan_sim.scan(test_pose, scan_rng)
-    #     diff = self.skirk_scan - new_skirk
-    #     mse = np.mean(diff**2)
-    #     print('skirk distance test, mse: ' + str(mse))
-
-    #     # plotting
-    #     import matplotlib.pyplot as plt
-    #     theta = np.linspace(-self.fov/2., self.fov/2., num=self.num_beams)
-    #     plt.polar(theta, new_skirk[1,:], '.', lw=0)
-    #     plt.polar(theta, self.skirk_scan[1,:], '.', lw=0)
-    #     plt.show()
-
-    #     self.assertLess(mse, 2.)
-
     def test_fps(self):
         # scan fps should be greater than 500
 
@@ -635,8 +581,6 @@ class ScanTests(unittest.TestCase):
             scan_sim.scan(np.array([x_test, 0.0, 0.0]), scan_rng)
         end = time.time()
         fps = 10000 / (end - start)
-        # print('FPS test')
-        # print('Elapsed time: ' + str(end-start) + ' , FPS: ' + str(1/fps))
         self.assertGreater(fps, 500.0)
 
     def test_rng(self):
@@ -703,7 +647,6 @@ def main():
     (line,) = ax.plot([], [], ".", lw=0)
 
     def update(i):
-        # x_ani = i * 3. / num_iter
         theta_ani = -i * 2 * np.pi / num_iter
         x_ani = 0.0
         current_scan = scan_sim.scan(np.array([x_ani, 0.0, theta_ani]), scan_rng)
@@ -717,26 +660,3 @@ def main():
 
 if __name__ == "__main__":
     unittest.main()
-    # main()
-
-    # import time
-    # pt_a = np.array([1., 1.])
-    # pt_b = np.array([1., 2.])
-    # pt_c = np.array([1., 3.])
-    # col = are_collinear(pt_a, pt_b, pt_c)
-    # print(col)
-
-    # pose = np.array([0., 0., -1.])
-    # beam_theta = 0.
-    # start = time.time()
-    # dist = get_range(pose, beam_theta, pt_a, pt_b)
-    # print(dist, time.time()-start)
-
-    # num_beams = 1080
-    # scan = 100.*np.ones((num_beams, ))
-    # scan_angles = np.linspace(-2.35, 2.35, num=num_beams)
-    # assert scan.shape[0] == scan_angles.shape[0]
-    # vertices = np.asarray([[4,11.],[5,5],[9,9],[10,10]])
-    # start = time.time()
-    # new_scan = ray_cast(pose, scan, scan_angles, vertices)
-    # print(time.time()-start)

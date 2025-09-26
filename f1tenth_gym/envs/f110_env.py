@@ -3,7 +3,7 @@ import gymnasium as gym
 import numpy as np
 
 from .base_classes import DynamicModel, Simulator
-from .integrators import integrator_from_type
+from .integrators import Integrator
 from .action import (
     get_action_space,
     from_single_to_multi_action_space
@@ -70,7 +70,7 @@ class F110Env(gym.Env):
         self.num_agents = self.config["num_agents"]
         self.timestep = self.config["timestep"]
         self.ego_idx = self.config["ego_idx"]
-        self.integrator_type = integrator_from_type(self.config["integrator"])
+        self.integrator_type = Integrator.from_type(self.config["integrator"])
         self.model = DynamicModel.from_string(self.config["model"])
         self.observation_config = self.config["observation_config"]
         

@@ -1,8 +1,17 @@
 from enum import IntEnum
 
-class IntegratorType(IntEnum):
+class Integrator(IntEnum):
     EULER = 1
     RK4 = 2
+
+    @classmethod
+    def from_type(integrator_type: 'Integrator'):
+        if integrator_type == Integrator.EULER:
+            return euler_integration
+        elif integrator_type == Integrator.RK4:
+            return rk4_integration
+        else:
+            raise ValueError(f"Unknown integrator type: {integrator_type}")
 
 def rk4_integration(f, x, u, dt, *args):
     k1 = f(x, u, *args)
@@ -23,11 +32,3 @@ def rk4_integration(f, x, u, dt, *args):
 def euler_integration(f, x, u, dt, *args):
     x = x + dt * f(x, u, *args)
     return x
-
-def integrator_from_type(integrator_type: 'IntegratorType'):
-    if integrator_type == IntegratorType.EULER:
-        return euler_integration
-    elif integrator_type == IntegratorType.RK4:
-        return rk4_integration
-    else:
-        raise ValueError(f"Unknown integrator type: {integrator_type}")
