@@ -31,12 +31,16 @@ from __future__ import annotations
 import numpy as np
 from collections import deque
 from .dynamic_models import DynamicModel
-from .action import CarAction
+from .action import (
+    LongitudinalActionType, 
+    SteerActionType, 
+    longitudinal_action_from_type,
+    steer_action_from_type
+)
+from .integrators import IntegratorType, integrator_from_type
 from .collision_models import collision_multiple, get_vertices
-from .integrator import EulerIntegrator, Integrator
 from .laser_models import ScanSimulator2D, check_ttc_jit, ray_cast
 from .track import Track
-
 
 class RaceCar(object):
     """
@@ -61,8 +65,9 @@ class RaceCar(object):
         config,
         params,
         seed,
-        action_type: CarAction,
-        integrator,
+        longitudinal_action_type: LongitudinalActionType,
+        steer_action_type: SteerActionType,
+        integrator_type: IntegratorType,
         model=DynamicModel.ST,
         is_ego=False,
         time_step=0.01,
@@ -96,12 +101,14 @@ class RaceCar(object):
         self.seed = seed
         self.is_ego = is_ego
         self.time_step = time_step
+        self.integrator_time_step = 0.01
         self.num_beams = config['lidar_num_beams']
         self.fov = config['lidar_fov']
         self.lidar_noise = config['lidar_noise_std']
         self.lidar_max_range = config['lidar_range']
-        self.integrator = integrator
-        self.action_type = action_type
+        self.integrator_fn = integrator_from_type(integrator_type)
+        self.longitudinal_action_fn = longitudinal_action_from_type(longitudinal_action_type)
+        self.steer_action_fn = steer_action_from_type(steer_action_type)
         self.model = model
         self.track = track
         self.standard_state_fn = self.model.get_standardized_state_fn()
@@ -397,22 +404,22 @@ class RaceCar(object):
                 steer = self.steer_buffer.popleft()
                 self.steer_buffer.append(raw_steer)
 
-        if self.action_type.type is None:
-            raise ValueError("No Control Action Type Specified.")
+        if self.longitudinal_action_fn is None or self.steer_action_fn is None:
+            raise ValueError("No Control Action Functions Specified.")
 
-        accl, sv = self.action_type.act(
-            action=(vel, steer), state=self.state, params=self.params
-        )
+        # Apply actions directly using the stored functions
+        accl = self.longitudinal_action_fn(vel, self.state, self.params)
+        sv = self.steer_action_fn(steer, self.state, self.params)
 
         u_np = np.array([sv, accl])
 
         f_dynamics = self.model.f_dynamics
-        self.state = self.integrator.integrate(
-            f_dynamics, self.state, u_np, self.params_arr
-        )
+        for _ in range(int(self.time_step / self.integrator_time_step)):
+            self.state = self.integrator_fn(
+                f_dynamics, self.state, u_np, self.integrator_time_step, self.params_arr
+            )
 
         # bound yaw angle
-        # self.state[4] = (self.state[4] + 2 * np.pi) % (2 * np.pi)
         self.state[4] = (self.state[4] + np.pi) % (2 * np.pi) - np.pi
 
         if self.config['enable_scan']:
@@ -500,8 +507,9 @@ class Simulator(object):
         params,
         num_agents,
         seed,
-        action_type: CarAction,
-        integrator=Integrator,
+        longitudinal_action_type: LongitudinalActionType,
+        steer_action_type: SteerActionType,
+        integrator_type: IntegratorType,
         model=DynamicModel.ST,
         time_step=0.01,
         ego_idx=0,
@@ -542,11 +550,12 @@ class Simulator(object):
                 config,
                 params,
                 self.seed,
+                longitudinal_action_type=longitudinal_action_type,
+                steer_action_type=steer_action_type,
+                integrator_type=integrator_type,
                 is_ego=bool(i == ego_idx),
                 time_step=self.time_step,
-                integrator=integrator,
                 model=model,
-                action_type=action_type,
                 track=self.track,
             )
             self.agents.append(car)

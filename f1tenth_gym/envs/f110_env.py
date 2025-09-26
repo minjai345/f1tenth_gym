@@ -1,35 +1,13 @@
-# MIT License
-
-# Copyright (c) 2020 Joseph Auckley, Matthew O'Kelly, Aman Sinha, Hongrui Zheng
-
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-
-"""
-Author: Hongrui Zheng, Zirui Zang
-"""
 import copy
 import gymnasium as gym
 import numpy as np
 
-from .action import CarAction, from_single_to_multi_action_space
 from .base_classes import DynamicModel, Simulator
-from .integrator import IntegratorType
+from .integrators import integrator_from_type
+from .action import (
+    get_action_space,
+    from_single_to_multi_action_space
+)
 from .observation import observation_factory
 from .rendering import make_renderer
 from .reset import make_reset_fn
@@ -92,12 +70,12 @@ class F110Env(gym.Env):
         self.num_agents = self.config["num_agents"]
         self.timestep = self.config["timestep"]
         self.ego_idx = self.config["ego_idx"]
-        self.integrator = IntegratorType.from_string(self.config["integrator"], 
-                                                     self.timestep, 
-                                                     self.config["integrator_timestep"])
+        self.integrator_type = integrator_from_type(self.config["integrator"])
         self.model = DynamicModel.from_string(self.config["model"])
         self.observation_config = self.config["observation_config"]
-        self.action_type = CarAction(self.config["control_input"], params=self.params)
+        
+        # Parse control input to get action types
+        self.longitudinal_action_type, self.steer_action_type = self.config["control_input"]
         
         # env states
         self.poses_x = []
@@ -138,9 +116,10 @@ class F110Env(gym.Env):
             self.num_agents,
             self.seed,
             time_step=self.timestep,
-            integrator=self.integrator,
+            longitudinal_action_type=self.longitudinal_action_type,
+            steer_action_type=self.steer_action_type,
+            integrator_type=self.integrator_type,
             model=self.model,
-            action_type=self.action_type,
             track=self.track,
         )
         self.sim.set_map(self.track, self.config["map_scale"])
@@ -157,8 +136,13 @@ class F110Env(gym.Env):
         self.render_obs = None
 
         # action space
+        single_action_space = get_action_space(
+            self.longitudinal_action_type,
+            self.steer_action_type,
+            self.params
+        )
         self.action_space = from_single_to_multi_action_space(
-            self.action_type.space, self.num_agents
+            single_action_space, self.num_agents
         )
 
         # reset modes
@@ -427,11 +411,14 @@ class F110Env(gym.Env):
 
             if hasattr(self, "action_space"):
                 # if some parameters changed, recompute action space
-                self.action_type = CarAction(
-                    self.config["control_input"], params=self.params
+                self.longitudinal_action_type, self.steer_action_type = self.config["control_input"]
+                single_action_space = get_action_space(
+                    self.longitudinal_action_type,
+                    self.steer_action_type,
+                    self.params
                 )
                 self.action_space = from_single_to_multi_action_space(
-                    self.action_type.space, self.num_agents
+                    single_action_space, self.num_agents
                 )
 
     def _check_done(self):
