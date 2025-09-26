@@ -441,15 +441,6 @@ class F110Env(gym.Env):
         done = (self.collisions[self.ego_idx]) or self.lap_counts[self.ego_idx] >= float(self.config["max_laps"])
         return bool(np.any(done))
 
-    def _update_state(self):
-        """
-        Update the env's states according to observations.
-        """
-        self.poses_x = self.sim.agent_poses[:, 0]
-        self.poses_y = self.sim.agent_poses[:, 1]
-        self.poses_theta = self.sim.agent_poses[:, 2]
-        self.collisions = self.sim.collisions
-
     def step(self, action):
         """
         Step function for the gym env
@@ -466,9 +457,6 @@ class F110Env(gym.Env):
 
         # call simulation step
         self.sim.step(action)
-        
-        # update data member
-        self._update_state()
 
         # check done
         done = self._check_done()
