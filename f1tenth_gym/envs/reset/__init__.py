@@ -1,22 +1,68 @@
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from enum import IntEnum
-from typing import Optional
+from typing import Callable, Optional
 
-from .masked_reset import GridResetFn, AllTrackResetFn
-from .map_reset import AllMapResetFn
-from .reset_fn import ResetFn
+import numpy as np
+
 from ..track import Track
+
+__all__ = ["ResetFn", "ResetStrategy", "make_reset_fn", "GridResetFn", "AllTrackResetFn", "AllMapResetFn"]
+
+
+class ResetFn(ABC):
+    @abstractmethod
+    def sample(self) -> np.ndarray:
+        """Return initial poses for all agents."""
 
 
 class ResetStrategy(IntEnum):
-    """Enumeration of the supported environment reset strategies."""
-
     RL_GRID_STATIC = 1
     RL_RANDOM_STATIC = 2
     RL_GRID_RANDOM = 3
     RL_RANDOM_RANDOM = 4
     MAP_RANDOM_STATIC = 5
+
+
+def _rl_reset_factory(
+    *,
+    builder: Callable[..., ResetFn],
+    shuffle: bool,
+    move_laterally: bool,
+) -> Callable[[Track, int, dict], ResetFn]:
+    def factory(track: Track, num_agents: int, kwargs: dict) -> ResetFn:
+        return builder(
+            reference_line=track.raceline,
+            num_agents=num_agents,
+            shuffle=shuffle,
+            move_laterally=move_laterally,
+            **kwargs,
+        )
+
+    return factory
+
+
+def _map_reset_factory(
+    *,
+    shuffle: bool,
+    move_laterally: bool,
+) -> Callable[[Track, int, dict], ResetFn]:
+    def factory(track: Track, num_agents: int, kwargs: dict) -> ResetFn:
+        return AllMapResetFn(
+            track=track,
+            num_agents=num_agents,
+            shuffle=shuffle,
+            move_laterally=move_laterally,
+            **kwargs,
+        )
+
+    return factory
+
+
+
+
+
 
 
 def make_reset_fn(
@@ -31,37 +77,40 @@ def make_reset_fn(
     if not isinstance(strategy, ResetStrategy):
         raise TypeError("type must be a ResetStrategy")
 
-    type_token = {
-        ResetStrategy.RL_GRID_STATIC: "rl_grid_static",
-        ResetStrategy.RL_RANDOM_STATIC: "rl_random_static",
-        ResetStrategy.RL_GRID_RANDOM: "rl_grid_random",
-        ResetStrategy.RL_RANDOM_RANDOM: "rl_random_random",
-        ResetStrategy.MAP_RANDOM_STATIC: "map_random_static",
-    }[strategy]
-
     try:
-        refline_token, reset_token, shuffle_token = type_token.split("_")
+        builder = _RESET_BUILDERS[strategy]
+    except KeyError as exc:
+        raise ValueError(f"Unsupported reset strategy: {strategy}") from exc
 
-        if refline_token == "map":
-            reset_fn = {"random": AllMapResetFn}[reset_token]
-            shuffle = {"static": False, "random": True}[shuffle_token]
-            return reset_fn(track=track, num_agents=num_agents, shuffle=shuffle, **kwargs)
+    return builder(track, num_agents, kwargs)
 
-        # "cl" or "rl"
-        refline = {"cl": track.centerline, "rl": track.raceline}[refline_token]
-        reset_fn = {"grid": GridResetFn, "random": AllTrackResetFn}[reset_token]
-        shuffle = {"static": False, "random": True}[shuffle_token]
-        options = {"cl": {"move_laterally": True}, "rl": {"move_laterally": False}}[refline_token]
 
-    except Exception as ex:
-        raise ValueError(
-            f"Invalid reset function type: {strategy}. Expected format: <refline>_<resetfn>_<shuffle>"
-        ) from ex
+from .masked_reset import GridResetFn, AllTrackResetFn
+from .map_reset import AllMapResetFn
 
-    return reset_fn(
-        reference_line=refline,
-        num_agents=num_agents,
-        shuffle=shuffle,
-        **options,
-        **kwargs,
-    )
+_RESET_BUILDERS: dict[ResetStrategy, Callable[[Track, int, dict], ResetFn]] = {
+    ResetStrategy.RL_GRID_STATIC: _rl_reset_factory(
+        builder=GridResetFn,
+        shuffle=False,
+        move_laterally=False,
+    ),
+    ResetStrategy.RL_RANDOM_STATIC: _rl_reset_factory(
+        builder=AllTrackResetFn,
+        shuffle=False,
+        move_laterally=False,
+    ),
+    ResetStrategy.RL_GRID_RANDOM: _rl_reset_factory(
+        builder=GridResetFn,
+        shuffle=True,
+        move_laterally=False,
+    ),
+    ResetStrategy.RL_RANDOM_RANDOM: _rl_reset_factory(
+        builder=AllTrackResetFn,
+        shuffle=True,
+        move_laterally=False,
+    ),
+    ResetStrategy.MAP_RANDOM_STATIC: _map_reset_factory(
+        shuffle=False,
+        move_laterally=True,
+    ),
+}

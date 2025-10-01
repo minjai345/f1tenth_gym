@@ -3,7 +3,7 @@ from abc import abstractmethod
 import cv2
 import numpy as np
 
-from .reset_fn import ResetFn
+from . import ResetFn
 from .utils import sample_around_pose
 from ..track import Track
 
