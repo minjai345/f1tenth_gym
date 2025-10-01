@@ -29,6 +29,14 @@ Author: Hongrui Zheng
 
 import numpy as np
 from numba import njit
+from enum import IntEnum
+
+
+class CollisionCheckMode(IntEnum):
+    """Available collision detection strategies for the environment."""
+
+    LIDAR_SCAN = 1
+    BOUNDING_BOX = 2
 
 
 @njit(cache=True)
