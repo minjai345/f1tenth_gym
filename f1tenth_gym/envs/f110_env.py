@@ -2,13 +2,27 @@ import copy
 import gymnasium as gym
 import numpy as np
 
-from .base_classes import DynamicModel, Simulator
-from .integrators import Integrator
+from .dynamic_models import (
+    DynamicModel,
+    F1TENTH_VEHICLE_PARAMETERS,
+)
+from .simulator import SimpleSimulator
+from .env_config import (
+    EnvConfig,
+    LoopCounterMode,
+    build_env_config,
+)
+from .integrators import IntegratorType, integrator_from_type
 from .action import (
     get_action_space,
-    from_single_to_multi_action_space
+    from_single_to_multi_action_space,
+    LongitudinalActionType,
+    SteerActionType,
 )
-from .observation import observation_factory
+from .observation.observation import ObservationType
+from .reset import ResetStrategy
+from .collision_models import CollisionCheckMode
+from .observation.observation import observation_factory
 from .rendering import make_renderer
 from .reset import make_reset_fn
 from .track import Track
@@ -61,40 +75,25 @@ class F110Env(gym.Env):
         # Configuration
         self.config = self.default_config()
         self.configure(config)
-        if self.config['loop_counting_method'] == "frenet_based":
-            self.config["compute_frenet"] = True # NOTE always compute frenet pose for lap counting
 
-        self.seed = self.config["seed"]
-        self.map = self.config["map"]
-        self.params = self.config["params"]
-        self.num_agents = self.config["num_agents"]
-        self.timestep = self.config["timestep"]
-        self.ego_idx = self.config["ego_idx"]
-        self.integrator_type = Integrator.from_type(self.config["integrator"])
-        self.model = DynamicModel.from_string(self.config["model"])
-        self.observation_config = self.config["observation_config"]
-        
-        # Parse control input to get action types
-        self.longitudinal_action_type, self.steer_action_type = self.config["control_input"]
-        
         # env states
         self.poses_x = []
         self.poses_y = []
         self.poses_theta = []
-        self.collisions = np.zeros((self.num_agents,))
+        
 
         # loop completion
         self.near_start = True
         self.num_toggles = 0
 
         # finish line info
-        if self.config["loop_counting_method"] == "frenet_based":
-            self.agents_prev_s = np.array([None] * self.num_agents)
+        if self.loop_counter_mode is LoopCounterMode.FRENET_BASED:
+            self.config["loop_counting_method"] = LoopCounterMode.FRENET_BASED
+            self.agents_prev_s = [None] * self.num_agents
             self.lap_times = np.zeros((self.num_agents, ))
             self.lap_times_finish = np.zeros((self.num_agents, ))
             self.lap_counts = np.zeros((self.num_agents, ))
             self.sim_time = 0.0
-
         if type(self.map) is not Track:
             if '/' in self.map or '\\' in self.map:
                 self.track = Track.from_track_path(
@@ -109,21 +108,21 @@ class F110Env(gym.Env):
         else:
             self.track = self.map  # use the track directly
         
-        # initiate stuff
-        self.sim = Simulator(
-            self.config,
-            self.params,
-            self.num_agents,
-            self.seed,
-            time_step=self.timestep,
-            longitudinal_action_type=self.longitudinal_action_type,
-            steer_action_type=self.steer_action_type,
-            integrator_type=self.integrator_type,
+        # initiate simulator
+        self.sim = SimpleSimulator(
+            env_config=self.env_config,
+            params=self.params,
             model=self.model,
+            dynamics_fn=self.model.f_dynamics,
+            integrator_fn=self.integrator_fn,
+            longitudinal_type=self.longitudinal_action_type,
+            steering_type=self.steer_action_type,
             track=self.track,
+            seed=self.seed,
         )
-        self.sim.set_map(self.track, self.config["map_scale"])
-        
+        if isinstance(self.track, Track):
+            self.sim.set_map(self.track, self.config["map_scale"])
+
         # observations
         self.agent_ids = [f"agent_{i}" for i in range(self.num_agents)]
 
@@ -132,7 +131,7 @@ class F110Env(gym.Env):
         ), "observation_config must contain 'type' key"
         self.observation_type = observation_factory(env=self, **self.observation_config)
         self.observation_space = self.observation_type.space()
-        self.render_obs_type = observation_factory(env=self, type='direct')
+        self.render_obs_type = observation_factory(env=self, type=ObservationType.DIRECT)
         self.render_obs = None
 
         # action space
@@ -186,260 +185,152 @@ class F110Env(gym.Env):
             "seed": 12345,
             "map": "Spielberg",
             "map_scale": 1.0,
-            "params": cls.f1tenth_vehicle_params(),
+            "params": F1TENTH_VEHICLE_PARAMETERS.as_mapping(),
             "num_agents": 1,
             "timestep": 0.01,
             "integrator_timestep": 0.01,
             "ego_idx": 0,
             "max_laps": 1,  # 'inf' for infinite laps, or a positive integer
-            "integrator": "rk4",
-            "model": "st", # "ks", "st", "mb"
-            "control_input": ["speed", "steering_angle"], # ["speed", "steering_angle"], ["accl", "steering_speed"]
-            "observation_config": {"type": "direct"},
-            "reset_config": {"type": None},
+            "integrator": IntegratorType.RK4,
+            "model": DynamicModel.ST,  # DynamicModel.KS, DynamicModel.ST, DynamicModel.MB
+            "control_input": [
+                LongitudinalActionType.SPEED,
+                SteerActionType.STEERING_ANGLE,
+            ],  # default speed + steering angle control
+            "observation_config": {"type": ObservationType.DIRECT},
+            "reset_config": {"type": ResetStrategy.RL_GRID_STATIC},
             "enable_rendering": True,
             "enable_scan": True, # NOTE no lidar scan and collision if False
-            "lidar_fov" : 4.712389,
+            "lidar_fov": 4.712389,
             "lidar_num_beams": 1080,
             "lidar_range": 30.0,
             "lidar_noise_std": 0.01,
             "steer_delay_buffer_size": 0,
-            "compute_frenet": True, 
-            "collision_check_method": "lidar_scan", # "lidar_scan", "bounding_box"
-            "loop_counting_method": "frenet_based", # "toggle", "frenet_based", "winding_angle"
+            "compute_frenet": True,
+            "collision_check_method": CollisionCheckMode.LIDAR_SCAN,  # CollisionCheckMode.LIDAR_SCAN or CollisionCheckMode.BOUNDING_BOX
+            "loop_counting_method": LoopCounterMode.FRENET_BASED, # "toggle", "frenet_based", "winding_angle"
         }
     
-    @classmethod
-    def fullscale_vehicle_params(cls) -> dict:
-        params = {
-            "mu": 1.0489,
-            "C_Sf": 20.89,
-            "C_Sr": 20.89,
-            "lf": 0.88392,
-            "lr": 1.50876,
-            "h": 0.557,
-            "m": 1225.8878467253344,
-            "I": 1538.8533713561394,
-            # steering constraints
-            "s_min": -0.91,
-            "s_max": 0.91,
-            "sv_min": -0.4,
-            "sv_max": 0.4,
-            # Longitudinal constraints
-            "v_switch": 4.755,
-            "a_max": 11.5,
-            "v_min": -13.9,
-            "v_max": 45.8,
-            "width": 1.674,
-            "length": 4.298,
-            # maximum curvature change
-            "kappa_dot_max": 0.4,
-            # maximum curvature rate rate
-            "kappa_dot_dot_max": 20.0,
-            # maximum longitudinal jerk [m/s^3]
-            "j_max": 10.0e3,
-            # maximum longitudinal jerk change [m/s^4]
-            "j_dot_max": 10.0e3,
-            # Extra parameters (for future use in multibody simulation)
-            # sprung mass [kg]  SMASS
-            "m_s": 1094.542720290477,
-            # unsprung mass front [kg]  UMASSF
-            "m_uf": 65.67256321742863,
-            # unsprung mass rear [kg]  UMASSR
-            "m_ur": 65.67256321742863,
-            # moments of inertia of sprung mass
-            # moment of inertia for sprung mass in roll [kg m^2]  IXS
-            "I_Phi_s": 244.04723069965206,
-            # moment of inertia for sprung mass in pitch [kg m^2]  IYS
-            "I_y_s": 1342.2597688480864,
-            # moment of inertia for sprung mass in yaw [kg m^2]  IZZ
-            "I_z": 1538.8533713561394,
-            # moment of inertia cross product [kg m^2]  IXZ
-            "I_xz_s": 0.0,
-            # suspension parameters
-            # suspension spring rate (front) [N/m]  KSF
-            "K_sf": 21898.332429625985,
-            # suspension damping rate (front) [N s/m]  KSDF
-            "K_sdf": 1459.3902937206362,
-            # suspension spring rate (rear) [N/m]  KSR
-            "K_sr": 21898.332429625985,
-            # suspension damping rate (rear) [N s/m]  KSDR
-            "K_sdr": 1459.3902937206362,
-            # geometric parameters
-            # track width front [m]  TRWF
-            "T_f": 1.389888,
-            # track width rear [m]  TRWB
-            "T_r": 1.423416,
-            # lateral spring rate at compliant compliant pin joint between M_s and M_u [N/m]  KRAS
-            "K_ras": 175186.65943700788,
-            # auxiliary torsion roll stiffness per axle (normally negative) (front) [N m/rad]  KTSF
-            "K_tsf": -12880.270509148304,
-            # auxiliary torsion roll stiffness per axle (normally negative) (rear) [N m/rad]  KTSR
-            "K_tsr": 0.0,
-            # damping rate at compliant compliant pin joint between M_s and M_u [N s/m]  KRADP
-            "K_rad": 10215.732056044453,
-            # vertical spring rate of tire [N/m]  KZT
-            "K_zt": 189785.5477234252,
-            # center of gravity height of total mass [m]  HCG (mainly required for conversion to other vehicle models)
-            "h_cg": 0.5577840000000001,
-            # height of roll axis above ground (front) [m]  HRAF
-            "h_raf": 0.0,
-            # height of roll axis above ground (rear) [m]  HRAR
-            "h_rar": 0.0,
-            # M_s center of gravity above ground [m]  HS
-            "h_s": 0.59436,
-            # moment of inertia for unsprung mass about x-axis (front) [kg m^2]  IXUF
-            "I_uf": 32.53963075995361,
-            # moment of inertia for unsprung mass about x-axis (rear) [kg m^2]  IXUR
-            "I_ur": 32.53963075995361,
-            # wheel inertia, from internet forum for 235/65 R 17 [kg m^2]
-            "I_y_w": 1.7,
-            # lateral compliance rate of tire, wheel, and suspension, per tire [m/N]  KLT
-            "K_lt": 1.0278264878518764e-05,
-            # effective wheel/tire radius  chosen as tire rolling radius RR  taken from ADAMS documentation [m]
-            "R_w": 0.344,
-            # split of brake and engine torque
-            "T_sb": 0.76,
-            "T_se": 1.0,
-            # suspension parameters
-            # [rad/m]  DF
-            "D_f": -0.6233595800524934,
-            # [rad/m]  DR
-            "D_r": -0.20997375328083986,
-            # [needs conversion if nonzero]  EF
-            "E_f": 0.0,
-            # [needs conversion if nonzero]  ER
-            "E_r": 0.0,
-            # tire parameters from ADAMS handbook
-            # longitudinal coefficients
-            "tire_p_cx1": 1.6411,  # Shape factor Cfx for longitudinal force
-            "tire_p_dx1": 1.1739,  # Longitudinal friction Mux at Fznom
-            "tire_p_dx3": 0.0,  # Variation of friction Mux with camber
-            "tire_p_ex1": 0.46403,  # Longitudinal curvature Efx at Fznom
-            "tire_p_kx1": 22.303,  # Longitudinal slip stiffness Kfx/Fz at Fznom
-            "tire_p_hx1": 0.0012297,  # Horizontal shift Shx at Fznom
-            "tire_p_vx1": -8.8098e-006,  # Vertical shift Svx/Fz at Fznom
-            "tire_r_bx1": 13.276,  # Slope factor for combined slip Fx reduction
-            "tire_r_bx2": -13.778,  # Variation of slope Fx reduction with kappa
-            "tire_r_cx1": 1.2568,  # Shape factor for combined slip Fx reduction
-            "tire_r_ex1": 0.65225,  # Curvature factor of combined Fx
-            "tire_r_hx1": 0.0050722,  # Shift factor for combined slip Fx reduction
-            # lateral coefficients
-            "tire_p_cy1": 1.3507,  # Shape factor Cfy for lateral forces
-            "tire_p_dy1": 1.0489,  # Lateral friction Muy
-            "tire_p_dy3": -2.8821,  # Variation of friction Muy with squared camber
-            "tire_p_ey1": -0.0074722,  # Lateral curvature Efy at Fznom
-            "tire_p_ky1": -21.92,  # Maximum value of stiffness Kfy/Fznom
-            "tire_p_hy1": 0.0026747,  # Horizontal shift Shy at Fznom
-            "tire_p_hy3": 0.031415,  # Variation of shift Shy with camber
-            "tire_p_vy1": 0.037318,  # Vertical shift in Svy/Fz at Fznom
-            "tire_p_vy3": -0.32931,  # Variation of shift Svy/Fz with camber
-            "tire_r_by1": 7.1433,  # Slope factor for combined Fy reduction
-            "tire_r_by2": 9.1916,  # Variation of slope Fy reduction with alpha
-            "tire_r_by3": -0.027856,  # Shift term for alpha in slope Fy reduction
-            "tire_r_cy1": 1.0719,  # Shape factor for combined Fy reduction
-            "tire_r_ey1": -0.27572,  # Curvature factor of combined Fy
-            "tire_r_hy1": 5.7448e-006,  # Shift factor for combined Fy reduction
-            "tire_r_vy1": -0.027825,  # Kappa induced side force Svyk/Muy*Fz at Fznom
-            "tire_r_vy3": -0.27568,  # Variation of Svyk/Muy*Fz with camber
-            "tire_r_vy4": 12.12,  # Variation of Svyk/Muy*Fz with alpha
-            "tire_r_vy5": 1.9,  # Variation of Svyk/Muy*Fz with kappa
-            "tire_r_vy6": -10.704,  # Variation of Svyk/Muy*Fz with atan(kappa)
-        }
-        return params
-
-    @classmethod
-    def f1fifth_vehicle_params(cls) -> dict:
-        params = {
-            "mu": 1.1,
-            "C_Sf": 5.3507,
-            "C_Sr": 5.3507,
-            "lf": 0.2725,
-            "lr": 0.2585,
-            "h": 0.1825,
-            "m": 15.32,
-            "I": 0.64332,
-            "s_min": -0.4189,
-            "s_max": 0.4189,
-            "sv_min": -3.2,
-            "sv_max": 3.2,
-            "v_switch": 7.319,
-            "a_max": 9.51,
-            "v_min": -5.0,
-            "v_max": 20.0,
-            "width": 0.55,
-            "length": 0.8,
-        }
-        return params
-
-    @classmethod
-    def f1tenth_vehicle_params(cls) -> dict:
-        params = {
-            "mu": 1.0489,
-            "C_Sf": 4.718,
-            "C_Sr": 5.4562,
-            "lf": 0.15875,
-            "lr": 0.17145,
-            "h": 0.074,
-            "m": 3.74,
-            "I": 0.04712,
-            "s_min": -0.4189,
-            "s_max": 0.4189,
-            "sv_min": -3.2,
-            "sv_max": 3.2,
-            "v_switch": 7.319,
-            "a_max": 9.51,
-            "v_min": -5.0,
-            "v_max": 20.0,
-            "width": 0.31,
-            "length": 0.58,
-        }
-        return params
-
     def configure(self, config: dict) -> None:
         if config:
             self.config = deep_update(self.config, config)
-            self.params = self.config["params"]
 
-            if hasattr(self, "sim"):
-                self.sim.update_params(self.config["params"])
+        self._sync_env_config()
 
-            if hasattr(self, "renderer"):
-                if self.renderer is not None:
-                    # if renderer exists, update the params
-                    self.renderer.update_params(self.params)
+        if hasattr(self, "sim"):
+            self.sim.update_params(self.params)
 
-            if hasattr(self, "action_space"):
-                # if some parameters changed, recompute action space
-                self.longitudinal_action_type, self.steer_action_type = self.config["control_input"]
-                single_action_space = get_action_space(
-                    self.longitudinal_action_type,
-                    self.steer_action_type,
-                    self.params
-                )
-                self.action_space = from_single_to_multi_action_space(
-                    single_action_space, self.num_agents
-                )
+        if hasattr(self, "renderer") and self.renderer is not None:
+            # if renderer exists, update the params
+            self.renderer.update_params(self.params)
+
+        if hasattr(self, "action_space"):
+            # if some parameters changed, recompute action space
+            single_action_space = get_action_space(
+                self.longitudinal_action_type,
+                self.steer_action_type,
+                self.params
+            )
+            self.action_space = from_single_to_multi_action_space(
+                single_action_space, self.num_agents
+            )
+
+    def _sync_env_config(self) -> None:
+        "Rebuild typed config view from the legacy config dictionary."
+        self.env_config: EnvConfig = build_env_config(self.config)
+        self._apply_env_config()
+
+    def _apply_env_config(self) -> None:
+        "Apply values from env_config to legacy attributes."
+        self.config["compute_frenet"] = self.env_config.simulation.compute_frenet_frame
+
+        self.seed = self.env_config.seed
+        self.map = self.env_config.map_name
+        param_mapping = self.env_config.params.as_mapping()
+        self.config["params"] = param_mapping
+        self.params = param_mapping
+        self.vehicle_params = self.env_config.params
+        self.num_agents = self.env_config.num_agents
+        self.timestep = self.env_config.simulation.timestep
+        self.ego_idx = self.env_config.ego_index
+        self.max_laps = self.env_config.simulation.max_laps
+
+        self.integrator_fn = integrator_from_type(
+            self.env_config.simulation.integrator
+        )
+
+        self.model = self.env_config.simulation.dynamics_model
+
+        observation_dict = dict(self.config.get("observation_config", {"type": ObservationType.ORIGINAL}))
+        observation_dict["type"] = self.env_config.observation.type
+        if self.env_config.observation.features is not None:
+            observation_dict["features"] = tuple(self.env_config.observation.features)
+        else:
+            observation_dict.pop("features", None)
+        self.config["observation_config"] = observation_dict
+        self.observation_config = dict(observation_dict)
+        self.observation_cfg = self.env_config.observation
+        self.reset_cfg = self.env_config.reset
+        self.lidar_cfg = self.env_config.lidar
+        self.control_cfg = self.env_config.control
+        self.simulation_cfg = self.env_config.simulation
+        self.loop_counter_mode = self.env_config.simulation.loop_counter
+        self.collision_check_mode = self.env_config.collision_check
+        self.render_enabled = self.env_config.render_enabled
+
+        self.longitudinal_action_type = self.control_cfg.longitudinal_mode
+        self.steer_action_type = self.control_cfg.steering_mode
+        self.steer_delay_steps = self.control_cfg.steer_delay_steps
+
+        self.config["integrator"] = self.env_config.simulation.integrator
+        self.config["model"] = self.env_config.simulation.dynamics_model
+        self.config["control_input"] = [
+            self.control_cfg.longitudinal_mode,
+            self.control_cfg.steering_mode,
+        ]
+        self.config["enable_rendering"] = self.render_enabled
+        self.config["enable_scan"] = self.lidar_cfg.enabled
+        self.config["lidar_num_beams"] = self.lidar_cfg.num_beams
+        self.config["lidar_fov"] = self.lidar_cfg.field_of_view
+        self.config["lidar_range"] = self.lidar_cfg.maximum_range
+        self.config["lidar_noise_std"] = self.lidar_cfg.noise_std
+        self.config["steer_delay_buffer_size"] = self.steer_delay_steps
+
+        reset_config = dict(self.config.get("reset_config", {}))
+        reset_config["type"] = self.reset_cfg.strategy
+        self.config["reset_config"] = reset_config
+        self.config["collision_check_method"] = self.collision_check_mode
+        self.config["loop_counting_method"] = self.loop_counter_mode
+        self.config["max_laps"] = "inf" if self.max_laps is None else self.max_laps
 
     def _check_done(self):
         """
         Check if the current rollout is done
         """
-        if self.config['loop_counting_method'] == "frenet_based":
-            # print(self.agents_prev_s)
-            for ind, agent_id in enumerate(self.agent_ids):
+        if (
+            self.loop_counter_mode is LoopCounterMode.FRENET_BASED
+            and self.config["compute_frenet"]
+            and self.track is not None
+        ):
+            s_frame_max = self.track.centerline.spline.s_frame_max
+            for ind in range(self.num_agents):
+                current_s = float(self.sim.state.frenet[ind, 0])
                 if self.agents_prev_s[ind] is None:
-                    self.agents_prev_s[ind] = self.sim.agents[ind].frenet_pose[0]
-                else:
-                    agent_curr_s = self.sim.agents[ind].frenet_pose[0]
-                    if self.agents_prev_s[ind] - agent_curr_s > self.sim.track.centerline.spline.s_frame_max * 0.85 \
-                        and self.sim_time > self.timestep:
-                        self.lap_counts[ind] += 1
-                        self.lap_times[ind] = self.sim_time - self.lap_times_finish[ind]
-                        self.lap_times_finish[ind] = self.sim_time
-                    self.agents_prev_s[ind] = agent_curr_s
-        done = (self.collisions[self.ego_idx]) or self.lap_counts[self.ego_idx] >= float(self.config["max_laps"])
-        return bool(np.any(done))
+                    self.agents_prev_s[ind] = current_s
+                    continue
+                if (
+                    self.agents_prev_s[ind] - current_s > s_frame_max * 0.85
+                    and self.sim_time > self.timestep
+                ):
+                    self.lap_counts[ind] += 1
+                    self.lap_times[ind] = self.sim_time - self.lap_times_finish[ind]
+                    self.lap_times_finish[ind] = self.sim_time
+                self.agents_prev_s[ind] = current_s
+
+        done = bool(self.sim.collisions[self.ego_idx])
+        if self.max_laps is not None:
+            done = done or (self.lap_counts[self.ego_idx] >= self.max_laps)
+        return done
 
     def step(self, action):
         """
@@ -473,7 +364,7 @@ class F110Env(gym.Env):
 
         # times
         reward = self.timestep
-        self.sim_time = self.sim_time + self.timestep
+        self.sim_time = self.sim.state.sim_time
 
         truncated = False
         info = {"lap_times": self.lap_times, 
@@ -502,12 +393,11 @@ class F110Env(gym.Env):
 
         # reset counters and data members
         self.sim_time = 0.0
-        self.collisions = np.zeros((self.num_agents,))
+        self.agents_prev_s = [None] * self.num_agents
         self.num_toggles = 0
         self.near_start = True
         self.near_starts = np.array([True] * self.num_agents)
         self.toggle_list = np.zeros((self.num_agents,))
-
         # states after reset
         if options is not None and "poses" in options:
             poses = options["poses"]
@@ -569,8 +459,14 @@ class F110Env(gym.Env):
         Returns:
             None
         """
-        self.sim.set_map(map_name)
-        self.track = Track.from_track_name(map_name)
+        if "/" in map_name or "\\" in map_name:
+            track = Track.from_track_path(map_name, track_scale=self.config["map_scale"])
+        else:
+            track = Track.from_track_name(map_name, track_scale=self.config["map_scale"])
+        self.map = map_name
+        self.track = track
+        self.sim.set_map(track, self.config["map_scale"])
+
 
     def update_params(self, params, index=-1):
         """
@@ -583,7 +479,12 @@ class F110Env(gym.Env):
         Returns:
             None
         """
-        self.sim.update_params(params, agent_idx=index)
+        if index >= 0:
+            raise NotImplementedError(
+                "Per-agent parameter updates are not supported in the simplified simulator"
+            )
+        self.params.update(params)
+        self.sim.update_params(self.params)
 
     def add_render_callback(self, callback_func):
         """
@@ -622,3 +523,9 @@ class F110Env(gym.Env):
         if self.renderer is not None:
             self.renderer.close()
         super().close()
+
+
+
+
+
+
