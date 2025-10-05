@@ -1,50 +1,42 @@
 from enum import IntEnum
-from typing import Dict, Tuple
 
 import gymnasium as gym
 import numpy as np
-from .dynamic_models import pid_steer, pid_accl
-
+from .dynamic_models import VehicleParameters, pid_steer, pid_accl
 
 class LongitudinalActionType(IntEnum):
     ACCL = 1
     SPEED = 2
 
-
 class SteerActionType(IntEnum):
     STEERING_ANGLE = 1
     STEERING_SPEED = 2
 
-
-def accl_action(action: float, state: np.ndarray, params: Dict) -> float:
+def accl_action(action: float, state: np.ndarray, params: VehicleParameters) -> float:
     """Direct acceleration control"""
     return action
 
-
-def speed_action(action: float, state: np.ndarray, params: Dict) -> float:
+def speed_action(action: float, state: np.ndarray, params: VehicleParameters) -> float:
     """Speed control using PID"""
     return pid_accl(
         action,
         state[3],  # current velocity
-        params["a_max"],
-        params["v_max"],
-        params["v_min"],
+        params.a_max,
+        params.v_max,
+        params.v_min,
     )
 
-
-def steering_angle_action(action: float, state: np.ndarray, params: Dict) -> float:
+def steering_angle_action(action: float, state: np.ndarray, params: VehicleParameters) -> float:
     """Steering angle control using PID"""
     return pid_steer(
         action,
         state[2],  # current steering angle
-        params["sv_max"],
+        params.sv_max,
     )
 
-
-def steering_speed_action(action: float, state: np.ndarray, params: Dict) -> float:
+def steering_speed_action(action: float, state: np.ndarray, params: VehicleParameters) -> float:
     """Direct steering velocity control"""
     return action
-
 
 def longitudinal_action_from_type(action_type: LongitudinalActionType):
     """Get longitudinal action function from type"""
@@ -55,7 +47,6 @@ def longitudinal_action_from_type(action_type: LongitudinalActionType):
     else:
         raise ValueError(f"Unknown longitudinal action type: {action_type}")
 
-
 def steer_action_from_type(action_type: SteerActionType):
     """Get steering action function from type"""
     if action_type == SteerActionType.STEERING_ANGLE:
@@ -65,25 +56,24 @@ def steer_action_from_type(action_type: SteerActionType):
     else:
         raise ValueError(f"Unknown steering action type: {action_type}")
 
-
 def get_action_space(
     longitudinal_type: LongitudinalActionType,
     steer_type: SteerActionType,
-    params: Dict
+    params: VehicleParameters
 ) -> gym.Space:
     """Get the action space for the given action types"""
     # Get limits based on action types
     if longitudinal_type == LongitudinalActionType.ACCL:
-        long_low, long_high = -params["a_max"], params["a_max"]
+        long_low, long_high = -params.a_max, params.a_max
     elif longitudinal_type == LongitudinalActionType.SPEED:
-        long_low, long_high = params["v_min"], params["v_max"]
+        long_low, long_high = params.v_min, params.v_max
     else:
         raise ValueError(f"Unknown longitudinal action type: {longitudinal_type}")
     
     if steer_type == SteerActionType.STEERING_ANGLE:
-        steer_low, steer_high = params["s_min"], params["s_max"]
+        steer_low, steer_high = params.s_min, params.s_max
     elif steer_type == SteerActionType.STEERING_SPEED:
-        steer_low, steer_high = params["sv_min"], params["sv_max"]
+        steer_low, steer_high = params.sv_min, params.sv_max
     else:
         raise ValueError(f"Unknown steering action type: {steer_type}")
     
@@ -91,7 +81,6 @@ def get_action_space(
     high = np.array([steer_high, long_high]).astype(np.float32)
     
     return gym.spaces.Box(low=low, high=high, shape=(2,), dtype=np.float32)
-
 
 def from_single_to_multi_action_space(
     single_agent_action_space: gym.spaces.Box, num_agents: int

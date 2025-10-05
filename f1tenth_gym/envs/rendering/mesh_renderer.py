@@ -1,9 +1,9 @@
-import sys
 import numpy as np
 from pathlib import Path
 from typing import Optional
 from pyqtgraph.opengl import MeshData, GLMeshItem
 
+from ..dynamic_models import VehicleParameters
 from .renderer import RenderSpec, EnvRenderer, ObjectRenderer
 
 class MeshRenderer(ObjectRenderer):
@@ -41,6 +41,11 @@ class MeshRenderer(ObjectRenderer):
         self.tire_length = self.wheel_size
         
     
+    def update_params(self, params: VehicleParameters) -> None:
+        """Update stored vehicle dimensions; mesh geometry currently static."""
+        self.car_length = float(params.length)
+        self.car_width = float(params.width)
+
     def load_obj(self):
         # Load meshes (skip the ground plane)
         scene = self.trimesh.load(OBJ_PATH, process=False)

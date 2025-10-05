@@ -1,7 +1,6 @@
 from __future__ import annotations
 import logging
-import math
-from typing import Any, Callable, Optional, Union
+from typing import Callable, Optional, Union
 import signal
 from time import perf_counter
 
@@ -12,8 +11,9 @@ import pyqtgraph as pg
 from pyqtgraph.exporters import ImageExporter
 from PIL import ImageColor
 
-from .pyqt_objects import *
+from .pyqt_objects import TextRenderer, CarRenderer, PointsRenderer, LinesRenderer, ClosedLinesRenderer
 from ..track import Track
+from ..dynamic_models import VehicleParameters
 from .renderer import EnvRenderer, ObjectRenderer, RenderSpec
 
 # Enable OpenGL backend for better performance
@@ -65,7 +65,7 @@ class PyQtEnvRenderer(EnvRenderer):
 
     def __init__(
         self,
-        params: dict[str, Any],
+        params: VehicleParameters,
         track: Track,
         agent_ids: list[str],
         render_spec: RenderSpec,
@@ -77,8 +77,8 @@ class PyQtEnvRenderer(EnvRenderer):
 
         Parameters
         ----------
-        params : dict
-            dictionary of simulation parameters (including vehicle dimensions, etc.)
+        params : VehicleParameters
+            vehicle parameters used for renderer sizing
         track : Track
             track object
         agent_ids : list
@@ -215,8 +215,8 @@ class PyQtEnvRenderer(EnvRenderer):
         if self.cars is None:
             self.cars = [
                 CarRenderer(
-                    car_length=self.params["length"],
-                    car_width=self.params["width"],
+                    car_length=float(self.params.length),
+                    car_width=float(self.params.width),
                     color=self.car_colors[ic],
                     render_spec=self.render_spec,
                     map_origin=self.map_origin[:2],
@@ -232,6 +232,15 @@ class PyQtEnvRenderer(EnvRenderer):
 
         # update time
         self.sim_time = obs[self.agent_ids[0]]["sim_time"]
+
+    def update_params(self, params: VehicleParameters) -> None:
+        """Update vehicle dimensions used by cached render objects."""
+        self.params = params
+        if self.cars is not None:
+            for car in self.cars:
+                update_fn = getattr(car, "update_params", None)
+                if callable(update_fn):
+                    update_fn(params)
 
     def add_renderer_callback(self, callback_fn: Callable[[EnvRenderer], None]) -> None:
         """

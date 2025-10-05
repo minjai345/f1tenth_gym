@@ -1,25 +1,26 @@
 import signal
-import time, logging
-import os
+import time
+import logging
 import numpy as np
 import pyqtgraph.opengl as gl
 from PyQt6 import QtWidgets, QtCore, QtGui
-from typing import Any, Optional, Union
+from typing import Optional, Union
 from PIL import ImageColor
 from PyQt6.QtGui import QImage
 import OpenGL.GL as gl_module
 
 from ..track import Track
+from ..dynamic_models import VehicleParameters
 from .renderer import EnvRenderer, RenderSpec, ObjectRenderer
 from .pyqtgl_objects import PointsRenderer, LinesRenderer, ClosedLinesRenderer, CarRenderer
 from .mesh_renderer import MeshRenderer
-from PIL import Image, ImageDraw, ImageFont
+from PIL import ImageFont
 import cv2
 
 class PyQtEnvRendererGL(EnvRenderer):
     def __init__(
         self,
-        params: dict[str, Any],
+        params: VehicleParameters,
         track: Track,
         agent_ids: list[str],
         render_spec: RenderSpec,
@@ -39,7 +40,7 @@ class PyQtEnvRendererGL(EnvRenderer):
         else:
             self.agent_to_follow = None
         self.car_scale = 1.0
-        self.default_camera_dist = self.params['width'] * 70
+        self.default_camera_dist = float(params.width) * 70
         self.obs = None
         self.zoom_level = 1.0
         self.init = True
@@ -114,11 +115,16 @@ class PyQtEnvRendererGL(EnvRenderer):
         elif self.render_mode == "rgb_array":
             self.window.hide()
 
-    def update_params(self, params: dict[str, Any]) -> None:
-        self.params.update(params)
+    def update_params(self, params: VehicleParameters) -> None:
+        self.params = params
+        self.default_camera_dist = float(params.width) * 70
         if self.cars is not None:
             for car in self.cars:
-                car.update_params(params)
+                update_fn = getattr(car, 'update_params', None)
+                if callable(update_fn):
+                    update_fn(params)
+        if self.agent_to_follow is None:
+            self._center_camera_on_map()
 
     def _apply_view_flip(self):
         """Apply a vertical flip transformation to the OpenGL view."""
@@ -169,7 +175,7 @@ class PyQtEnvRendererGL(EnvRenderer):
         center = (min_xy + max_xy) / 2
         extent = max(max_xy - min_xy)
         if self.render_spec.bigger_car_when_map_centered:
-            self.car_scale = extent/self.params['width'] / 120
+            self.car_scale = extent/self.params.width / 120
         # Fixed height above map
         x, y = center
         self.view.setCameraPosition(
@@ -254,8 +260,8 @@ class PyQtEnvRendererGL(EnvRenderer):
             if self.render_spec.car_model == "3d":
                 self.cars = [MeshRenderer(
                     env_renderer=self,
-                    car_length=self.params["length"],
-                    car_width=self.params["width"],
+                    car_length=float(self.params.length),
+                    car_width=float(self.params.width),
                     color=self.car_colors[ic],
                     render_spec=self.render_spec,
                     map_origin=self.map_origin[:2],
@@ -265,8 +271,8 @@ class PyQtEnvRendererGL(EnvRenderer):
             elif self.render_spec.car_model == "2d":
                 self.cars = [CarRenderer(
                     env_renderer=self,
-                    car_length=self.params["length"],
-                    car_width=self.params["width"],
+                    car_length=float(self.params.length),
+                    car_width=float(self.params.width),
                     color=self.car_colors[ic],
                     render_spec=self.render_spec,
                     map_origin=self.map_origin[:2],

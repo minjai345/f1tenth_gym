@@ -2,12 +2,10 @@ from __future__ import annotations
 import numpy as np
 import pyqtgraph as pg
 
-# from PyQt6.QtWidgets import QGraphicsRectItem, QGraphicsPolygonItem
-# from PyQt6 import QtGui
-
 from .renderer import RenderSpec, EnvRenderer, ObjectRenderer
 from ..collision_models import get_vertices, get_trmtx
-from typing import Optional, Any, Union
+from ..dynamic_models import VehicleParameters
+from typing import Optional, Union
 
 from numba import njit
 
@@ -333,6 +331,16 @@ class CarRenderer(ObjectRenderer):
                 fillLevel=0,
                 brush=(0,0,0), # Rubber tire => Black
             )
+    def update_params(self, params: VehicleParameters) -> None:
+        """Update vehicle geometry parameters for 2D rendering."""
+        new_length = float(params.length)
+        new_width = float(params.width)
+        if not np.isfinite(new_length) or not np.isfinite(new_width):
+            return
+        self.car_length = new_length
+        self.car_width = new_width
+        self.tire_length = self.wheel_size
+
 
     def update(self, obs: dict[str, np.ndarray], id: str):        
         state = obs[id]["std_state"].astype(float)

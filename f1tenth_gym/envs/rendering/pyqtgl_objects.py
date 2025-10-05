@@ -4,7 +4,8 @@ import time
 import pyqtgraph.opengl as gl
 
 from .renderer import RenderSpec, EnvRenderer, ObjectRenderer
-from typing import Optional, Any, Union
+from ..dynamic_models import VehicleParameters
+from typing import Optional, Union
 
 
 class CarRenderer(ObjectRenderer):
@@ -65,18 +66,16 @@ class CarRenderer(ObjectRenderer):
         self.tire_width = 0.1
         self.tire_length = self.wheel_size
         
-    def update_params(self, params: dict[str, Any]) -> None:
-        """
-        Update the parameters of the car renderer.
-        """
-        if "car_length" in params:
-            self.car_length = params["car_length"]
-        if "car_width" in params:
-            self.car_width = params["car_width"]
-        if "wheel_size" in params:
-            self.wheel_size = params["wheel_size"]
-        
-        # Recalculate base rectangle
+    def update_params(self, params: VehicleParameters) -> None:
+        """Update cached geometry when vehicle dimensions change."""
+        new_length = float(params.length)
+        new_width = float(params.width)
+        if not np.isfinite(new_length) or not np.isfinite(new_width):
+            return
+
+        self.car_length = new_length
+        self.car_width = new_width
+
         hl = self.car_length / 2
         hw = self.car_width / 2
         self.base_rect = np.array([

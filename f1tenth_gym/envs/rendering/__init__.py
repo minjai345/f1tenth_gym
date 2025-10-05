@@ -1,13 +1,14 @@
 import pathlib
 import os
-from typing import Any, Optional
+from typing import Optional
 
 from .renderer import RenderSpec, EnvRenderer
+from ..dynamic_models import VehicleParameters
 # from ..track import Track This is due to a circular import
 
 
 def make_renderer(
-    params: dict[str, Any],
+    params: VehicleParameters,
     track: "Track",
     agent_ids: list[str],
     render_mode: Optional[str] = None,
@@ -18,8 +19,8 @@ def make_renderer(
 
     Parameters
     ----------
-    params : dict
-        dictionary of renderer parameters
+    params : VehicleParameters
+        vehicle parameters used for sizing render assets
     track : Track
         track object
     agent_ids : list
