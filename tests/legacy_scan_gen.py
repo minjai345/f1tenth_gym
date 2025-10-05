@@ -1,6 +1,9 @@
 import numpy as np
 
+
 import gymnasium as gym
+
+from f1tenth_gym.envs.env_config import EnvConfig, F1TENTH_VEHICLE_PARAMETERS
 
 
 # init
@@ -23,13 +26,16 @@ all_scans = {}  # map 1: vegas
 for map_name in ["Spielberg", "Monza", "Austin"]:
     print(f"Generating scan data for {map_name}")
 
+    vehicle_params = F1TENTH_VEHICLE_PARAMETERS
+    vehicle_params = vehicle_params.with_updates(**params)
+    cfg = EnvConfig(
+        map_name=map_name,
+        params=vehicle_params,\
+        num_agents=1,
+    )
     env = gym.make(
         "f110_gym:f110-v0",
-        config={
-            "map": map_name,
-            "num_agents": 1,
-            "params": params,
-        },
+        config=cfg,
     )
 
     scan = np.empty((num_test, 1080))

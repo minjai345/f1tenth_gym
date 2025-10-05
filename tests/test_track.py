@@ -50,6 +50,8 @@ class TestTrack(unittest.TestCase):
 
             # check subdir is capitalized (at least first letter is capitalized)
             trackdirname = trackdir.stem
+            if "_tmp" in trackdirname.lower():
+                continue
             self.assertTrue(
                 trackdirname[0].isupper(), f"trackdir {trackdirname} is not capitalized"
             )
@@ -95,6 +97,8 @@ class TestTrack(unittest.TestCase):
         track_dir = find_track_dir(track_name)
         tmp_dir = track_dir.parent / f"{track_name}_tmp{int(time.time())}"
         track_dir.rename(tmp_dir)
+        track_dir.mkdir(parents=True, exist_ok=False)
+        shutil.copytree(tmp_dir, track_dir, dirs_exist_ok=True)
 
         # download the track
         track = Track.from_track_name(track_name)

@@ -1,26 +1,38 @@
 import unittest
+import math
+from dataclasses import fields
+
+import numpy as np
+import gymnasium as gym
+
+from f1tenth_gym.envs.env_config import EnvConfig
+
+
+def with_params(cfg: EnvConfig, **updates: float) -> EnvConfig:
+    return cfg.with_updates(params=cfg.params.with_updates(**updates))
 
 
 class TestUtilities(unittest.TestCase):
-    def test_deep_update(self):
-        """
-        Test that the deep_update function works as expected with nested dictionaries,
-        by comparing two environments with different mu values.
-        """
-        import gymnasium as gym
+    def test_env_config_param_override(self):
+        """Verify parameter overrides through EnvConfig propagate into the simulator."""
+        base_cfg = EnvConfig()
+        custom_cfg = with_params(base_cfg, mu=1.0)
 
-        default_env = gym.make("f1tenth_gym:f1tenth-v0")
-        custom_env = gym.make("f1tenth_gym:f1tenth-v0", config={"params": {"mu": 1.0}})
+        default_env = gym.make("f1tenth_gym:f1tenth-v0", config=base_cfg)
+        custom_env = gym.make("f1tenth_gym:f1tenth-v0", config=custom_cfg)
 
-        # check all parameters are the same except for mu
-        for par in default_env.unwrapped.sim.params:
-            default_val = default_env.unwrapped.sim.params[par]
-            custom_val = custom_env.unwrapped.sim.params[par]
-
-            if par == "mu":
+        default_params = default_env.unwrapped.vehicle_params
+        custom_params = custom_env.unwrapped.vehicle_params
+        for field in fields(default_params):
+            default_val = getattr(default_params, field.name)
+            custom_val = getattr(custom_params, field.name)
+            if field.name == "mu":
                 self.assertNotEqual(default_val, custom_val, "mu should be different")
+            elif isinstance(default_val, (float, np.floating)) and isinstance(custom_val, (float, np.floating)) and math.isnan(default_val) and math.isnan(custom_val):
+                continue
             else:
-                self.assertEqual(default_val, custom_val, f"{par} should be the same")
+                self.assertEqual(default_val, custom_val, f"{field.name} should be the same")
 
         default_env.close()
         custom_env.close()
+

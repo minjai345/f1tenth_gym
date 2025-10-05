@@ -1,26 +1,55 @@
 import unittest
+from dataclasses import replace
+from typing import Callable
 
 import gymnasium as gym
 import numpy as np
-from f1tenth_gym.envs.utils import deep_update
+
+from f1tenth_gym.envs.action import LongitudinalActionType, SteerActionType
+from f1tenth_gym.envs.env_config import EnvConfig
+from f1tenth_gym.envs.observation import ObservationType
+from f1tenth_gym.envs.reset import ResetStrategy
+
+
+def with_params(cfg: EnvConfig, **updates: float) -> EnvConfig:
+    return replace(cfg, params=cfg.params.with_updates(**updates))
+
+
+def with_control_modes(
+    cfg: EnvConfig,
+    *,
+    longitudinal: LongitudinalActionType,
+    steering: SteerActionType,
+) -> EnvConfig:
+    return replace(
+        cfg,
+        control=replace(
+            cfg.control,
+            longitudinal_mode=longitudinal,
+            steering_mode=steering,
+        ),
+    )
+
+
+def with_num_agents(cfg: EnvConfig, num_agents: int) -> EnvConfig:
+    return replace(cfg, num_agents=num_agents)
+
+
+def with_observation(cfg: EnvConfig, obs_type: ObservationType) -> EnvConfig:
+    return replace(cfg, observation=replace(cfg.observation, type=obs_type, features=None))
+
+
+def with_reset_strategy(cfg: EnvConfig, strategy: ResetStrategy) -> EnvConfig:
+    return replace(cfg, reset=replace(cfg.reset, strategy=strategy))
 
 
 class TestEnvInterface(unittest.TestCase):
-    def _make_env(self, config={}):
-        conf = {
-            "map": "Spielberg",
-            "num_agents": 1,
-            "timestep": 0.01,
-            "integrator": "rk4",
-            "control_input": ["speed", "steering_angle"],
-            "params": {"mu": 1.0},
-        }
-        conf = deep_update(conf, config)
-
-        env = gym.make(
-            "f1tenth_gym:f1tenth-v0",
-            config=conf,
-        )
+    @staticmethod
+    def _make_env(modifier: Callable[[EnvConfig], EnvConfig] | None = None):
+        cfg = EnvConfig()
+        if modifier is not None:
+            cfg = modifier(cfg)
+        env = gym.make("f1tenth_gym:f1tenth-v0", config=cfg)
         return env
 
     def test_gymnasium_api(self):
@@ -36,37 +65,23 @@ class TestEnvInterface(unittest.TestCase):
         correctly updated in the simulator and agents.
         """
 
-        # create a base environment and use configure() to change the width
-        config_ext = {"params": {"width": 15.0}}
+        def widen(cfg: EnvConfig) -> EnvConfig:
+            return with_params(cfg, width=15.0)
+
         base_env = self._make_env()
-        base_env.unwrapped.configure(config=config_ext)
+        base_env.unwrapped.configure(config=widen(base_env.unwrapped.env_config))
 
-        # create an extended environment, with the width set on initialization
-        extended_env = self._make_env(config=config_ext)
+        extended_env = self._make_env(modifier=widen)
 
-        # check consistency parameters in config
-        for par in base_env.unwrapped.config["params"]:
-            base_val = base_env.unwrapped.config["params"][par]
-            extended_val = extended_env.unwrapped.config["params"][par]
+        base_params = base_env.unwrapped.vehicle_params
+        extended_params = extended_env.unwrapped.vehicle_params
+        self.assertEqual(base_params, extended_params)
 
-            self.assertEqual(base_val, extended_val, f"{par} should be the same")
+        np.testing.assert_allclose(
+            base_env.unwrapped.sim.params_array,
+            extended_env.unwrapped.sim.params_array,
+        )
 
-        # check consistency in simulator parameters
-        for par in base_env.unwrapped.sim.params:
-            base_val = base_env.unwrapped.sim.params[par]
-            extended_val = extended_env.unwrapped.sim.params[par]
-
-            self.assertEqual(base_val, extended_val, f"{par} should be the same")
-
-        # check consistency in agent parameters
-        for agent, ext_agent in zip(base_env.unwrapped.sim.agents, extended_env.unwrapped.sim.agents):
-            for par in agent.params:
-                base_val = agent.params[par]
-                extended_val = ext_agent.params[par]
-
-                self.assertEqual(base_val, extended_val, f"{par} should be the same")
-
-        # finally, run a simulation and check that the results are the same
         obs0, _ = base_env.reset(options={"poses": np.array([[0.0, 0.0, np.pi / 2]])})
         obs1, _ = extended_env.reset(
             options={"poses": np.array([[0.0, 0.0, np.pi / 2]])}
@@ -108,11 +123,10 @@ class TestEnvInterface(unittest.TestCase):
         action_space_low = base_env.action_space.low
         action_space_high = base_env.action_space.high
 
-        params = base_env.unwrapped.sim.params.copy()
         new_v_max = 5.0
-        params["v_max"] = new_v_max
-
-        base_env.unwrapped.configure(config={"params": params})
+        base_env.unwrapped.configure(
+            config=with_params(base_env.unwrapped.env_config, v_max=new_v_max)
+        )
         new_action_space_low = base_env.action_space.low
         new_action_space_high = base_env.action_space.high
 
@@ -134,40 +148,45 @@ class TestEnvInterface(unittest.TestCase):
         """
         Test that the acceleration action space is correctly configured.
         """
-        base_env = self._make_env(config={"control_input": ["accl", "steering_speed"]})
-        params = base_env.unwrapped.sim.params
-        action_space_low = base_env.action_space.low
-        action_space_high = base_env.action_space.high
+        env = self._make_env(
+            modifier=lambda cfg: with_control_modes(
+                cfg,
+                longitudinal=LongitudinalActionType.ACCL,
+                steering=SteerActionType.STEERING_SPEED,
+            )
+        )
+        params = env.unwrapped.vehicle_params
+        action_space_low = env.action_space.low
+        action_space_high = env.action_space.high
 
         self.assertTrue(
-            (action_space_low[0][0] - params["sv_min"]) < 1e-6,
+            (action_space_low[0][0] - params.sv_min) < 1e-6,
             "lower sv does not match min steering velocity",
         )
         self.assertTrue(
-            (action_space_high[0][0] - params["sv_max"]) < 1e-6,
+            (action_space_high[0][0] - params.sv_max) < 1e-6,
             "upper sv does not match max steering velocity",
         )
         self.assertTrue(
-            (action_space_low[0][1] + params["a_max"]) < 1e-6,
+            (action_space_low[0][1] + params.a_max) < 1e-6,
             "lower acceleration bound does not match a_min",
         )
         self.assertTrue(
-            (action_space_high[0][1] - params["a_max"]) < 1e-6,
+            (action_space_high[0][1] - params.a_max) < 1e-6,
             "upper acceleration bound does not match a_max",
         )
-        base_env.close()
+        env.close()
 
     def test_manual_reset_options_in_synch_vec_env(self):
         """
         Test that the environment can be used in a vectorized environment.
         """
         num_envs, num_agents = 3, 2
-        config = {
-            "num_agents": num_agents,
-            "observation_config": {"type": "kinematic_state"},
-        }
+        cfg = EnvConfig()
+        cfg = with_num_agents(cfg, num_agents)
+        cfg = with_observation(cfg, ObservationType.KINEMATIC_STATE)
         vec_env = gym.make_vec(
-            "f1tenth_gym:f1tenth-v0", asynchronous=False, config=config, num_envs=num_envs
+            "f1tenth_gym:f1tenth-v0", asynchronous=False, config=cfg, num_envs=num_envs
         )
 
         rnd_poses = np.random.random((2, 3))
@@ -194,12 +213,11 @@ class TestEnvInterface(unittest.TestCase):
         Test that the environment can be used in a vectorized environment.
         """
         num_envs, num_agents = 3, 2
-        config = {
-            "num_agents": num_agents,
-            "observation_config": {"type": "kinematic_state"},
-        }
+        cfg = EnvConfig()
+        cfg = with_num_agents(cfg, num_agents)
+        cfg = with_observation(cfg, ObservationType.KINEMATIC_STATE)
         vec_env = gym.make_vec(
-            "f1tenth_gym:f1tenth-v0", vectorization_mode="async", config=config, num_envs=num_envs
+            "f1tenth_gym:f1tenth-v0", vectorization_mode="async", config=cfg, num_envs=num_envs
         )
 
         rnd_poses = np.random.random((2, 3))
@@ -226,13 +244,12 @@ class TestEnvInterface(unittest.TestCase):
         Test that the environment can be used in a vectorized environment without explicit poses.
         """
         num_envs, num_agents = 3, 2
-        config = {
-            "num_agents": num_agents,
-            "observation_config": {"type": "kinematic_state"},
-            "reset_config": {"type": "rl_random_random"},
-        }
+        cfg = EnvConfig()
+        cfg = with_num_agents(cfg, num_agents)
+        cfg = with_observation(cfg, ObservationType.KINEMATIC_STATE)
+        cfg = with_reset_strategy(cfg, ResetStrategy.RL_RANDOM_RANDOM)
         vec_env = gym.make_vec(
-            "f1tenth_gym:f1tenth-v0", vectorization_mode="sync", config=config, num_envs=num_envs,
+            "f1tenth_gym:f1tenth-v0", vectorization_mode="sync", config=cfg, num_envs=num_envs,
         )
 
         obss, infos = vec_env.reset()
@@ -259,7 +276,6 @@ class TestEnvInterface(unittest.TestCase):
                     f"pose of agent {agent_id} in env {ie} should be random, got same {agent_pose} == {agent_pose0}",
                 )
 
-        # test auto reset
         all_dones_once = [False] * num_envs
         all_dones_twice = [False] * num_envs
 
@@ -279,3 +295,4 @@ class TestEnvInterface(unittest.TestCase):
             all(all_dones_twice),
             f"All envs should be done twice, got {all_dones_twice}",
         )
+

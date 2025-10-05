@@ -1,46 +1,41 @@
 import unittest
 
+from typing import Callable
+
 import numpy as np
 
 from f1tenth_gym.envs import F110Env
-from f1tenth_gym.envs.utils import deep_update
+from f1tenth_gym.envs.env_config import EnvConfig
+from f1tenth_gym.envs.observation import ObservationType
 
 
+def with_observation(cfg: EnvConfig, obs_type: ObservationType) -> EnvConfig:
+    return cfg.with_updates(
+        observation=cfg.observation.with_updates(type=obs_type, features=None)
+    )
 class TestRenderer(unittest.TestCase):
     @staticmethod
-    def _make_env(config={}, render_mode=None) -> F110Env:
+    def _make_env(modifier: Callable[[EnvConfig], EnvConfig] | None = None, render_mode=None) -> F110Env:
         import gymnasium as gym
         import f1tenth_gym
 
-        base_config = {
-            "map": "Spielberg",
-            "num_agents": 1,
-            "timestep": 0.01,
-            "integrator": "rk4",
-            "control_input": ["speed", "steering_angle"],
-            "model": "st",
-            "observation_config": {"type": "kinematic_state"},
-            "params": {"mu": 1.0},
-        }
-        config = deep_update(base_config, config)
+        cfg = EnvConfig()
+        if modifier is not None:
+            cfg = modifier(cfg)
 
-        env = gym.make("f1tenth_gym:f1tenth-v0", config=config, render_mode=render_mode,)
+        env = gym.make(
+            "f1tenth_gym:f1tenth-v0",
+            config=cfg,
+            render_mode=render_mode,
+        )
 
         return env
 
-    # def test_human_render(self):
-    #     env = self._make_env(render_mode="human")
-    #     env.reset()
-    #     for _ in range(100):
-    #         action = env.action_space.sample()
-    #         env.step(action)
-    #         env.render()
-    #     env.close()
-
-    #     self.assertTrue(True, "Human render test failed")
-
     def test_rgb_array_render(self):
-        env = self._make_env(render_mode="rgb_array")
+        env = self._make_env(
+            modifier=lambda cfg: with_observation(cfg, ObservationType.KINEMATIC_STATE),
+            render_mode="rgb_array",
+        )
         env.reset()
         for _ in range(100):
             action = env.action_space.sample()
@@ -56,7 +51,10 @@ class TestRenderer(unittest.TestCase):
         self.assertTrue(True, "rgb_array render test failed")
 
     def test_rgb_array_list(self):
-        env = self._make_env(render_mode="rgb_array_list")
+        env = self._make_env(
+            modifier=lambda cfg: with_observation(cfg, ObservationType.KINEMATIC_STATE),
+            render_mode="rgb_array_list",
+        )
         env.reset()
 
         steps = 100
@@ -87,3 +85,6 @@ class TestRenderer(unittest.TestCase):
         )
 
         env.close()
+
+
+
