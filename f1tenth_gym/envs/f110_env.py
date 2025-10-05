@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import copy
-import warnings
-from typing import Any, Mapping
+from typing import Any
 
 import gymnasium as gym
 import numpy as np
@@ -31,8 +30,7 @@ class F110Env(gym.Env):
     OpenAI gym environment for F1TENTH.
 
     Args:
-        config: Optional environment configuration. Supplying mappings is deprecated;
-            pass an `EnvConfig` instead.
+        config: EnvConfig | None: Optional environment configuration.
         render_mode: Rendering mode requested by Gymnasium.
     """
 
@@ -40,22 +38,11 @@ class F110Env(gym.Env):
 
     def __init__(
         self,
-        config: EnvConfig | Mapping[str, Any] | None = None,
+        config: EnvConfig | None = None,
         render_mode=None,
-        **legacy_kwargs: Any,
     ):
         super().__init__()
-
-        if legacy_kwargs:
-            warnings.warn(
-                f"Ignoring unsupported keyword arguments: {sorted(legacy_kwargs.keys())}",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-
-        if isinstance(config, Mapping):
-            raise TypeError("config must be an EnvConfig instance; mapping-based configuration is no longer supported")
-        elif isinstance(config, EnvConfig) or config is None:
+        if isinstance(config, EnvConfig) or config is None:
             resolved_config = config or EnvConfig()
         else:
             raise TypeError("config must be an EnvConfig instance or None")
@@ -370,8 +357,7 @@ class F110Env(gym.Env):
         Update the shared vehicle parameters used by the simulator and renderers.
 
         Args:
-            params (VehicleParameters | Mapping[str, float]): new vehicle parameters or
-                a legacy mapping of parameter overrides.
+            params (VehicleParameters): new vehicle parameters.
             index (int, default=-1): if >= 0 then only update a specific agent's params
 
         Returns:

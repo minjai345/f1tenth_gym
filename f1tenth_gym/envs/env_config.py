@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from enum import IntEnum
-from collections.abc import Mapping
 from typing import Callable, Optional, Type, TypeVar, TYPE_CHECKING, Any
 
 import numpy as np
@@ -101,7 +100,7 @@ class EnvConfig:
         seed: int = 12345,
         map_name: "Track | str" = "Spielberg",
         map_scale: float = 1.0,
-        params: VehicleParameters | Mapping[str, object] = F1TENTH_VEHICLE_PARAMETERS,
+        params: VehicleParameters = F1TENTH_VEHICLE_PARAMETERS,
         num_agents: int = 1,
         ego_index: int = 0,
         control: ControlConfig | None = None,
@@ -114,7 +113,7 @@ class EnvConfig:
         **overrides: object,
     ) -> None:
         if not isinstance(params, VehicleParameters):
-            raise TypeError("params must be a VehicleParameters instance or mapping")
+            raise TypeError("params must be a VehicleParameters instance")
 
         control_cfg = control or ControlConfig()
         simulation_cfg = simulation or SimulationConfig()

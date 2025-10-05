@@ -8,7 +8,6 @@ import math
 import warnings
 from dataclasses import astuple, dataclass, fields, replace
 from enum import IntEnum
-from typing import Mapping
 
 import numpy as np
 
@@ -26,7 +25,6 @@ __all__ = [
     "get_f1tenth_vehicle_parameters",
     "get_f1fifth_vehicle_parameters",
     "get_fullscale_vehicle_parameters",
-    "vehicle_parameters_from_mapping",
     "pid_steer",
     "pid_accl",
 ]
@@ -135,38 +133,8 @@ class VehicleParameters:
         return values[: model.parameter_count()].copy()
 
 _ALL_PARAMETER_FIELDS = tuple(field.name for field in fields(VehicleParameters))
-_FIELD_NAMES = set(_ALL_PARAMETER_FIELDS)
 _BASE_PARAMETER_COUNT = 18
 _MB_PARAMETER_COUNT = len(_ALL_PARAMETER_FIELDS)
-
-
-def vehicle_parameters_from_mapping(
-    raw: Mapping[str, object],
-    *,
-    base: VehicleParameters | None = None,
-) -> VehicleParameters:
-    if isinstance(raw, VehicleParameters):
-        return raw
-
-    base_params = base or VehicleParameters()
-    values: dict[str, float] = {name: getattr(base_params, name) for name in _ALL_PARAMETER_FIELDS}
-
-    unknown = [key for key in raw.keys() if key not in _FIELD_NAMES]
-    if unknown:
-        raise KeyError(f"Vehicle parameter dictionary has unknown keys: {unknown}")
-
-    for key, value in raw.items():
-        try:
-            values[key] = float(value)
-        except (TypeError, ValueError) as exc:
-            raise TypeError(f"Vehicle parameter '{key}' must be numeric, got {value!r}") from exc
-
-    result = VehicleParameters(**values)
-    missing = [name for name in _ALL_PARAMETER_FIELDS[:_BASE_PARAMETER_COUNT] if math.isnan(getattr(result, name))]
-    if missing:
-        raise KeyError(f"Vehicle parameter dictionary missing required keys: {missing}")
-    return result
-
 
 F1TENTH_VEHICLE_PARAMETERS = VehicleParameters(
     mu=1.0489,
