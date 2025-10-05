@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Mapping
 
 __all__ = ["LiDARConfig"]
@@ -10,11 +10,11 @@ __all__ = ["LiDARConfig"]
 class LiDARConfig:
     """Configuration for the simulated LiDAR sensor."""
 
-    enabled: bool
-    num_beams: int
-    field_of_view: float
-    maximum_range: float
-    noise_std: float
+    enabled: bool = True
+    num_beams: int = 1080
+    field_of_view: float = 4.712389
+    maximum_range: float = 30.0
+    noise_std: float = 0.01
 
     def as_mapping(self) -> dict[str, float]:
         """Return a mutable mapping representation of the configuration."""
@@ -26,6 +26,9 @@ class LiDARConfig:
             "lidar_range": self.maximum_range,
             "lidar_noise_std": self.noise_std,
         }
+
+    def with_updates(self, **changes: object) -> "LiDARConfig":
+        return replace(self, **changes)
 
     @classmethod
     def from_mapping(cls, raw: Mapping[str, object]) -> "LiDARConfig":

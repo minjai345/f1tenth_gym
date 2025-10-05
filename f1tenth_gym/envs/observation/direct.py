@@ -7,7 +7,6 @@ from .base import Observation, scan_space
 
 __all__ = ["DirectObservation"]
 
-
 class DirectObservation(Observation):
     def space(self) -> gym.Space:
         sim = self._sim
@@ -38,7 +37,7 @@ class DirectObservation(Observation):
                     low=0.0, high=large_num, shape=(), dtype=np.float32
                 ),
             }
-            if self.env.unwrapped.config["compute_frenet"]:
+            if self.env.unwrapped.compute_frenet:
                 agent_dict["frenet_pose"] = gym.spaces.Box(
                     low=-large_num, high=large_num, shape=(3,), dtype=np.float32
                 )
@@ -61,7 +60,7 @@ class DirectObservation(Observation):
                 "lap_count": np.array(self.env.unwrapped.lap_counts[idx], dtype=np.float32),
                 "sim_time": np.array(self.env.unwrapped.sim_time, dtype=np.float32),
             }
-            if self.env.unwrapped.config["compute_frenet"]:
+            if self.env.unwrapped.compute_frenet:
                 agent_obs["frenet_pose"] = state.frenet[idx].astype(np.float32)
             obs[agent_id] = agent_obs
         return obs

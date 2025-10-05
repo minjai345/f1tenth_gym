@@ -1,117 +1,88 @@
+from __future__ import annotations
+
 import copy
+import warnings
+from typing import Any, Mapping
+
 import gymnasium as gym
 import numpy as np
 
 from .dynamic_models import (
-    DynamicModel,
-    F1TENTH_VEHICLE_PARAMETERS,
+    VehicleParameters,
 )
-from .simulator import SimpleSimulator
+from .simulator import F110Simulator
 from .env_config import (
     EnvConfig,
     LoopCounterMode,
-    build_env_config,
 )
-from .integrators import IntegratorType, integrator_from_type
+from .integrators import integrator_from_type
 from .action import (
     get_action_space,
     from_single_to_multi_action_space,
-    LongitudinalActionType,
-    SteerActionType,
 )
-from .observation.observation import ObservationType
-from .reset import ResetStrategy
-from .collision_models import CollisionCheckMode
-from .observation.observation import observation_factory
-from .rendering import make_renderer
+from .observation import ObservationType, observation_factory
 from .reset import make_reset_fn
+from .rendering import make_renderer
 from .track import Track
-from .utils import deep_update
+
 
 class F110Env(gym.Env):
     """
-    OpenAI gym environment for F1TENTH
-
-    Env should be initialized by calling gym.make('f110_gym:f110-v0', **kwargs)
+    OpenAI gym environment for F1TENTH.
 
     Args:
-        kwargs:
-            seed (int, default=12345): seed for random state and reproducibility
-            map (str, default='vegas'): name of the map used for the environment.
-
-            params (dict, default={'mu': 1.0489, 'C_Sf':, 'C_Sr':, 'lf': 0.15875, 'lr': 0.17145, 'h': 0.074, 'm': 3.74, 'I': 0.04712, 's_min': -0.4189, 's_max': 0.4189, 'sv_min': -3.2, 'sv_max': 3.2, 'v_switch':7.319, 'a_max': 9.51, 'v_min':-5.0, 'v_max': 20.0, 'width': 0.31, 'length': 0.58}): dictionary of vehicle parameters.
-            mu: surface friction coefficient
-            C_Sf: Cornering stiffness coefficient, front
-            C_Sr: Cornering stiffness coefficient, rear
-            lf: Distance from center of gravity to front axle
-            lr: Distance from center of gravity to rear axle
-            h: Height of center of gravity
-            m: Total mass of the vehicle
-            I: Moment of inertial of the entire vehicle about the z axis
-            s_min: Minimum steering angle constraint
-            s_max: Maximum steering angle constraint
-            sv_min: Minimum steering velocity constraint
-            sv_max: Maximum steering velocity constraint
-            v_switch: Switching velocity (velocity at which the acceleration is no longer able to create wheel spin)
-            a_max: Maximum longitudinal acceleration
-            v_min: Minimum longitudinal velocity
-            v_max: Maximum longitudinal velocity
-            width: width of the vehicle in meters
-            length: length of the vehicle in meters
-
-            num_agents (int, default=2): number of agents in the environment
-
-            timestep (float, default=0.01): physics timestep
-
-            ego_idx (int, default=0): ego's index in list of agents
+        config: Optional environment configuration. Supplying mappings is deprecated;
+            pass an `EnvConfig` instead.
+        render_mode: Rendering mode requested by Gymnasium.
     """
 
-    # NOTE: change matadata with default rendering-modes, add definition of render_fps
     metadata = {"render_modes": ["human", "human_fast", "rgb_array", "unlimited"], "render_fps": 100}
 
-    def __init__(self, config: dict = None, render_mode=None, **kwargs):
+    def __init__(
+        self,
+        config: EnvConfig | Mapping[str, Any] | None = None,
+        render_mode=None,
+        **legacy_kwargs: Any,
+    ):
         super().__init__()
 
-        # Configuration
-        self.config = self.default_config()
-        self.configure(config)
+        if legacy_kwargs:
+            warnings.warn(
+                f"Ignoring unsupported keyword arguments: {sorted(legacy_kwargs.keys())}",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
-        # env states
-        self.poses_x = []
-        self.poses_y = []
-        self.poses_theta = []
-        
+        if isinstance(config, Mapping):
+            raise TypeError("config must be an EnvConfig instance; mapping-based configuration is no longer supported")
+        elif isinstance(config, EnvConfig) or config is None:
+            resolved_config = config or EnvConfig()
+        else:
+            raise TypeError("config must be an EnvConfig instance or None")
 
-        # loop completion
+        self.env_config = resolved_config
+        self._apply_env_config()
+
         self.near_start = True
         self.num_toggles = 0
 
-        # finish line info
-        if self.loop_counter_mode is LoopCounterMode.FRENET_BASED:
-            self.config["loop_counting_method"] = LoopCounterMode.FRENET_BASED
-            self.agents_prev_s = [None] * self.num_agents
-            self.lap_times = np.zeros((self.num_agents, ))
-            self.lap_times_finish = np.zeros((self.num_agents, ))
-            self.lap_counts = np.zeros((self.num_agents, ))
-            self.sim_time = 0.0
-        if type(self.map) is not Track:
-            if '/' in self.map or '\\' in self.map:
-                self.track = Track.from_track_path(
-                    self.map,
-                    track_scale=self.config["map_scale"],
-                )
-            else:
-                self.track = Track.from_track_name(
-                    self.map,
-                    track_scale=self.config["map_scale"],
-                )  # load track in gym env for convenience
+        self.agents_prev_s = [None] * self.num_agents
+        self.lap_times = np.zeros((self.num_agents,))
+        self.lap_times_finish = np.zeros((self.num_agents,))
+        self.lap_counts = np.zeros((self.num_agents,))
+        self.sim_time = 0.0
+
+        if isinstance(self.map, Track):
+            self.track = self.map
         else:
-            self.track = self.map  # use the track directly
-        
-        # initiate simulator
-        self.sim = SimpleSimulator(
+            if "/" in self.map or "\\" in self.map:
+                self.track = Track.from_track_path(self.map, track_scale=self.map_scale)
+            else:
+                self.track = Track.from_track_name(self.map, track_scale=self.map_scale)
+
+        self.sim = F110Simulator(
             env_config=self.env_config,
-            params=self.params,
+            vehicle_params=self.vehicle_params,
             model=self.model,
             dynamics_fn=self.model.f_dynamics,
             integrator_fn=self.integrator_fn,
@@ -121,187 +92,110 @@ class F110Env(gym.Env):
             seed=self.seed,
         )
         if isinstance(self.track, Track):
-            self.sim.set_map(self.track, self.config["map_scale"])
+            self.sim.set_map(self.track, self.map_scale)
 
-        # observations
         self.agent_ids = [f"agent_{i}" for i in range(self.num_agents)]
 
-        assert (
-            "type" in self.observation_config
-        ), "observation_config must contain 'type' key"
-        self.observation_type = observation_factory(env=self, **self.observation_config)
+        obs_kwargs: dict[str, Any] = {"type": self.observation_cfg.type}
+        if self.observation_cfg.features is not None:
+            obs_kwargs["features"] = self.observation_cfg.features
+        self.observation_type = observation_factory(env=self, **obs_kwargs)
         self.observation_space = self.observation_type.space()
         self.render_obs_type = observation_factory(env=self, type=ObservationType.DIRECT)
         self.render_obs = None
 
-        # action space
         single_action_space = get_action_space(
             self.longitudinal_action_type,
             self.steer_action_type,
-            self.params
+            self.vehicle_params,
         )
-        self.action_space = from_single_to_multi_action_space(
-            single_action_space, self.num_agents
-        )
+        self.action_space = from_single_to_multi_action_space(single_action_space, self.num_agents)
 
-        # reset modes
         self.reset_fn = make_reset_fn(
-            **self.config["reset_config"], track=self.track, num_agents=self.num_agents
+            track=self.track,
+            num_agents=self.num_agents,
+            type=self.reset_cfg.strategy,
         )
-
-        # stateful observations for rendering
-        # add choice of colors (same, random, ...)
         self.render_mode = render_mode
-
-        # match render_fps to integration timestep
         self.metadata["render_fps"] = int(1.0 / self.timestep)
         if self.render_mode == "human_fast":
-            self.metadata["render_fps"] *= 10  # boost fps by 10x
+            self.metadata["render_fps"] *= 10
         elif self.render_mode == "unlimited":
-            self.metadata["render_fps"] = float('inf')
-        if self.config["enable_rendering"]:
+            self.metadata["render_fps"] = float("inf")
+
+        self.renderer = None
+        self.render_spec = None
+        if self.render_enabled:
             self.renderer, self.render_spec = make_renderer(
-                params=self.params,
+                params=self.vehicle_params,
                 track=self.track,
                 agent_ids=self.agent_ids,
                 render_mode=render_mode,
                 render_fps=self.metadata["render_fps"],
             )
-            
-    @classmethod
-    def default_config(cls) -> dict:
-        """
-        Default environment configuration.
 
-        Can be overloaded in environment implementations, or by calling configure().
+    def configure(self, config: EnvConfig | None) -> None:
+        if config is None:
+            return
+        if isinstance(config, EnvConfig):
+            new_config = config
+        else:
+            raise TypeError("config must be an EnvConfig or None")
 
-        Args:
-            None
-
-        Returns:
-            a configuration dict
-        """
-        return {
-            "seed": 12345,
-            "map": "Spielberg",
-            "map_scale": 1.0,
-            "params": F1TENTH_VEHICLE_PARAMETERS.as_mapping(),
-            "num_agents": 1,
-            "timestep": 0.01,
-            "integrator_timestep": 0.01,
-            "ego_idx": 0,
-            "max_laps": 1,  # 'inf' for infinite laps, or a positive integer
-            "integrator": IntegratorType.RK4,
-            "model": DynamicModel.ST,  # DynamicModel.KS, DynamicModel.ST, DynamicModel.MB
-            "control_input": [
-                LongitudinalActionType.SPEED,
-                SteerActionType.STEERING_ANGLE,
-            ],  # default speed + steering angle control
-            "observation_config": {"type": ObservationType.DIRECT},
-            "reset_config": {"type": ResetStrategy.RL_GRID_STATIC},
-            "enable_rendering": True,
-            "enable_scan": True, # NOTE no lidar scan and collision if False
-            "lidar_fov": 4.712389,
-            "lidar_num_beams": 1080,
-            "lidar_range": 30.0,
-            "lidar_noise_std": 0.01,
-            "steer_delay_buffer_size": 0,
-            "compute_frenet": True,
-            "collision_check_method": CollisionCheckMode.LIDAR_SCAN,  # CollisionCheckMode.LIDAR_SCAN or CollisionCheckMode.BOUNDING_BOX
-            "loop_counting_method": LoopCounterMode.FRENET_BASED, # "toggle", "frenet_based", "winding_angle"
-        }
-    
-    def configure(self, config: dict) -> None:
-        if config:
-            self.config = deep_update(self.config, config)
-
-        self._sync_env_config()
+        self.env_config = new_config
+        self._apply_env_config()
 
         if hasattr(self, "sim"):
-            self.sim.update_params(self.params)
-
+            self.sim.update_params(self.vehicle_params)
         if hasattr(self, "renderer") and self.renderer is not None:
-            # if renderer exists, update the params
-            self.renderer.update_params(self.params)
-
+            self.renderer.update_params(self.vehicle_params)
         if hasattr(self, "action_space"):
-            # if some parameters changed, recompute action space
             single_action_space = get_action_space(
                 self.longitudinal_action_type,
                 self.steer_action_type,
-                self.params
+                self.vehicle_params,
             )
-            self.action_space = from_single_to_multi_action_space(
-                single_action_space, self.num_agents
+            self.action_space = from_single_to_multi_action_space(single_action_space, self.num_agents)
+        if hasattr(self, "reset_fn") and hasattr(self, "track"):
+            self.reset_fn = make_reset_fn(
+                track=self.track,
+                num_agents=self.num_agents,
+                type=self.reset_cfg.strategy,
             )
-
-    def _sync_env_config(self) -> None:
-        "Rebuild typed config view from the legacy config dictionary."
-        self.env_config: EnvConfig = build_env_config(self.config)
-        self._apply_env_config()
 
     def _apply_env_config(self) -> None:
-        "Apply values from env_config to legacy attributes."
-        self.config["compute_frenet"] = self.env_config.simulation.compute_frenet_frame
+        cfg = self.env_config
 
-        self.seed = self.env_config.seed
-        self.map = self.env_config.map_name
-        param_mapping = self.env_config.params.as_mapping()
-        self.config["params"] = param_mapping
-        self.params = param_mapping
-        self.vehicle_params = self.env_config.params
-        self.num_agents = self.env_config.num_agents
-        self.timestep = self.env_config.simulation.timestep
-        self.ego_idx = self.env_config.ego_index
-        self.max_laps = self.env_config.simulation.max_laps
+        self.seed = cfg.seed
+        self.map = cfg.map_name
+        self.map_scale = cfg.map_scale
 
-        self.integrator_fn = integrator_from_type(
-            self.env_config.simulation.integrator
-        )
+        self.vehicle_params = cfg.params
 
-        self.model = self.env_config.simulation.dynamics_model
+        self.num_agents = cfg.num_agents
+        self.ego_idx = cfg.ego_index
 
-        observation_dict = dict(self.config.get("observation_config", {"type": ObservationType.ORIGINAL}))
-        observation_dict["type"] = self.env_config.observation.type
-        if self.env_config.observation.features is not None:
-            observation_dict["features"] = tuple(self.env_config.observation.features)
-        else:
-            observation_dict.pop("features", None)
-        self.config["observation_config"] = observation_dict
-        self.observation_config = dict(observation_dict)
-        self.observation_cfg = self.env_config.observation
-        self.reset_cfg = self.env_config.reset
-        self.lidar_cfg = self.env_config.lidar
-        self.control_cfg = self.env_config.control
-        self.simulation_cfg = self.env_config.simulation
-        self.loop_counter_mode = self.env_config.simulation.loop_counter
-        self.collision_check_mode = self.env_config.collision_check
-        self.render_enabled = self.env_config.render_enabled
+        self.control_cfg = cfg.control
+        self.simulation_cfg = cfg.simulation
+        self.observation_cfg = cfg.observation
+        self.reset_cfg = cfg.reset
+        self.lidar_cfg = cfg.lidar
 
         self.longitudinal_action_type = self.control_cfg.longitudinal_mode
         self.steer_action_type = self.control_cfg.steering_mode
         self.steer_delay_steps = self.control_cfg.steer_delay_steps
 
-        self.config["integrator"] = self.env_config.simulation.integrator
-        self.config["model"] = self.env_config.simulation.dynamics_model
-        self.config["control_input"] = [
-            self.control_cfg.longitudinal_mode,
-            self.control_cfg.steering_mode,
-        ]
-        self.config["enable_rendering"] = self.render_enabled
-        self.config["enable_scan"] = self.lidar_cfg.enabled
-        self.config["lidar_num_beams"] = self.lidar_cfg.num_beams
-        self.config["lidar_fov"] = self.lidar_cfg.field_of_view
-        self.config["lidar_range"] = self.lidar_cfg.maximum_range
-        self.config["lidar_noise_std"] = self.lidar_cfg.noise_std
-        self.config["steer_delay_buffer_size"] = self.steer_delay_steps
+        self.timestep = self.simulation_cfg.timestep
+        self.integrator_fn = integrator_from_type(self.simulation_cfg.integrator)
+        self.model = self.simulation_cfg.dynamics_model
+        self.loop_counter_mode = self.simulation_cfg.loop_counter
+        self.compute_frenet = self.simulation_cfg.compute_frenet_frame
+        self.max_laps = self.simulation_cfg.max_laps
 
-        reset_config = dict(self.config.get("reset_config", {}))
-        reset_config["type"] = self.reset_cfg.strategy
-        self.config["reset_config"] = reset_config
-        self.config["collision_check_method"] = self.collision_check_mode
-        self.config["loop_counting_method"] = self.loop_counter_mode
-        self.config["max_laps"] = "inf" if self.max_laps is None else self.max_laps
+        self.collision_check_mode = cfg.collision_check
+        self.render_enabled = cfg.render_enabled
+        self.collision_check_mode = cfg.collision_check
+        self.render_enabled = cfg.render_enabled
 
     def _check_done(self):
         """
@@ -309,7 +203,7 @@ class F110Env(gym.Env):
         """
         if (
             self.loop_counter_mode is LoopCounterMode.FRENET_BASED
-            and self.config["compute_frenet"]
+            and self.compute_frenet
             and self.track is not None
         ):
             s_frame_max = self.track.centerline.spline.s_frame_max
@@ -354,8 +248,8 @@ class F110Env(gym.Env):
 
         # observation
         obs = self.observation_type.observe()
-        if self.config["enable_rendering"]:
-            if self.observation_config["type"] == "direct":
+        if self.render_enabled:
+            if self.observation_cfg.type is ObservationType.DIRECT:
                 # for direct observation, also update the render_obs
                 self.render_obs = copy.deepcopy(obs)
             else:
@@ -367,9 +261,7 @@ class F110Env(gym.Env):
         self.sim_time = self.sim.state.sim_time
 
         truncated = False
-        info = {"lap_times": self.lap_times, 
-                "lap_counts": self.lap_counts,
-                "sim_time": self.sim_time}
+        info = {"lap_times": self.lap_times, "lap_counts": self.lap_counts, "sim_time": self.sim_time}
 
         return obs, reward, done, truncated, info
 
@@ -418,12 +310,12 @@ class F110Env(gym.Env):
             assert isinstance(poses, np.ndarray) and poses.shape == (
                 self.num_agents,
                 self.model.state_dim,
-            ), f"Initial full state must be a numpy array of shape (num_agents, {self.model.state_dim})"       
+            ), f"Initial full state must be a numpy array of shape (num_agents, {self.model.state_dim})"
         else:
             raise ValueError(
                 "Invalid reset option."
             )
-        
+
         # call reset to simulator
         self.sim.reset(poses, option=option)
 
@@ -460,20 +352,26 @@ class F110Env(gym.Env):
             None
         """
         if "/" in map_name or "\\" in map_name:
-            track = Track.from_track_path(map_name, track_scale=self.config["map_scale"])
+            track = Track.from_track_path(map_name, track_scale=self.map_scale)
         else:
-            track = Track.from_track_name(map_name, track_scale=self.config["map_scale"])
+            track = Track.from_track_name(map_name, track_scale=self.map_scale)
         self.map = map_name
         self.track = track
-        self.sim.set_map(track, self.config["map_scale"])
-
+        self.env_config = self.env_config.with_updates(map_name=map_name)
+        self.sim.set_map(track, self.map_scale)
+        self.reset_fn = make_reset_fn(
+            track=self.track,
+            num_agents=self.num_agents,
+            type=self.reset_cfg.strategy,
+        )
 
     def update_params(self, params, index=-1):
         """
-        Updates the parameters used by simulation for vehicles
+        Update the shared vehicle parameters used by the simulator and renderers.
 
         Args:
-            params (dict): dictionary of parameters
+            params (VehicleParameters | Mapping[str, float]): new vehicle parameters or
+                a legacy mapping of parameter overrides.
             index (int, default=-1): if >= 0 then only update a specific agent's params
 
         Returns:
@@ -483,8 +381,26 @@ class F110Env(gym.Env):
             raise NotImplementedError(
                 "Per-agent parameter updates are not supported in the simplified simulator"
             )
-        self.params.update(params)
-        self.sim.update_params(self.params)
+        if isinstance(params, VehicleParameters):
+            vehicle_params = params
+        else:
+            raise TypeError("params must be a VehicleParameters instance")
+
+        self.vehicle_params = vehicle_params
+        self.env_config = self.env_config.with_updates(params=vehicle_params)
+
+        self.sim.update_params(self.vehicle_params)
+        if hasattr(self, "renderer") and self.renderer is not None:
+            self.renderer.update_params(self.vehicle_params)
+        if hasattr(self, "action_space"):
+            single_action_space = get_action_space(
+                self.longitudinal_action_type,
+                self.steer_action_type,
+                self.vehicle_params,
+            )
+            self.action_space = from_single_to_multi_action_space(
+                single_action_space, self.num_agents
+            )            
 
     def add_render_callback(self, callback_func):
         """
@@ -493,12 +409,13 @@ class F110Env(gym.Env):
         Args:
             callback_func (function (EnvRenderer) -> None): custom function to called during render()
         """
-        if self.config["enable_rendering"]:
+        if self.render_enabled and self.renderer is not None:
             self.renderer.add_renderer_callback(callback_func)
 
     def render(self, mode="human"):
         """
-        Renders the environment with pyglet. Use mouse scroll in the window to zoom in/out, use mouse click drag to pan. Shows the agents, the map, current fps (bottom left corner), and the race information near as text.
+        Renders the environment with pyglet. Use mouse scroll in the window to zoom in/out, use mouse click drag to pan.
+        Shows the agents, the map, current fps (bottom left corner), and the race information near as text.
 
         Args:
             mode (str, default='human'): rendering mode, currently supports:
@@ -510,7 +427,7 @@ class F110Env(gym.Env):
         """
         # NOTE: separate render (manage render-mode) from render_frame (actual rendering with pyglet)
 
-        if self.render_mode not in self.metadata["render_modes"] or not self.config["enable_rendering"]:
+        if self.render_mode not in self.metadata["render_modes"] or not self.render_enabled:
             return
 
         self.renderer.update(obs=self.render_obs)
@@ -523,9 +440,3 @@ class F110Env(gym.Env):
         if self.renderer is not None:
             self.renderer.close()
         super().close()
-
-
-
-
-
-
