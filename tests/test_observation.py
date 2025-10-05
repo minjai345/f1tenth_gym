@@ -1,46 +1,24 @@
 import unittest
 
-from typing import Callable
-
 import gymnasium as gym
 import numpy as np
 from gymnasium.spaces import Box
 
-from f1tenth_gym.envs import F110Env
-from f1tenth_gym.envs.env_config import EnvConfig
+from f1tenth_gym.envs.env_config import EnvConfig, ObservationConfig
 from f1tenth_gym.envs.observation import (
     observation_factory,
     ObservationType,
     ObservationFeature,
 )
 
-
-def with_observation(
-    cfg: EnvConfig,
-    *,
-    obs_type: ObservationType,
-    features: tuple[ObservationFeature, ...] | None = None,
-) -> EnvConfig:
-    return cfg.with_updates(
-        observation=cfg.observation.with_updates(type=obs_type, features=features)
-    )
-
-
 class TestObservationInterface(unittest.TestCase):
-    @staticmethod
-    def _make_env(modifier: Callable[[EnvConfig], EnvConfig] | None = None) -> F110Env:
-        cfg = EnvConfig()
-        if modifier is not None:
-            cfg = modifier(cfg)
-        env = gym.make("f1tenth_gym:f1tenth-v0", config=cfg)
-        return env
-
     def test_original_obs_space(self):
         """
         Check backward compatibility with the original observation space.
         """
-        env = self._make_env(
-            modifier=lambda cfg: with_observation(cfg, obs_type=ObservationType.ORIGINAL)
+        env = gym.make(
+            "f1tenth_gym:f1tenth-v0", 
+            config=EnvConfig(observation=ObservationConfig(type=ObservationType.ORIGINAL))
         )
 
         obs, _ = env.reset()
@@ -95,11 +73,10 @@ class TestObservationInterface(unittest.TestCase):
             ObservationFeature.POSE_THETA,
         )
 
-        env = self._make_env(
-            modifier=lambda cfg: with_observation(
-                cfg,
-                obs_type=ObservationType.FEATURES,
-                features=features,
+        env = gym.make(
+            "f1tenth_gym:f1tenth-v0", 
+            config=EnvConfig(
+                observation=ObservationConfig(type=ObservationType.FEATURES, features=features)
             )
         )
 
@@ -134,7 +111,7 @@ class TestObservationInterface(unittest.TestCase):
         """
         Check that an error is raised when a nonexistent observation type is requested.
         """
-        env = self._make_env()
+        env = gym.make("f1tenth_gym:f1tenth-v0", config=EnvConfig())
         with self.assertRaises(TypeError):
             observation_factory(env, vehicle_id=0, type="nonexistent_obs_type")
         env.close()
@@ -143,9 +120,10 @@ class TestObservationInterface(unittest.TestCase):
         """
         Check the kinematic state observation space contains the correct features [x, y, theta, v].
         """
-        env = self._make_env(
-            modifier=lambda cfg: with_observation(
-                cfg, obs_type=ObservationType.KINEMATIC_STATE
+        env = gym.make(
+            "f1tenth_gym:f1tenth-v0", 
+            config=EnvConfig(
+                observation=ObservationConfig(type=ObservationType.KINEMATIC_STATE)
             )
         )
 
@@ -188,9 +166,10 @@ class TestObservationInterface(unittest.TestCase):
         """
         Check the dynamic state observation space contains the correct features.
         """
-        env = self._make_env(
-            modifier=lambda cfg: with_observation(
-                cfg, obs_type=ObservationType.DYNAMIC_STATE
+        env = gym.make(
+            "f1tenth_gym:f1tenth-v0", 
+            config=EnvConfig(
+                observation=ObservationConfig(type=ObservationType.DYNAMIC_STATE)
             )
         )
 
@@ -247,7 +226,7 @@ class TestObservationInterface(unittest.TestCase):
             ObservationType.ORIGINAL,
         ]
 
-        env = self._make_env()
+        env = gym.make("f1tenth_gym:f1tenth-v0", config=EnvConfig())
         env.reset()
 
         for obs_type in obs_types:
@@ -272,10 +251,9 @@ class TestObservationInterface(unittest.TestCase):
         ]
 
         for obs_type in obs_types:
-            env = self._make_env(
-                modifier=lambda cfg, obs_type=obs_type: with_observation(
-                    cfg, obs_type=obs_type
-                )
+            env = gym.make(
+                "f1tenth_gym:f1tenth-v0", 
+                config=EnvConfig(observation=ObservationConfig(type=obs_type))
             )
             check_env(
                 env.unwrapped,

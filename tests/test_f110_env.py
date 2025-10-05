@@ -1,61 +1,19 @@
 import unittest
-from dataclasses import replace
-from typing import Callable
 
 import gymnasium as gym
 import numpy as np
 
 from f1tenth_gym.envs.action import LongitudinalActionType, SteerActionType
-from f1tenth_gym.envs.env_config import EnvConfig
+from f1tenth_gym.envs.env_config import ControlConfig, EnvConfig, ObservationConfig, ResetConfig
 from f1tenth_gym.envs.observation import ObservationType
 from f1tenth_gym.envs.reset import ResetStrategy
 
 
-def with_params(cfg: EnvConfig, **updates: float) -> EnvConfig:
-    return replace(cfg, params=cfg.params.with_updates(**updates))
-
-
-def with_control_modes(
-    cfg: EnvConfig,
-    *,
-    longitudinal: LongitudinalActionType,
-    steering: SteerActionType,
-) -> EnvConfig:
-    return replace(
-        cfg,
-        control=replace(
-            cfg.control,
-            longitudinal_mode=longitudinal,
-            steering_mode=steering,
-        ),
-    )
-
-
-def with_num_agents(cfg: EnvConfig, num_agents: int) -> EnvConfig:
-    return replace(cfg, num_agents=num_agents)
-
-
-def with_observation(cfg: EnvConfig, obs_type: ObservationType) -> EnvConfig:
-    return replace(cfg, observation=replace(cfg.observation, type=obs_type, features=None))
-
-
-def with_reset_strategy(cfg: EnvConfig, strategy: ResetStrategy) -> EnvConfig:
-    return replace(cfg, reset=replace(cfg.reset, strategy=strategy))
-
-
 class TestEnvInterface(unittest.TestCase):
-    @staticmethod
-    def _make_env(modifier: Callable[[EnvConfig], EnvConfig] | None = None):
-        cfg = EnvConfig()
-        if modifier is not None:
-            cfg = modifier(cfg)
-        env = gym.make("f1tenth_gym:f1tenth-v0", config=cfg)
-        return env
-
     def test_gymnasium_api(self):
         from gymnasium.utils.env_checker import check_env
 
-        env = self._make_env()
+        env =  gym.make("f1tenth_gym:f1tenth-v0", config=EnvConfig())
         check_env(env.unwrapped, skip_render_check=True)
         env.close()
 
@@ -66,12 +24,12 @@ class TestEnvInterface(unittest.TestCase):
         """
 
         def widen(cfg: EnvConfig) -> EnvConfig:
-            return with_params(cfg, width=15.0)
+            return cfg.with_updates(params=cfg.params.with_updates(width=15.0))
 
-        base_env = self._make_env()
+        base_env = gym.make("f1tenth_gym:f1tenth-v0", config=EnvConfig())
         base_env.unwrapped.configure(config=widen(base_env.unwrapped.env_config))
 
-        extended_env = self._make_env(modifier=widen)
+        extended_env = gym.make("f1tenth_gym:f1tenth-v0", config=widen(EnvConfig()))
 
         base_params = base_env.unwrapped.vehicle_params
         extended_params = extended_env.unwrapped.vehicle_params
@@ -119,14 +77,15 @@ class TestEnvInterface(unittest.TestCase):
         Try to change the upper bound of the action space, and check that the
         action space is correctly updated.
         """
-        base_env = self._make_env()
+        base_env = gym.make("f1tenth_gym:f1tenth-v0", config=EnvConfig())
         action_space_low = base_env.action_space.low
         action_space_high = base_env.action_space.high
 
         new_v_max = 5.0
-        base_env.unwrapped.configure(
-            config=with_params(base_env.unwrapped.env_config, v_max=new_v_max)
+        new_config = base_env.unwrapped.env_config.with_updates(
+            params=base_env.unwrapped.env_config.params.with_updates(v_max=new_v_max)
         )
+        base_env.unwrapped.configure(config=new_config)
         new_action_space_low = base_env.action_space.low
         new_action_space_high = base_env.action_space.high
 
@@ -148,11 +107,12 @@ class TestEnvInterface(unittest.TestCase):
         """
         Test that the acceleration action space is correctly configured.
         """
-        env = self._make_env(
-            modifier=lambda cfg: with_control_modes(
-                cfg,
-                longitudinal=LongitudinalActionType.ACCL,
-                steering=SteerActionType.STEERING_SPEED,
+        env = gym.make("f1tenth_gym:f1tenth-v0",
+            config=EnvConfig(
+                control=ControlConfig(
+                    longitudinal_mode=LongitudinalActionType.ACCL,
+                    steering_mode=SteerActionType.STEERING_SPEED,
+                )
             )
         )
         params = env.unwrapped.vehicle_params
@@ -182,11 +142,12 @@ class TestEnvInterface(unittest.TestCase):
         Test that the environment can be used in a vectorized environment.
         """
         num_envs, num_agents = 3, 2
-        cfg = EnvConfig()
-        cfg = with_num_agents(cfg, num_agents)
-        cfg = with_observation(cfg, ObservationType.KINEMATIC_STATE)
+        cfg = EnvConfig(
+            num_agents=num_agents,
+            observation=ObservationConfig(type=ObservationType.KINEMATIC_STATE),
+        )
         vec_env = gym.make_vec(
-            "f1tenth_gym:f1tenth-v0", asynchronous=False, config=cfg, num_envs=num_envs
+            "f1tenth_gym:f1tenth-v0", vectorization_mode="sync", config=cfg, num_envs=num_envs
         )
 
         rnd_poses = np.random.random((2, 3))
@@ -213,9 +174,10 @@ class TestEnvInterface(unittest.TestCase):
         Test that the environment can be used in a vectorized environment.
         """
         num_envs, num_agents = 3, 2
-        cfg = EnvConfig()
-        cfg = with_num_agents(cfg, num_agents)
-        cfg = with_observation(cfg, ObservationType.KINEMATIC_STATE)
+        cfg = EnvConfig(
+            num_agents=num_agents,
+            observation=ObservationConfig(type=ObservationType.KINEMATIC_STATE),
+        )
         vec_env = gym.make_vec(
             "f1tenth_gym:f1tenth-v0", vectorization_mode="async", config=cfg, num_envs=num_envs
         )
@@ -244,10 +206,11 @@ class TestEnvInterface(unittest.TestCase):
         Test that the environment can be used in a vectorized environment without explicit poses.
         """
         num_envs, num_agents = 3, 2
-        cfg = EnvConfig()
-        cfg = with_num_agents(cfg, num_agents)
-        cfg = with_observation(cfg, ObservationType.KINEMATIC_STATE)
-        cfg = with_reset_strategy(cfg, ResetStrategy.RL_RANDOM_RANDOM)
+        cfg = EnvConfig(
+            num_agents=num_agents,
+            observation=ObservationConfig(type=ObservationType.KINEMATIC_STATE),
+            reset=ResetConfig(strategy=ResetStrategy.RL_RANDOM_RANDOM),
+        )
         vec_env = gym.make_vec(
             "f1tenth_gym:f1tenth-v0", vectorization_mode="sync", config=cfg, num_envs=num_envs,
         )

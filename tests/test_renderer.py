@@ -1,39 +1,16 @@
 import unittest
 
-from typing import Callable
-
 import numpy as np
-
-from f1tenth_gym.envs import F110Env
-from f1tenth_gym.envs.env_config import EnvConfig
+from f1tenth_gym.envs.env_config import EnvConfig, ObservationConfig
 from f1tenth_gym.envs.observation import ObservationType
+import gymnasium as gym
 
 
-def with_observation(cfg: EnvConfig, obs_type: ObservationType) -> EnvConfig:
-    return cfg.with_updates(
-        observation=cfg.observation.with_updates(type=obs_type, features=None)
-    )
 class TestRenderer(unittest.TestCase):
-    @staticmethod
-    def _make_env(modifier: Callable[[EnvConfig], EnvConfig] | None = None, render_mode=None) -> F110Env:
-        import gymnasium as gym
-        import f1tenth_gym
-
-        cfg = EnvConfig()
-        if modifier is not None:
-            cfg = modifier(cfg)
-
-        env = gym.make(
-            "f1tenth_gym:f1tenth-v0",
-            config=cfg,
-            render_mode=render_mode,
-        )
-
-        return env
-
     def test_rgb_array_render(self):
-        env = self._make_env(
-            modifier=lambda cfg: with_observation(cfg, ObservationType.KINEMATIC_STATE),
+        env =  gym.make(
+            "f1tenth_gym:f1tenth-v0",
+            config=EnvConfig(observation=ObservationConfig(type=ObservationType.KINEMATIC_STATE)),
             render_mode="rgb_array",
         )
         env.reset()
@@ -51,8 +28,9 @@ class TestRenderer(unittest.TestCase):
         self.assertTrue(True, "rgb_array render test failed")
 
     def test_rgb_array_list(self):
-        env = self._make_env(
-            modifier=lambda cfg: with_observation(cfg, ObservationType.KINEMATIC_STATE),
+        env = gym.make(
+            "f1tenth_gym:f1tenth-v0",
+            config=EnvConfig(observation=ObservationConfig(type=ObservationType.KINEMATIC_STATE)),
             render_mode="rgb_array_list",
         )
         env.reset()
@@ -85,6 +63,5 @@ class TestRenderer(unittest.TestCase):
         )
 
         env.close()
-
 
 
