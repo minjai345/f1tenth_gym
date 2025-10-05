@@ -9,80 +9,25 @@ from .base import Observation, scan_space
 __all__ = ["FeaturesObservation"]
 
 
-_FEATURE_SPACE_BUILDERS: dict[ObservationFeature, callable] = {}
+def _scalar_box(low: float, high: float) -> gym.Space:
+    return gym.spaces.Box(low=low, high=high, shape=(), dtype=np.float32)
 
 
-def _register(feature: ObservationFeature):
-    def decorator(builder):
-        _FEATURE_SPACE_BUILDERS[feature] = builder
-        return builder
-
-    return decorator
-
-
-@_register(ObservationFeature.SCAN)
-def _(sim, large_num):
-    return scan_space(sim)
-
-
-@_register(ObservationFeature.POSE_X)
-def _(sim, large_num):
-    return gym.spaces.Box(low=-large_num, high=large_num, shape=(), dtype=np.float32)
-
-
-@_register(ObservationFeature.POSE_Y)
-def _(sim, large_num):
-    return gym.spaces.Box(low=-large_num, high=large_num, shape=(), dtype=np.float32)
-
-
-@_register(ObservationFeature.POSE_THETA)
-def _(sim, large_num):
-    return gym.spaces.Box(low=-large_num, high=large_num, shape=(), dtype=np.float32)
-
-
-@_register(ObservationFeature.LINEAR_VEL_X)
-def _(sim, large_num):
-    return gym.spaces.Box(low=-large_num, high=large_num, shape=(), dtype=np.float32)
-
-
-@_register(ObservationFeature.LINEAR_VEL_Y)
-def _(sim, large_num):
-    return gym.spaces.Box(low=-large_num, high=large_num, shape=(), dtype=np.float32)
-
-
-@_register(ObservationFeature.LINEAR_VEL_MAGNITUDE)
-def _(sim, large_num):
-    return gym.spaces.Box(low=-large_num, high=large_num, shape=(), dtype=np.float32)
-
-
-@_register(ObservationFeature.ANGULAR_VEL_Z)
-def _(sim, large_num):
-    return gym.spaces.Box(low=-large_num, high=large_num, shape=(), dtype=np.float32)
-
-
-@_register(ObservationFeature.STEER_ANGLE)
-def _(sim, large_num):
-    return gym.spaces.Box(low=-large_num, high=large_num, shape=(), dtype=np.float32)
-
-
-@_register(ObservationFeature.SLIP_ANGLE)
-def _(sim, large_num):
-    return gym.spaces.Box(low=-large_num, high=large_num, shape=(), dtype=np.float32)
-
-
-@_register(ObservationFeature.COLLISION)
-def _(sim, large_num):
-    return gym.spaces.Box(low=0.0, high=1.0, shape=(), dtype=np.float32)
-
-
-@_register(ObservationFeature.LAP_TIME)
-def _(sim, large_num):
-    return gym.spaces.Box(low=0.0, high=large_num, shape=(), dtype=np.float32)
-
-
-@_register(ObservationFeature.LAP_COUNT)
-def _(sim, large_num):
-    return gym.spaces.Box(low=0.0, high=large_num, shape=(), dtype=np.float32)
+_FEATURE_SPACE_BUILDERS: dict[ObservationFeature, Callable[[object, float], gym.Space]] = {
+    ObservationFeature.SCAN: lambda sim, limit: scan_space(sim),
+    ObservationFeature.POSE_X: lambda sim, limit: _scalar_box(-limit, limit),
+    ObservationFeature.POSE_Y: lambda sim, limit: _scalar_box(-limit, limit),
+    ObservationFeature.POSE_THETA: lambda sim, limit: _scalar_box(-limit, limit),
+    ObservationFeature.LINEAR_VEL_X: lambda sim, limit: _scalar_box(-limit, limit),
+    ObservationFeature.LINEAR_VEL_Y: lambda sim, limit: _scalar_box(-limit, limit),
+    ObservationFeature.LINEAR_VEL_MAGNITUDE: lambda sim, limit: _scalar_box(-limit, limit),
+    ObservationFeature.ANGULAR_VEL_Z: lambda sim, limit: _scalar_box(-limit, limit),
+    ObservationFeature.STEER_ANGLE: lambda sim, limit: _scalar_box(-limit, limit),
+    ObservationFeature.SLIP_ANGLE: lambda sim, limit: _scalar_box(-limit, limit),
+    ObservationFeature.COLLISION: lambda sim, limit: _scalar_box(0.0, 1.0),
+    ObservationFeature.LAP_TIME: lambda sim, limit: _scalar_box(0.0, limit),
+    ObservationFeature.LAP_COUNT: lambda sim, limit: _scalar_box(0.0, limit),
+}
 
 
 class FeaturesObservation(Observation):
@@ -130,11 +75,12 @@ class FeaturesObservation(Observation):
                 ObservationFeature.LAP_TIME: self.env.unwrapped.lap_times[idx],
                 ObservationFeature.LAP_COUNT: self.env.unwrapped.lap_counts[idx],
             }
-            agent_obs = {
-                feature.value: np.array(feature_values[feature], dtype=np.float32)
-                if feature is not ObservationFeature.SCAN
-                else feature_values[feature].astype(np.float32)
-                for feature in self.features
-            }
+            agent_obs = {}
+            for feature in self.features:
+                value = feature_values[feature]
+                if feature is ObservationFeature.SCAN:
+                    agent_obs[feature.value] = value.astype(np.float32)
+                else:
+                    agent_obs[feature.value] = np.array(value, dtype=np.float32)
             obs[agent_id] = agent_obs
         return obs
