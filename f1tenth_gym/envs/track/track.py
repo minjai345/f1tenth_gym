@@ -15,7 +15,6 @@ from . import Raceline
 from .cubic_spline import CubicSplineND
 from .utils import find_track_dir
 
-
 @dataclass
 class TrackSpec(YamlDataClassConfig):
     name: Optional[str]
@@ -25,7 +24,6 @@ class TrackSpec(YamlDataClassConfig):
     negate: int
     occupied_thresh: float
     free_thresh: float
-
 
 @dataclass
 class Track:

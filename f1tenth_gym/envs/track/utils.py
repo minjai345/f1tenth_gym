@@ -6,7 +6,6 @@ import numpy as np
 import requests
 from numba import njit
 
-
 def find_track_dir(track_name: str) -> pathlib.Path:
     """
     Find the directory of the track map corresponding to the given track name.
@@ -51,7 +50,6 @@ def find_track_dir(track_name: str) -> pathlib.Path:
             return subdir
 
     raise FileNotFoundError(f"no mapdir matching {track_name} in {[map_dir]}")
-
 
 @njit(fastmath=False, cache=True)
 def nearest_point_on_trajectory(point: np.ndarray, trajectory: np.ndarray) -> tuple:

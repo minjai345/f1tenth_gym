@@ -8,7 +8,6 @@ import pandas as pd
 from ..rendering import EnvRenderer
 from .cubic_spline import CubicSplineND
 
-
 class Raceline:
     """
     Raceline object.

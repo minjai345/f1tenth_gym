@@ -11,7 +11,6 @@ if TYPE_CHECKING:
 
 __all__ = ["Observation", "scan_space"]
 
-
 class Observation(ABC):
     """Base class for environment observations."""
 
@@ -33,10 +32,6 @@ class Observation(ABC):
     @property
     def _state(self):
         return self._sim.state
-
-
-AccumulationArray = np.ndarray
-
 
 def scan_space(sim: "F110Simulator") -> gym.spaces.Box:
     """Build a scan space that adapts to the active LiDAR configuration."""

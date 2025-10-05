@@ -2,15 +2,11 @@
 Cubic Spline interpolation using scipy.interpolate
 Provides utilities for position, curvature, yaw, and arclength calculation
 """
-
-import math
-
 import numpy as np
 from scipy import interpolate
-from typing import Union, Optional
+from typing import Optional
 import scipy.optimize as so
 from f1tenth_gym.envs.track.utils import nearest_point_on_trajectory
-from numba import njit
 
 class CubicSplineND:
     """
