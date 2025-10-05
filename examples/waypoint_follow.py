@@ -4,9 +4,12 @@ from typing import Tuple
 import gymnasium as gym
 import numpy as np
 from numba import njit
-import pathlib
 
-from f1tenth_gym.envs.f110_env import F110Env
+from f1tenth_gym.envs.integrators import IntegratorType
+from f1tenth_gym.envs.dynamic_models import DynamicModel, F1TENTH_VEHICLE_PARAMETERS
+from f1tenth_gym.envs.observation import ObservationType
+from f1tenth_gym.envs.reset import ResetStrategy
+from f1tenth_gym.envs.env_config import EnvConfig
 
 """
 Planner Helpers
@@ -296,7 +299,6 @@ class PurePursuitPlanner:
 
         return speed, steering_angle
 
-
 def main():
     """
     main entry point
@@ -309,28 +311,26 @@ def main():
         "vgain": 1.,
     }
     num_agents = 1
+    cfg = EnvConfig(
+        map_name="Spielberg",
+        num_agents=num_agents,
+        map_scale=1.0,
+        timestep=0.01,
+        integrator_timestep=0.01,
+        integrator=IntegratorType.RK4,
+        dynamics_model=DynamicModel.KS,
+        compute_frenet_frame=False,
+        max_laps=5,
+        steer_delay_steps=1,
+        observation_type=ObservationType.KINEMATIC_STATE,
+        reset_strategy=ResetStrategy.RL_RANDOM_STATIC,
+        lidar_enabled=False,
+        lidar_num_beams=270,
+    )
+
     env = gym.make(
         "f1tenth_gym:f1tenth-v0",
-        config={
-            "map": "Spielberg",
-            "num_agents": num_agents,
-            "timestep": 0.01,
-            "integrator_timestep": 0.01,
-            "integrator": "rk4",
-            "control_input": ["speed", "steering_angle"],
-            "model": 'ks', # "ks", "st", "mb"
-            "observation_config": {"type": "kinematic_state"},
-            "params": F110Env.f1tenth_vehicle_params(),
-            # "params": F110Env.fullscale_vehicle_params(),
-            "reset_config": {"type": "rl_random_static"},
-            "map_scale": 1.0,
-            "enable_rendering": 1,
-            "enable_scan": 0,
-            "lidar_num_beams": 270,
-            "compute_frenet": 0,
-            "max_laps": 5,  # 'inf' for infinite laps, or a positive integer
-            "steer_delay_buffer_size": 1,  # 0 for no delay, >0 for delay
-        },
+        config=cfg,
         render_mode="unlimited", # "human", "human_fast", "unlimited"
     )
     track = env.unwrapped.track
@@ -338,10 +338,8 @@ def main():
     planner = PurePursuitPlanner(
         track=track,
         wb=(
-            F110Env.f1tenth_vehicle_params()["lf"]
-            + F110Env.f1tenth_vehicle_params()["lr"]
-            # F110Env.fullscale_vehicle_params()["lf"]
-            # + F110Env.fullscale_vehicle_params()["lr"]
+            F1TENTH_VEHICLE_PARAMETERS.lf
+            + F1TENTH_VEHICLE_PARAMETERS.lr
         ),
     )
 
@@ -358,7 +356,6 @@ def main():
 
     laptime = 0.0
     start = time.time()
-    times = []
     while not done:
         action = env.action_space.sample()
         for i, agent_id in enumerate(obs.keys()):
@@ -372,16 +369,9 @@ def main():
             action[i] = np.array([steer, speed])
         obs, step_reward, done, truncated, info = env.step(action)
         laptime += step_reward
-        frame = env.render()
+        env.render()
 
     print("Sim elapsed time:", laptime, "Real elapsed time:", time.time() - start)
 
 if __name__ == "__main__":
     main()
-# %%
-# work = {
-#     "mass": 3.463388126201571,
-#     "lf": 0.15597534362552312,
-#     "tlad": 0.82461887897713965 * 10,
-#     "vgain": 1,
-# }

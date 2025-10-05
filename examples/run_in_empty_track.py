@@ -1,8 +1,13 @@
 import numpy as np
 
+
 from waypoint_follow import PurePursuitPlanner
 from f1tenth_gym.envs.track import Track
+from f1tenth_gym.envs.observation import ObservationType
+from f1tenth_gym.envs.reset import ResetStrategy
+from f1tenth_gym.envs.env_config import EnvConfig
 import gymnasium as gym
+
 
 
 def main():
@@ -10,32 +15,29 @@ def main():
     Demonstrate the creation of an empty map with a custom reference line.
     This is useful for testing and debugging control algorithms on standard maneuvers.
     """
-    # create sinusoidal reference line with custom velocity profile
-    xs = np.linspace(0, 100, 200)
-    ys = np.sin(xs / 2.0) * 5.0
-    velxs = 4.0 * (1 + (np.abs(np.cos(xs / 2.0))))
 
-    # create track from custom reference line
+    xs = np.linspace(0, 10, num=100)
+    ys = np.zeros_like(xs)
+    velxs = np.ones_like(xs) * 3.0
+
     track = Track.from_refline(x=xs, y=ys, velx=velxs)
 
-    # env and planner
+    cfg = EnvConfig(
+        map_name=track,
+        observation_type=ObservationType.KINEMATIC_STATE,
+        reset_strategy=ResetStrategy.RL_RANDOM_STATIC,
+    )
+
     env = gym.make(
         "f1tenth_gym:f1tenth-v0",
-        config={
-            "map": track,
-            "num_agents": 1,
-            "observation_config": {"type": "kinematic_state"},
-            "reset_config": {"type": "rl_random_static"},
-        },
+        config=cfg,
         render_mode="unlimited",
     )
     planner = PurePursuitPlanner(track=track, wb=0.17145 + 0.15875)
 
-    # rendering callbacks
     env.unwrapped.add_render_callback(track.raceline.render_waypoints)
     env.unwrapped.add_render_callback(planner.render_lookahead_point)
 
-    # simulation
     obs, info = env.reset()
     done = False
     env.render()
@@ -56,5 +58,8 @@ def main():
     env.close()
 
 
+
 if __name__ == "__main__":
     main()
+
+

@@ -3,9 +3,10 @@ import gymnasium as gym
 import gymnasium.wrappers
 import numpy as np
 
-from f1tenth_gym.envs.f110_env import F110Env
+from f1tenth_gym.envs.observation import ObservationType
+from f1tenth_gym.envs.reset import ResetStrategy
+from f1tenth_gym.envs.env_config import EnvConfig
 from waypoint_follow import PurePursuitPlanner
-
 
 def main():
     work = {
@@ -15,19 +16,14 @@ def main():
         "vgain": 1,
     }
 
+    cfg = EnvConfig(
+        observation_type=ObservationType.KINEMATIC_STATE,
+        reset_strategy=ResetStrategy.RL_RANDOM_STATIC,
+    )
+
     env = gym.make(
         "f1tenth_gym:f1tenth-v0",
-        config={
-            "map": "Spielberg",
-            "num_agents": 1,
-            "timestep": 0.01,
-            "integrator": "rk4",
-            "control_input": ["speed", "steering_angle"],
-            "model": "st",
-            "params": F110Env.f1tenth_vehicle_params(),
-            "observation_config": {"type": "kinematic_state"},
-            "reset_config": {"type": "rl_random_static"},
-        },
+        config=cfg,
         render_mode="rgb_array",
     )
     env = gymnasium.wrappers.RecordVideo(env, f"video_{time.time()}")
