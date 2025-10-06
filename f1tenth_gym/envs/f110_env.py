@@ -162,11 +162,11 @@ class F110Env(gym.Env):
         self.num_agents = cfg.num_agents
         self.ego_idx = cfg.ego_index
 
-        self.control_cfg = cfg.control
-        self.simulation_cfg = cfg.simulation
-        self.observation_cfg = cfg.observation
-        self.reset_cfg = cfg.reset
-        self.lidar_cfg = cfg.lidar
+        self.control_cfg = cfg.control_config
+        self.simulation_cfg = cfg.simulation_config
+        self.observation_cfg = cfg.observation_config
+        self.reset_cfg = cfg.reset_config
+        self.lidar_cfg = cfg.lidar_config
 
         self.longitudinal_action_type = self.control_cfg.longitudinal_mode
         self.steer_action_type = self.control_cfg.steering_mode

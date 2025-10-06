@@ -14,7 +14,7 @@ from .dynamic_models import (
     F1TENTH_VEHICLE_PARAMETERS,
 )
 from .action import LongitudinalActionType, SteerActionType
-from .observation import ObservationFeature, ObservationType
+from .observation import ObservationType
 from .reset import ResetStrategy
 from .lidar import LiDARConfig
 from .collision_models import CollisionCheckMode
@@ -64,7 +64,7 @@ class SimulationConfig:
 @dataclass(frozen=True, slots=True)
 class ObservationConfig:
     type: ObservationType = ObservationType.DIRECT
-    features: Optional[tuple[ObservationFeature, ...]] = None
+    features: Optional[tuple[str, ...]] = None
 
     def with_updates(self, **changes: Any) -> "ObservationConfig":
         return replace(self, **changes)
@@ -104,23 +104,23 @@ class EnvConfig:
         object.__setattr__(self, "ego_index", int(self.ego_index))
         object.__setattr__(self, "render_enabled", bool(self.render_enabled))
 
-        control_cfg = self.control
+        control_cfg = self.control_config
         if not isinstance(control_cfg, ControlConfig):
             raise TypeError("control must be a ControlConfig instance")
 
-        simulation_cfg = self.simulation
+        simulation_cfg = self.simulation_config
         if not isinstance(simulation_cfg, SimulationConfig):
             raise TypeError("simulation must be a SimulationConfig instance")
 
-        observation_cfg = self.observation
+        observation_cfg = self.observation_config
         if not isinstance(observation_cfg, ObservationConfig):
             raise TypeError("observation must be an ObservationConfig instance")
 
-        reset_cfg = self.reset
+        reset_cfg = self.reset_config
         if not isinstance(reset_cfg, ResetConfig):
             raise TypeError("reset must be a ResetConfig instance")
 
-        lidar_cfg = self.lidar
+        lidar_cfg = self.lidar_config
         if not isinstance(lidar_cfg, LiDARConfig):
             raise TypeError("lidar must be a LiDARConfig instance")
 
@@ -130,11 +130,11 @@ class EnvConfig:
         ):
             simulation_cfg = simulation_cfg.with_updates(compute_frenet_frame=True)
 
-        object.__setattr__(self, "control", control_cfg)
-        object.__setattr__(self, "simulation", simulation_cfg)
-        object.__setattr__(self, "observation", observation_cfg)
-        object.__setattr__(self, "reset", reset_cfg)
-        object.__setattr__(self, "lidar", lidar_cfg)
+        object.__setattr__(self, "control_config", control_cfg)
+        object.__setattr__(self, "simulation_config", simulation_cfg)
+        object.__setattr__(self, "observation_config", observation_cfg)
+        object.__setattr__(self, "reset_config", reset_cfg)
+        object.__setattr__(self, "lidar_config", lidar_cfg)
 
     def with_updates(self, **changes: Any) -> "EnvConfig":
         return replace(self, **changes)

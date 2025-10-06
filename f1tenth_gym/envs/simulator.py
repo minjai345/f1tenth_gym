@@ -60,8 +60,8 @@ class F110Simulator:
 
         self.num_agents = env_config.num_agents
         self.ego_idx = env_config.ego_index
-        self.time_step = env_config.simulation.timestep
-        self.integrator_dt = env_config.simulation.integrator_timestep
+        self.time_step = env_config.simulation_config.timestep
+        self.integrator_dt = env_config.simulation_config.integrator_timestep
         if not np.isclose(self.time_step % self.integrator_dt, 0.0):
             raise ValueError("time_step must be an integer multiple of integrator_timestep")
         self.substeps = max(1, int(round(self.time_step / self.integrator_dt)))
@@ -78,19 +78,19 @@ class F110Simulator:
         initial_state = self.model.get_initial_state(params=self.params_array)
         self.state_dim = initial_state.shape[0]
         self.control_dim = self.model.control_dim
-        scan_size = env_config.lidar.num_beams if env_config.lidar.enabled else 1
+        scan_size = env_config.lidar_config.num_beams if env_config.lidar_config.enabled else 1
         self.state = SimulationState.allocate(
             num_agents=self.num_agents,
             state_dim=self.state_dim,
             scan_size=scan_size,
             control_dim=self.control_dim,
-            delay_steps=env_config.control.steer_delay_steps,
+            delay_steps=env_config.control_config.steer_delay_steps,
         )
 
         # Static helpers
         self.standard_state_fn = self.model.get_standardized_state_fn()
-        self.scan_enabled = env_config.lidar.enabled
-        self.scan_max_range = env_config.lidar.maximum_range
+        self.scan_enabled = env_config.lidar_config.enabled
+        self.scan_max_range = env_config.lidar_config.maximum_range
 
         self.scan_sims: list[ScanSimulator2D] = []
         self.scan_rngs: list[np.random.Generator] = []
@@ -99,10 +99,10 @@ class F110Simulator:
             for agent_index in range(self.num_agents):
                 rng = np.random.default_rng(seed + agent_index)
                 simulator = ScanSimulator2D(
-                    env_config.lidar.num_beams,
-                    env_config.lidar.field_of_view,
-                    std_dev=env_config.lidar.noise_std,
-                    max_range=env_config.lidar.maximum_range,
+                    env_config.lidar_config.num_beams,
+                    env_config.lidar_config.field_of_view,
+                    std_dev=env_config.lidar_config.noise_std,
+                    max_range=env_config.lidar_config.maximum_range,
                 )
                 if self.track is not None:
                     simulator.set_map(self.track, env_config.map_scale)
@@ -159,7 +159,7 @@ class F110Simulator:
                 [self.state.state[i, 0], self.state.state[i, 1], self.state.state[i, 4]],
                 dtype=np.float32,
             )
-            if self.config.simulation.compute_frenet_frame and self.track is not None:
+            if self.config.simulation_config.compute_frenet_frame and self.track is not None:
                 self.state.frenet[i] = np.array(
                     self.track.cartesian_to_frenet(
                         float(self.state.state[i, 0]),
@@ -206,7 +206,7 @@ class F110Simulator:
                 [state[0], state[1], state[4]], dtype=np.float32
             )
 
-        if self.config.simulation.compute_frenet_frame and self.track is not None:
+        if self.config.simulation_config.compute_frenet_frame and self.track is not None:
             for agent_idx in range(self.num_agents):
                 pose = self.state.poses[agent_idx]
                 self.state.frenet[agent_idx] = np.array(
@@ -238,7 +238,7 @@ class F110Simulator:
 
     @property
     def scan_num_beams(self) -> int:
-        return self.config.lidar.num_beams if self.scan_enabled else 0
+        return self.config.lidar_config.num_beams if self.scan_enabled else 0
 
     # ------------------------------------------------------------------
     # Internal helpers
