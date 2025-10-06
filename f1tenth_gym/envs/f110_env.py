@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+from pathlib import Path
 from typing import Any
 
 import gymnasium as gym
@@ -48,107 +49,23 @@ class F110Env(gym.Env):
             raise TypeError("config must be an EnvConfig instance")
 
         self.env_config = resolved_config
-        self._apply_env_config()
-
-        self.near_start = True
-        self.num_toggles = 0
-
-        self.agents_prev_s = [None] * self.num_agents
-        self.lap_times = np.zeros((self.num_agents,))
-        self.lap_times_finish = np.zeros((self.num_agents,))
-        self.lap_counts = np.zeros((self.num_agents,))
-        self.sim_time = 0.0
-
-        if isinstance(self.map, Track):
-            self.track = self.map
-        else:
-            if "/" in self.map or "\\" in self.map:
-                self.track = Track.from_track_path(self.map, track_scale=self.map_scale)
-            else:
-                self.track = Track.from_track_name(self.map, track_scale=self.map_scale)
-
-        self.sim = F110Simulator(
-            env_config=self.env_config,
-            vehicle_params=self.vehicle_params,
-            model=self.model,
-            dynamics_fn=self.model.f_dynamics,
-            integrator_fn=self.integrator_fn,
-            longitudinal_type=self.longitudinal_action_type,
-            steering_type=self.steer_action_type,
-            track=self.track,
-            seed=self.seed,
-        )
-        if isinstance(self.track, Track):
-            self.sim.set_map(self.track, self.map_scale)
-
-        self.agent_ids = [f"agent_{i}" for i in range(self.num_agents)]
-
-        obs_kwargs: dict[str, Any] = {"type": self.observation_cfg.type}
-        if self.observation_cfg.features is not None:
-            obs_kwargs["features"] = self.observation_cfg.features
-        self.observation_type = observation_factory(env=self, **obs_kwargs)
-        self.observation_space = self.observation_type.space()
-        self.render_obs_type = observation_factory(env=self, type=ObservationType.DIRECT)
-        self.render_obs = None
-
-        single_action_space = get_action_space(
-            self.longitudinal_action_type,
-            self.steer_action_type,
-            self.vehicle_params,
-        )
-        self.action_space = from_single_to_multi_action_space(single_action_space, self.num_agents)
-
-        self.reset_fn = make_reset_fn(
-            track=self.track,
-            num_agents=self.num_agents,
-            type=self.reset_cfg.strategy,
-        )
         self.render_mode = render_mode
-        self.metadata["render_fps"] = int(1.0 / self.timestep)
-        if self.render_mode == "human_fast":
-            self.metadata["render_fps"] *= 10
-        elif self.render_mode == "unlimited":
-            self.metadata["render_fps"] = float("inf")
-
         self.renderer = None
         self.render_spec = None
-        if self.render_enabled:
-            self.renderer, self.render_spec = make_renderer(
-                params=self.vehicle_params,
-                track=self.track,
-                agent_ids=self.agent_ids,
-                render_mode=render_mode,
-                render_fps=self.metadata["render_fps"],
-            )
+        self.render_obs = None
+
+        self._apply_env_config()
+        self._initialize_components()
 
     def configure(self, config: EnvConfig | None) -> None:
         if config is None:
             return
-        if isinstance(config, EnvConfig):
-            new_config = config
-        else:
+        if not isinstance(config, EnvConfig):
             raise TypeError("config must be an EnvConfig or None")
 
-        self.env_config = new_config
+        self.env_config = config
         self._apply_env_config()
-
-        if hasattr(self, "sim"):
-            self.sim.update_params(self.vehicle_params)
-        if hasattr(self, "renderer") and self.renderer is not None:
-            self.renderer.update_params(self.vehicle_params)
-        if hasattr(self, "action_space"):
-            single_action_space = get_action_space(
-                self.longitudinal_action_type,
-                self.steer_action_type,
-                self.vehicle_params,
-            )
-            self.action_space = from_single_to_multi_action_space(single_action_space, self.num_agents)
-        if hasattr(self, "reset_fn") and hasattr(self, "track"):
-            self.reset_fn = make_reset_fn(
-                track=self.track,
-                num_agents=self.num_agents,
-                type=self.reset_cfg.strategy,
-            )
+        self._initialize_components()
 
     def _apply_env_config(self) -> None:
         cfg = self.env_config
@@ -181,9 +98,89 @@ class F110Env(gym.Env):
 
         self.collision_check_mode = cfg.collision_check
         self.render_enabled = cfg.render_enabled
-        self.collision_check_mode = cfg.collision_check
-        self.render_enabled = cfg.render_enabled
 
+    def _resolve_track(self) -> Track:
+        map_source = self.map
+        if isinstance(map_source, Track):
+            return map_source
+        if isinstance(map_source, (str, Path)):
+            map_str = str(map_source)
+            map_path = Path(map_source)
+            if "/" in map_str or "\\" in map_str or map_path.suffix:
+                return Track.from_track_path(map_path, track_scale=self.map_scale)
+            return Track.from_track_name(map_str, track_scale=self.map_scale)
+        raise TypeError("map must be a Track instance or a path/name string")
+
+    def _initialize_components(self) -> None:
+        if self.renderer is not None:
+            self.renderer.close()
+        self.renderer = None
+        self.render_spec = None
+
+        self.track = self._resolve_track()
+
+        self.sim = F110Simulator(
+            env_config=self.env_config,
+            vehicle_params=self.vehicle_params,
+            model=self.model,
+            dynamics_fn=self.model.f_dynamics,
+            integrator_fn=self.integrator_fn,
+            longitudinal_type=self.longitudinal_action_type,
+            steering_type=self.steer_action_type,
+            track=self.track,
+            seed=self.seed,
+        )
+        if isinstance(self.track, Track):
+            self.sim.set_map(self.track, self.map_scale)
+
+        self.agent_ids = [f"agent_{i}" for i in range(self.num_agents)]
+
+        self.agents_prev_s = [None] * self.num_agents
+        self.lap_times = np.zeros((self.num_agents,))
+        self.lap_times_finish = np.zeros((self.num_agents,))
+        self.lap_counts = np.zeros((self.num_agents,))
+        self.sim_time = 0.0
+
+        obs_kwargs: dict[str, Any] = {"type": self.observation_cfg.type}
+        if self.observation_cfg.features is not None:
+            obs_kwargs["features"] = self.observation_cfg.features
+        self.observation_type = observation_factory(env=self, **obs_kwargs)
+        self.observation_space = self.observation_type.space()
+        self.render_obs_type = observation_factory(env=self, type=ObservationType.DIRECT)
+        self.render_obs = None
+
+        single_action_space = get_action_space(
+            self.longitudinal_action_type,
+            self.steer_action_type,
+            self.vehicle_params,
+        )
+        self.action_space = from_single_to_multi_action_space(
+            single_action_space, self.num_agents
+        )
+
+        self.reset_fn = make_reset_fn(
+            track=self.track,
+            num_agents=self.num_agents,
+            type=self.reset_cfg.strategy,
+        )
+
+        base_fps = int(1.0 / self.timestep) if self.timestep > 0 else 0
+        if self.render_mode == "human_fast":
+            render_fps = base_fps * 10
+        elif self.render_mode == "unlimited":
+            render_fps = float("inf")
+        else:
+            render_fps = base_fps
+        self.metadata["render_fps"] = render_fps
+
+        if self.render_enabled:
+            self.renderer, self.render_spec = make_renderer(
+                params=self.vehicle_params,
+                track=self.track,
+                agent_ids=self.agent_ids,
+                render_mode=self.render_mode,
+                render_fps=self.metadata["render_fps"],
+            )
     def _check_done(self):
         """
         Check if the current rollout is done
@@ -270,14 +267,11 @@ class F110Env(gym.Env):
             np.random.seed(seed=seed)
         super().reset(seed=seed)
 
-        # reset counters and data members
         self.sim_time = 0.0
         self.agents_prev_s = [None] * self.num_agents
-        self.num_toggles = 0
-        self.near_start = True
-        self.near_starts = np.array([True] * self.num_agents)
-        self.toggle_list = np.zeros((self.num_agents,))
-        # states after reset
+        self.lap_counts.fill(0.0)
+        self.lap_times.fill(0.0)
+        self.lap_times_finish.fill(0.0)
         if options is not None and "poses" in options:
             poses = options["poses"]
             option = "pose"
@@ -288,27 +282,26 @@ class F110Env(gym.Env):
             poses = self.reset_fn.sample()
             option = "pose"
 
-        if option == 'pose':
+
+        if option == "pose":
             assert isinstance(poses, np.ndarray) and poses.shape == (
                 self.num_agents,
                 3,
             ), "Initial poses must be a numpy array of shape (num_agents, 3)"
-        elif option == 'state':
+        elif option == "state":
             assert isinstance(poses, np.ndarray) and poses.shape == (
                 self.num_agents,
                 self.model.state_dim,
             ), f"Initial full state must be a numpy array of shape (num_agents, {self.model.state_dim})"
         else:
-            raise ValueError(
-                "Invalid reset option."
-            )
+            raise ValueError("Invalid reset option.")
 
-        # call reset to simulator
         self.sim.reset(poses, option=option)
 
-        self.start_xs = poses[:, 0]
-        self.start_ys = poses[:, 1]
-        self.start_thetas = poses[:, 2]
+        sim_poses = self.sim.state.poses
+        self.start_xs = sim_poses[:, 0]
+        self.start_ys = sim_poses[:, 1]
+        self.start_thetas = sim_poses[:, 2]
         self.start_rot = np.array(
             [
                 [
@@ -322,35 +315,29 @@ class F110Env(gym.Env):
             ]
         )
 
-        # get no input observations
-        action = np.zeros((self.num_agents, self.model.control_dim))
-        obs, _, _, _, info = self.step(action)
+        obs = self.observation_type.observe()
+        if self.render_enabled:
+            if self.observation_cfg.type is ObservationType.DIRECT:
+                self.render_obs = copy.deepcopy(obs)
+            else:
+                self.render_obs = copy.deepcopy(self.render_obs_type.observe())
+
+        info = {"lap_times": self.lap_times, "lap_counts": self.lap_counts, "sim_time": self.sim_time}
 
         return obs, info
 
-    def update_map(self, map_name: str):
+    def update_map(self, map_name: Track | str):
         """
         Updates the map used by simulation
 
         Args:
-            map_name (str): name of the map
+            map_name (Track | str): name of the map, path to map, or Track instance
 
         Returns:
             None
         """
-        if "/" in map_name or "\\" in map_name:
-            track = Track.from_track_path(map_name, track_scale=self.map_scale)
-        else:
-            track = Track.from_track_name(map_name, track_scale=self.map_scale)
-        self.map = map_name
-        self.track = track
-        self.env_config = self.env_config.with_updates(map_name=map_name)
-        self.sim.set_map(track, self.map_scale)
-        self.reset_fn = make_reset_fn(
-            track=self.track,
-            num_agents=self.num_agents,
-            type=self.reset_cfg.strategy,
-        )
+        new_config = self.env_config.with_updates(map_name=map_name)
+        self.configure(new_config)
 
     def update_params(self, params, index=-1):
         """
