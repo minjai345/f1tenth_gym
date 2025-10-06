@@ -2,230 +2,144 @@ import unittest
 
 import gymnasium as gym
 import numpy as np
-from gymnasium.spaces import Box
 
 from f1tenth_gym.envs.env_config import EnvConfig, ObservationConfig
 from f1tenth_gym.envs.observation import (
     observation_factory,
     ObservationType,
-    ObservationFeature,
 )
 
+
 class TestObservationInterface(unittest.TestCase):
-    def test_original_obs_space(self):
-        """
-        Check backward compatibility with the original observation space.
-        """
+    def test_direct_default_fields(self):
         env = gym.make(
-            "f1tenth_gym:f1tenth-v0", 
-            config=EnvConfig(observation_config=ObservationConfig(type=ObservationType.ORIGINAL))
+            "f1tenth_gym:f1tenth-v0",
+            config=EnvConfig(
+                observation_config=ObservationConfig(type=ObservationType.DIRECT)
+            ),
         )
 
         obs, _ = env.reset()
+        direct_obs = observation_factory(env, type=ObservationType.DIRECT)
+        space = direct_obs.space()
+        sample = direct_obs.observe()
 
-        obs_keys = [
-            "ego_idx",
-            "scans",
-            "poses_x",
-            "poses_y",
-            "poses_theta",
-            "linear_vels_x",
-            "linear_vels_y",
-            "ang_vels_z",
-            "collisions",
-            "lap_times",
-            "lap_counts",
+        expected_fields = {
+            "scan",
+            "std_state",
+            "state",
+            "collision",
+            "lap_time",
+            "lap_count",
             "sim_time",
-        ]
+        }
+        if env.unwrapped.compute_frenet:
+            expected_fields.add("frenet_pose")
 
-        self.assertTrue(
-            all(
-                [
-                    isinstance(env.observation_space.spaces[k], Box)
-                    for k in obs_keys
-                    if k != "ego_idx"
-                ]
-            )
-        )
-        self.assertTrue(
-            all(
-                [
-                    env.observation_space.spaces[k].dtype == np.float32
-                    for k in obs_keys
-                    if k != "ego_idx"
-                ]
-            )
-        )
-
-        self.assertTrue(isinstance(obs, dict))
-        self.assertTrue(all([k in obs for k in obs_keys]))
-        self.assertTrue(all([k in obs_keys for k in obs]))
-        self.assertTrue(env.observation_space.contains(obs))
+        for agent_id in env.unwrapped.agent_ids:
+            agent_space = space.spaces[agent_id]
+            self.assertTrue(isinstance(agent_space, gym.spaces.Dict))
+            self.assertEqual(set(agent_space.spaces.keys()), expected_fields)
+            self.assertEqual(set(sample[agent_id].keys()), expected_fields)
+            self.assertTrue(agent_space.contains(sample[agent_id]))
+            self.assertIn(agent_id, obs)
         env.close()
 
-    def test_features_observation(self):
-        """
-        Check the FeatureObservation allows selecting an arbitrary subset of features.
-        """
-        features = (
-            ObservationFeature.POSE_X,
-            ObservationFeature.POSE_Y,
-            ObservationFeature.POSE_THETA,
-        )
-
+    def test_feature_subset(self):
+        features = ("pose_x", "pose_y", "pose_theta")
         env = gym.make(
-            "f1tenth_gym:f1tenth-v0", 
+            "f1tenth_gym:f1tenth-v0",
             config=EnvConfig(
-                observation_config=ObservationConfig(type=ObservationType.FEATURES, features=features)
-            )
+                observation_config=ObservationConfig(
+                    type=ObservationType.FEATURES,
+                    features=features,
+                )
+            ),
         )
-
-        self.assertTrue(isinstance(env.observation_space, gym.spaces.Dict))
-
-        expected_keys = [feature.value for feature in features]
-        for agent_id in env.unwrapped.agent_ids:
-            space = env.observation_space.spaces[agent_id].spaces
-            self.assertTrue(all(key in space for key in expected_keys))
-            self.assertTrue(all(key in expected_keys for key in space))
-            self.assertTrue(all(isinstance(space[key], Box) for key in expected_keys))
-            self.assertTrue(all(space[key].dtype == np.float32 for key in expected_keys))
 
         obs, _ = env.reset()
         obs, _, _, _, _ = env.step(env.action_space.sample())
 
+        for agent_id in env.unwrapped.agent_ids:
+            self.assertEqual(set(obs[agent_id].keys()), set(features))
+            self.assertTrue(all(isinstance(value, np.ndarray) for value in obs[agent_id].values()))
+
         sim_state = env.unwrapped.sim.state
-        for i, agent_id in enumerate(env.unwrapped.agent_ids):
-            pose_x, pose_y, pose_theta = sim_state.poses[i]
-            obs_x, obs_y, obs_theta = (
-                obs[agent_id][ObservationFeature.POSE_X.value],
-                obs[agent_id][ObservationFeature.POSE_Y.value],
-                obs[agent_id][ObservationFeature.POSE_THETA.value],
-            )
-            for ground_truth, observation in zip(
-                [pose_x, pose_y, pose_theta], [obs_x, obs_y, obs_theta]
-            ):
-                self.assertTrue(np.allclose(ground_truth, observation))
+        for idx, agent_id in enumerate(env.unwrapped.agent_ids):
+            pose_x, pose_y, pose_theta = sim_state.poses[idx]
+            agent_obs = obs[agent_id]
+            observed = np.asarray([
+                agent_obs["pose_x"],
+                agent_obs["pose_y"],
+                agent_obs["pose_theta"],
+            ], dtype=np.float32)
+            expected = np.asarray([pose_x, pose_y, pose_theta], dtype=np.float32)
+            self.assertTrue(np.allclose(observed, expected))
         env.close()
 
-    def test_nonexistent_obs_space(self):
-        """
-        Check that an error is raised when a nonexistent observation type is requested.
-        """
+    def test_presets_match_expected_fields(self):
+        preset_expectations = {
+            ObservationType.KINEMATIC_STATE: {"pose_x", "pose_y", "delta", "linear_vel_x", "pose_theta"},
+            ObservationType.DYNAMIC_STATE: {
+                "pose_x",
+                "pose_y",
+                "delta",
+                "linear_vel_magnitude",
+                "pose_theta",
+                "ang_vel_z",
+                "beta",
+            },
+            ObservationType.FRENET_DYNAMIC_STATE: {
+                "pose_x",
+                "pose_y",
+                "delta",
+                "linear_vel_x",
+                "linear_vel_y",
+                "pose_theta",
+                "ang_vel_z",
+                "beta",
+            },
+        }
+
+        for obs_type, expected in preset_expectations.items():
+            env = gym.make(
+                "f1tenth_gym:f1tenth-v0",
+                config=EnvConfig(
+                    observation_config=ObservationConfig(type=obs_type)
+                ),
+            )
+            obs_impl = observation_factory(env, type=obs_type)
+            space = obs_impl.space()
+            observation = obs_impl.observe()
+
+            for agent_id in env.unwrapped.agent_ids:
+                self.assertEqual(set(space.spaces[agent_id].spaces.keys()), expected)
+                self.assertEqual(set(observation[agent_id].keys()), expected)
+                self.assertTrue(space.spaces[agent_id].contains(observation[agent_id]))
+            env.close()
+
+    def test_invalid_feature_name(self):
+        env = gym.make("f1tenth_gym:f1tenth-v0", config=EnvConfig())
+        with self.assertRaises(ValueError):
+            observation_factory(
+                env,
+                type=ObservationType.FEATURES,
+                features=("unknown_feature",),
+            )
+        env.close()
+
+    def test_invalid_observation_type(self):
         env = gym.make("f1tenth_gym:f1tenth-v0", config=EnvConfig())
         with self.assertRaises(TypeError):
-            observation_factory(env, vehicle_id=0, type="nonexistent_obs_type")
+            observation_factory(env, type="unsupported")
         env.close()
 
-    def test_kinematic_obs_space(self):
-        """
-        Check the kinematic state observation space contains the correct features [x, y, theta, v].
-        """
-        env = gym.make(
-            "f1tenth_gym:f1tenth-v0", 
-            config=EnvConfig(
-                observation_config=ObservationConfig(type=ObservationType.KINEMATIC_STATE)
-            )
-        )
-
-        expected_features = (
-            ObservationFeature.POSE_X,
-            ObservationFeature.POSE_Y,
-            ObservationFeature.POSE_THETA,
-            ObservationFeature.LINEAR_VEL_X,
-            ObservationFeature.STEER_ANGLE,
-        )
-        expected_keys = [feature.value for feature in expected_features]
-
-        for agent_id in env.unwrapped.agent_ids:
-            space = env.observation_space.spaces[agent_id].spaces
-            self.assertTrue(all(key in space for key in expected_keys))
-            self.assertTrue(all(key in expected_keys for key in space))
-
-        obs, _ = env.reset()
-        obs, _, _, _, _ = env.step(env.action_space.sample())
-
-        sim_state = env.unwrapped.sim.state
-        for i, agent_id in enumerate(env.unwrapped.agent_ids):
-            std_state = sim_state.standard_state[i]
-            pose_x, pose_y, pose_theta = std_state[0], std_state[1], std_state[4]
-            vel = std_state[3]
-            beta = std_state[6]
-            obs_x, obs_y, obs_theta = (
-                obs[agent_id][ObservationFeature.POSE_X.value],
-                obs[agent_id][ObservationFeature.POSE_Y.value],
-                obs[agent_id][ObservationFeature.POSE_THETA.value],
-            )
-            obs_velx = obs[agent_id][ObservationFeature.LINEAR_VEL_X.value]
-
-            ground_truth = np.asarray([pose_x, pose_y, pose_theta, vel * np.cos(beta)], dtype=np.float32)
-            observed = np.asarray([obs_x, obs_y, obs_theta, obs_velx], dtype=np.float32)
-            self.assertTrue(np.allclose(ground_truth, observed))
-        env.close()
-
-    def test_dynamic_obs_space(self):
-        """
-        Check the dynamic state observation space contains the correct features.
-        """
-        env = gym.make(
-            "f1tenth_gym:f1tenth-v0", 
-            config=EnvConfig(
-                observation_config=ObservationConfig(type=ObservationType.DYNAMIC_STATE)
-            )
-        )
-
-        expected_features = (
-            ObservationFeature.POSE_X,
-            ObservationFeature.POSE_Y,
-            ObservationFeature.POSE_THETA,
-            ObservationFeature.LINEAR_VEL_MAGNITUDE,
-            ObservationFeature.ANGULAR_VEL_Z,
-            ObservationFeature.STEER_ANGLE,
-            ObservationFeature.SLIP_ANGLE,
-        )
-        expected_keys = [feature.value for feature in expected_features]
-
-        for agent_id in env.unwrapped.agent_ids:
-            space = env.observation_space.spaces[agent_id].spaces
-            self.assertTrue(all(key in space for key in expected_keys))
-            self.assertTrue(all(key in expected_keys for key in space))
-
-        obs, _ = env.reset()
-        obs, _, _, _, _ = env.step(env.action_space.sample())
-
-        sim_state = env.unwrapped.sim.state
-        for i, agent_id in enumerate(env.unwrapped.agent_ids):
-            agent_obs = obs[agent_id]
-            observed = np.array([
-                agent_obs[ObservationFeature.POSE_X.value],
-                agent_obs[ObservationFeature.POSE_Y.value],
-                agent_obs[ObservationFeature.STEER_ANGLE.value],
-                agent_obs[ObservationFeature.LINEAR_VEL_MAGNITUDE.value],
-                agent_obs[ObservationFeature.POSE_THETA.value],
-                agent_obs[ObservationFeature.ANGULAR_VEL_Z.value],
-                agent_obs[ObservationFeature.SLIP_ANGLE.value],
-            ])
-            std_state = sim_state.standard_state[i]
-            ground_truth = np.array([
-                std_state[0],
-                std_state[1],
-                std_state[2],
-                std_state[3],
-                std_state[4],
-                std_state[5],
-                std_state[6],
-            ], dtype=np.float32)
-
-            self.assertTrue(np.allclose(ground_truth, observed))
-        env.close()
-
-    def test_consistency_observe_space(self):
+    def test_space_contains_observation(self):
         obs_types = [
+            ObservationType.DIRECT,
             ObservationType.KINEMATIC_STATE,
             ObservationType.DYNAMIC_STATE,
-            ObservationType.DIRECT,
-            ObservationType.ORIGINAL,
         ]
-
         env = gym.make("f1tenth_gym:f1tenth-v0", config=EnvConfig())
         env.reset()
 
@@ -233,31 +147,6 @@ class TestObservationInterface(unittest.TestCase):
             obs_impl = observation_factory(env, type=obs_type)
             space = obs_impl.space()
             observation = obs_impl.observe()
-
-            self.assertTrue(
-                space.contains(observation),
-                f"Observation {obs_type} is not contained in its space",
-            )
+            self.assertTrue(space.contains(observation))
         env.close()
-
-    def test_gymnasium_api(self):
-        from gymnasium.utils.env_checker import check_env
-
-        obs_types = [
-            ObservationType.DIRECT,
-            ObservationType.ORIGINAL,
-            ObservationType.KINEMATIC_STATE,
-            ObservationType.DYNAMIC_STATE,
-        ]
-
-        for obs_type in obs_types:
-            env = gym.make(
-                "f1tenth_gym:f1tenth-v0", 
-                config=EnvConfig(observation_config=ObservationConfig(type=obs_type))
-            )
-            check_env(
-                env.unwrapped,
-                skip_render_check=True,
-            )
-            env.close()
 

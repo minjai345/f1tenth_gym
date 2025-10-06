@@ -4,7 +4,7 @@ import numpy as np
 
 from . import ResetFn
 from .utils import sample_around_waypoint
-from ..track import Track, Raceline
+from ..track import Raceline
 
 
 class MaskedResetFn(ResetFn):

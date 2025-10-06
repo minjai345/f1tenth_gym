@@ -1,16 +1,14 @@
 from __future__ import annotations
 
-from enum import Enum, IntEnum
-from typing import Iterable, Tuple
+from enum import IntEnum
+from typing import Iterable
 
 __all__ = [
     "ObservationType",
-    "ObservationFeature",
+    "ALL_FEATURES",
     "Observation",
     "scan_space",
-    "DirectObservation",
-    "OriginalObservation",
-    "FeaturesObservation",
+    "FullObservation",
     "observation_factory",
 ]
 
@@ -24,101 +22,103 @@ class ObservationType(IntEnum):
     FRENET_DYNAMIC_STATE = 6
 
 
-class ObservationFeature(Enum):
-    SCAN = "scan"
-    POSE_X = "pose_x"
-    POSE_Y = "pose_y"
-    POSE_THETA = "pose_theta"
-    LINEAR_VEL_X = "linear_vel_x"
-    LINEAR_VEL_Y = "linear_vel_y"
-    LINEAR_VEL_MAGNITUDE = "linear_vel_magnitude"
-    ANGULAR_VEL_Z = "ang_vel_z"
-    STEER_ANGLE = "delta"
-    SLIP_ANGLE = "beta"
-    COLLISION = "collision"
-    LAP_TIME = "lap_time"
-    LAP_COUNT = "lap_count"
+BASE_FIELDS: tuple[str, ...] = (
+    "scan",
+    "std_state",
+    "state",
+    "collision",
+    "lap_time",
+    "lap_count",
+    "sim_time",
+    "frenet_pose",
+)
 
-    @classmethod
-    def from_value(cls, value: object) -> "ObservationFeature":
-        if isinstance(value, ObservationFeature):
-            return value
-        raise TypeError(
-            "Observation features must be provided as ObservationFeature enums "
-            f"(got {value!r})"
-        )
+DERIVED_FIELDS: tuple[str, ...] = (
+    "pose_x",
+    "pose_y",
+    "pose_theta",
+    "linear_vel_x",
+    "linear_vel_y",
+    "linear_vel_magnitude",
+    "ang_vel_z",
+    "delta",
+    "beta",
+)
+
+ALL_FEATURES: tuple[str, ...] = BASE_FIELDS + DERIVED_FIELDS
+_ALLOWED_FIELDS = set(ALL_FEATURES)
 
 
 from .base import Observation, scan_space  # noqa: E402
-from .direct import DirectObservation  # noqa: E402
-from .original import OriginalObservation  # noqa: E402
-from .features import FeaturesObservation  # noqa: E402
+from .full import FullObservation  # noqa: E402
 
 
-_FEATURE_PRESETS: dict[ObservationType, Tuple[ObservationFeature, ...]] = {
+FEATURE_PRESETS: dict[ObservationType, tuple[str, ...]] = {
     ObservationType.KINEMATIC_STATE: (
-        ObservationFeature.POSE_X,
-        ObservationFeature.POSE_Y,
-        ObservationFeature.STEER_ANGLE,
-        ObservationFeature.LINEAR_VEL_X,
-        ObservationFeature.POSE_THETA,
+        "pose_x",
+        "pose_y",
+        "delta",
+        "linear_vel_x",
+        "pose_theta",
     ),
     ObservationType.DYNAMIC_STATE: (
-        ObservationFeature.POSE_X,
-        ObservationFeature.POSE_Y,
-        ObservationFeature.STEER_ANGLE,
-        ObservationFeature.LINEAR_VEL_MAGNITUDE,
-        ObservationFeature.POSE_THETA,
-        ObservationFeature.ANGULAR_VEL_Z,
-        ObservationFeature.SLIP_ANGLE,
+        "pose_x",
+        "pose_y",
+        "delta",
+        "linear_vel_magnitude",
+        "pose_theta",
+        "ang_vel_z",
+        "beta",
     ),
     ObservationType.FRENET_DYNAMIC_STATE: (
-        ObservationFeature.POSE_X,
-        ObservationFeature.POSE_Y,
-        ObservationFeature.STEER_ANGLE,
-        ObservationFeature.LINEAR_VEL_X,
-        ObservationFeature.LINEAR_VEL_Y,
-        ObservationFeature.POSE_THETA,
-        ObservationFeature.ANGULAR_VEL_Z,
-        ObservationFeature.SLIP_ANGLE,
+        "pose_x",
+        "pose_y",
+        "delta",
+        "linear_vel_x",
+        "linear_vel_y",
+        "pose_theta",
+        "ang_vel_z",
+        "beta",
     ),
 }
 
 
-_OBSERVATION_BUILDERS = {
-    ObservationType.ORIGINAL: lambda env, **kwargs: OriginalObservation(env),
-    ObservationType.DIRECT: lambda env, **kwargs: DirectObservation(env),
-}
+def _normalize_fields(fields: Iterable[str] | None) -> tuple[str, ...]:
+    if fields is None:
+        raise ValueError("FullObservation requires 'features' to be specified")
+
+    normalized = tuple(fields)
+    if not normalized:
+        raise ValueError("FullObservation requires at least one feature")
+
+    invalid = next((item for item in normalized if item not in _ALLOWED_FIELDS), None)
+    if invalid is not None:
+        raise ValueError(f"Unknown observation feature: {invalid!r}")
+
+    return normalized
 
 
-def _build_features_observation(env, *, features: Iterable[ObservationFeature] | None = None):
-    if features is None:
-        raise ValueError("FeaturesObservation requires 'features' to be specified")
-    feature_tuple = tuple(ObservationFeature.from_value(item) for item in features)
-    if not feature_tuple:
-        raise ValueError("FeaturesObservation requires at least one feature")
-    return FeaturesObservation(env, features=feature_tuple)
-
-
-_OBSERVATION_BUILDERS[ObservationType.FEATURES] = _build_features_observation
-
-
-def observation_factory(env, type: ObservationType | None = None, **kwargs) -> Observation:
-    obs_type = type or ObservationType.ORIGINAL
-    if not isinstance(obs_type, ObservationType):
+def observation_factory(
+    env,
+    type: ObservationType | None = None,
+    **kwargs,
+) -> Observation:
+    if type is None:
+        obs_type = ObservationType.DIRECT
+    elif isinstance(type, ObservationType):
+        obs_type = type
+    else:
         raise TypeError("observation_factory 'type' must be an ObservationType")
 
-    if obs_type in _FEATURE_PRESETS:
-        return _build_features_observation(
-            env,
-            features=_FEATURE_PRESETS[obs_type],
-        )
-
-    builder = _OBSERVATION_BUILDERS.get(obs_type)
-    if builder is not None:
-        return builder(env, **kwargs)
-
+    if obs_type is ObservationType.DIRECT:
+        return FullObservation(env)
+    if obs_type is ObservationType.ORIGINAL:
+        return FullObservation(env)
+    if obs_type in FEATURE_PRESETS:
+        return FullObservation(env, fields=FEATURE_PRESETS[obs_type])
     if obs_type is ObservationType.FEATURES:
-        return _build_features_observation(env, features=kwargs.get("features"))
+        return FullObservation(env, fields=_normalize_fields(kwargs.get("features")))
 
     raise ValueError(f"Unsupported observation type: {obs_type}")
+
+
