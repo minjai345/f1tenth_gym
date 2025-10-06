@@ -181,6 +181,10 @@ class F110Env(gym.Env):
                 render_mode=self.render_mode,
                 render_fps=self.metadata["render_fps"],
             )
+        else:
+            self.renderer = None
+            self.render_spec = None
+
     def _check_done(self):
         """
         Check if the current rollout is done
