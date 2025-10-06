@@ -18,7 +18,7 @@ class TestObservationInterface(unittest.TestCase):
         """
         env = gym.make(
             "f1tenth_gym:f1tenth-v0", 
-            config=EnvConfig(observation=ObservationConfig(type=ObservationType.ORIGINAL))
+            config=EnvConfig(observation_config=ObservationConfig(type=ObservationType.ORIGINAL))
         )
 
         obs, _ = env.reset()
@@ -76,7 +76,7 @@ class TestObservationInterface(unittest.TestCase):
         env = gym.make(
             "f1tenth_gym:f1tenth-v0", 
             config=EnvConfig(
-                observation=ObservationConfig(type=ObservationType.FEATURES, features=features)
+                observation_config=ObservationConfig(type=ObservationType.FEATURES, features=features)
             )
         )
 
@@ -123,7 +123,7 @@ class TestObservationInterface(unittest.TestCase):
         env = gym.make(
             "f1tenth_gym:f1tenth-v0", 
             config=EnvConfig(
-                observation=ObservationConfig(type=ObservationType.KINEMATIC_STATE)
+                observation_config=ObservationConfig(type=ObservationType.KINEMATIC_STATE)
             )
         )
 
@@ -169,7 +169,7 @@ class TestObservationInterface(unittest.TestCase):
         env = gym.make(
             "f1tenth_gym:f1tenth-v0", 
             config=EnvConfig(
-                observation=ObservationConfig(type=ObservationType.DYNAMIC_STATE)
+                observation_config=ObservationConfig(type=ObservationType.DYNAMIC_STATE)
             )
         )
 
@@ -253,7 +253,7 @@ class TestObservationInterface(unittest.TestCase):
         for obs_type in obs_types:
             env = gym.make(
                 "f1tenth_gym:f1tenth-v0", 
-                config=EnvConfig(observation=ObservationConfig(type=obs_type))
+                config=EnvConfig(observation_config=ObservationConfig(type=obs_type))
             )
             check_env(
                 env.unwrapped,

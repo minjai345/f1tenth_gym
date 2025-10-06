@@ -38,14 +38,14 @@ class F110Env(gym.Env):
 
     def __init__(
         self,
-        config: EnvConfig | None = None,
+        config: EnvConfig = EnvConfig(),
         render_mode=None,
     ):
         super().__init__()
-        if isinstance(config, EnvConfig) or config is None:
-            resolved_config = config or EnvConfig()
+        if isinstance(config, EnvConfig):
+            resolved_config = config
         else:
-            raise TypeError("config must be an EnvConfig instance or None")
+            raise TypeError("config must be an EnvConfig instance")
 
         self.env_config = resolved_config
         self._apply_env_config()

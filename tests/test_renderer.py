@@ -10,7 +10,7 @@ class TestRenderer(unittest.TestCase):
     def test_rgb_array_render(self):
         env =  gym.make(
             "f1tenth_gym:f1tenth-v0",
-            config=EnvConfig(observation=ObservationConfig(type=ObservationType.KINEMATIC_STATE)),
+            config=EnvConfig(observation_config=ObservationConfig(type=ObservationType.KINEMATIC_STATE)),
             render_mode="rgb_array",
         )
         env.reset()
@@ -30,7 +30,7 @@ class TestRenderer(unittest.TestCase):
     def test_rgb_array_list(self):
         env = gym.make(
             "f1tenth_gym:f1tenth-v0",
-            config=EnvConfig(observation=ObservationConfig(type=ObservationType.KINEMATIC_STATE)),
+            config=EnvConfig(observation_config=ObservationConfig(type=ObservationType.KINEMATIC_STATE)),
             render_mode="rgb_array_list",
         )
         env.reset()

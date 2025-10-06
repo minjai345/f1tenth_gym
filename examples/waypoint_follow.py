@@ -9,7 +9,14 @@ from f1tenth_gym.envs.integrators import IntegratorType
 from f1tenth_gym.envs.dynamic_models import DynamicModel, F1TENTH_VEHICLE_PARAMETERS
 from f1tenth_gym.envs.observation import ObservationType
 from f1tenth_gym.envs.reset import ResetStrategy
-from f1tenth_gym.envs.env_config import EnvConfig
+from f1tenth_gym.envs.env_config import (
+    ControlConfig,
+    EnvConfig,
+    ObservationConfig,
+    ResetConfig,
+    SimulationConfig,
+)
+from f1tenth_gym.envs.lidar import LiDARConfig
 
 """
 Planner Helpers
@@ -313,19 +320,20 @@ def main():
     num_agents = 1
     cfg = EnvConfig(
         map_name="Spielberg",
-        num_agents=num_agents,
         map_scale=1.0,
-        timestep=0.01,
-        integrator_timestep=0.01,
-        integrator=IntegratorType.RK4,
-        dynamics_model=DynamicModel.KS,
-        compute_frenet_frame=False,
-        max_laps=5,
-        steer_delay_steps=1,
-        observation_type=ObservationType.KINEMATIC_STATE,
-        reset_strategy=ResetStrategy.RL_RANDOM_STATIC,
-        lidar_enabled=False,
-        lidar_num_beams=270,
+        num_agents=num_agents,
+        control_config=ControlConfig(steer_delay_steps=1),
+        simulation_config=SimulationConfig(
+            timestep=0.01,
+            integrator_timestep=0.01,
+            integrator=IntegratorType.RK4,
+            dynamics_model=DynamicModel.KS,
+            compute_frenet_frame=False,
+            max_laps=5,
+        ),
+        observation_config=ObservationConfig(type=ObservationType.KINEMATIC_STATE),
+        reset_config=ResetConfig(strategy=ResetStrategy.RL_RANDOM_STATIC),
+        lidar_config=LiDARConfig(enabled=False, num_beams=270),
     )
 
     env = gym.make(

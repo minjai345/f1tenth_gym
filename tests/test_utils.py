@@ -7,16 +7,11 @@ import gymnasium as gym
 
 from f1tenth_gym.envs.env_config import EnvConfig
 
-
-def with_params(cfg: EnvConfig, **updates: float) -> EnvConfig:
-    return cfg.with_updates(params=cfg.params.with_updates(**updates))
-
-
 class TestUtilities(unittest.TestCase):
     def test_env_config_param_override(self):
         """Verify parameter overrides through EnvConfig propagate into the simulator."""
         base_cfg = EnvConfig()
-        custom_cfg = with_params(base_cfg, mu=1.0)
+        custom_cfg = base_cfg.with_updates(params=base_cfg.params.with_updates(mu=1.0))
 
         default_env = gym.make("f1tenth_gym:f1tenth-v0", config=base_cfg)
         custom_env = gym.make("f1tenth_gym:f1tenth-v0", config=custom_cfg)

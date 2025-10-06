@@ -5,7 +5,7 @@ from waypoint_follow import PurePursuitPlanner
 from f1tenth_gym.envs.track import Track
 from f1tenth_gym.envs.observation import ObservationType
 from f1tenth_gym.envs.reset import ResetStrategy
-from f1tenth_gym.envs.env_config import EnvConfig
+from f1tenth_gym.envs.env_config import EnvConfig, ObservationConfig, ResetConfig
 import gymnasium as gym
 
 
@@ -24,8 +24,8 @@ def main():
 
     cfg = EnvConfig(
         map_name=track,
-        observation_type=ObservationType.KINEMATIC_STATE,
-        reset_strategy=ResetStrategy.RL_RANDOM_STATIC,
+        observation_config=ObservationConfig(type=ObservationType.KINEMATIC_STATE),
+        reset_config=ResetConfig(strategy=ResetStrategy.RL_RANDOM_STATIC),
     )
 
     env = gym.make(

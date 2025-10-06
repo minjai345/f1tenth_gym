@@ -109,7 +109,7 @@ class TestEnvInterface(unittest.TestCase):
         """
         env = gym.make("f1tenth_gym:f1tenth-v0",
             config=EnvConfig(
-                control=ControlConfig(
+                control_config=ControlConfig(
                     longitudinal_mode=LongitudinalActionType.ACCL,
                     steering_mode=SteerActionType.STEERING_SPEED,
                 )
@@ -144,7 +144,7 @@ class TestEnvInterface(unittest.TestCase):
         num_envs, num_agents = 3, 2
         cfg = EnvConfig(
             num_agents=num_agents,
-            observation=ObservationConfig(type=ObservationType.KINEMATIC_STATE),
+            observation_config=ObservationConfig(type=ObservationType.KINEMATIC_STATE),
         )
         vec_env = gym.make_vec(
             "f1tenth_gym:f1tenth-v0", vectorization_mode="sync", config=cfg, num_envs=num_envs
@@ -176,7 +176,7 @@ class TestEnvInterface(unittest.TestCase):
         num_envs, num_agents = 3, 2
         cfg = EnvConfig(
             num_agents=num_agents,
-            observation=ObservationConfig(type=ObservationType.KINEMATIC_STATE),
+            observation_config=ObservationConfig(type=ObservationType.KINEMATIC_STATE),
         )
         vec_env = gym.make_vec(
             "f1tenth_gym:f1tenth-v0", vectorization_mode="async", config=cfg, num_envs=num_envs
@@ -208,8 +208,8 @@ class TestEnvInterface(unittest.TestCase):
         num_envs, num_agents = 3, 2
         cfg = EnvConfig(
             num_agents=num_agents,
-            observation=ObservationConfig(type=ObservationType.KINEMATIC_STATE),
-            reset=ResetConfig(strategy=ResetStrategy.RL_RANDOM_RANDOM),
+            observation_config=ObservationConfig(type=ObservationType.KINEMATIC_STATE),
+            reset_config=ResetConfig(strategy=ResetStrategy.RL_RANDOM_RANDOM),
         )
         vec_env = gym.make_vec(
             "f1tenth_gym:f1tenth-v0", vectorization_mode="sync", config=cfg, num_envs=num_envs,
