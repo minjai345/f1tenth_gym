@@ -1,11 +1,8 @@
-import pathlib
 import os
 from typing import Optional
 
 from .renderer import RenderSpec, EnvRenderer
 from ..dynamic_models import VehicleParameters
-# from ..track import Track This is due to a circular import
-
 
 def make_renderer(
     params: VehicleParameters,
@@ -13,30 +10,11 @@ def make_renderer(
     agent_ids: list[str],
     render_mode: Optional[str] = None,
     render_fps: Optional[int] = 100,
+    render_spec: RenderSpec = RenderSpec(),
 ) -> tuple[EnvRenderer, RenderSpec]:
-    """
-    Return an instance of the renderer and the rendering specification.
+    """Return an instance of the renderer and the rendering specification."""
+    render_spec = render_spec
 
-    Parameters
-    ----------
-    params : VehicleParameters
-        vehicle parameters used for sizing render assets
-    track : Track
-        track object
-    agent_ids : list
-        list of agent ids to render
-    render_mode : str, optional
-        rendering mode, by default None
-    render_fps : int, optional
-        rendering frames per second, by default 100
-    """
-    cfg_file = pathlib.Path(__file__).parent.absolute() / "rendering.yaml"
-    
-    render_spec = RenderSpec()
-    render_spec.from_yaml(cfg_file)
-
-    # if render_spec.render_type == "pygame": 
-    #     from .rendering_pygame import PygameEnvRenderer as EnvRenderer
     if render_spec.render_type == "pyqt6":
         if render_mode in ["rgb_array", "rgb_array_list"]:
             os.environ["QT_QPA_PLATFORM"] = "offscreen"
@@ -50,7 +28,7 @@ def make_renderer(
     else:
         raise ValueError(f"Unknown render type: {render_spec.render_type}")
 
-    if render_mode in ["human", "rgb_array", 'unlimited', "human_fast"]:
+    if render_mode in ["human", "rgb_array", "unlimited", "human_fast"]:
         renderer = EnvRenderer(
             params=params,
             track=track,
