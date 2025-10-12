@@ -39,8 +39,8 @@ class DynamicModel(Enum):
 
     def get_initial_state(self, pose=None, params: Optional[dict] = None):
         # Assert that if self is MB, params is not None
-        if (self == DynamicModel.MB or self == DynamicModel.STD) and params is None:
-            raise ValueError("MultiBody and SingleTrackDrift models require parameters to be provided.")
+        if (self == DynamicModel.MB and params is None):
+            raise ValueError("MultiBody model requires parameters to be provided.")
         # initialize zero state
         if self == DynamicModel.KS:
             # state is [x, y, steer_angle, vel, yaw_angle]
