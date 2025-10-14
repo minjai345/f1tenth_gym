@@ -371,6 +371,43 @@ class F110Env(gym.Env):
             "v_max": 20.0,
             "width": 0.31,
             "length": 0.58,
+            "R_w": 0.049, # effective tire radius [m]
+            "T_sb": 0.5, # torque split of brakes (percent of torque sent to front axle) [no units]
+            "T_se": 0.5, # torque split of engine (percent of torque sent to front axle) [no units]
+            # longitudinal coefficients
+            "tire_p_cx1": 1.3,
+            "tire_p_dx1": 9.99,
+            "tire_p_dx3": 0,
+            "tire_p_ex1": 0.46403,
+            "tire_p_kx1": 99.9,
+            "tire_p_hx1": 0,
+            "tire_p_vx1": -8.809800e-06,
+            "tire_r_bx1": 13.276,
+            "tire_r_bx2": -13.778,
+            "tire_r_cx1": 1.2568,
+            "tire_r_ex1": 0.65225,
+            "tire_r_hx1": 0.005072,
+            # lateral coefficients
+            "tire_p_cy1": 1.329112,
+            "tire_p_dy1": 818.578752,
+            "tire_p_dy3": -2.8821,
+            "tire_p_ey1": -0.007472,
+            "tire_p_ky1": 4700.458358,
+            "tire_p_hy1": -0.000146,
+            "tire_p_hy3": 0.031415,
+            "tire_p_vy1": 0.037318,
+            "tire_p_vy3": -0.32931,
+            "tire_r_by1": 7.1433,
+            "tire_r_by2": 9.1916,
+            "tire_r_by3": -0.027856,
+            "tire_r_cy1": 1.0719,
+            "tire_r_ey1": -0.27572,
+            "tire_r_hy1": 5.744800e-06,
+            "tire_r_vy1": -0.027825,
+            "tire_r_vy3": -0.27568,
+            "tire_r_vy4": 12.12,
+            "tire_r_vy5": 1.9,
+            "tire_r_vy6": -10.704
         }
         return params
 
