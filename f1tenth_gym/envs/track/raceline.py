@@ -3,9 +3,10 @@ import pathlib
 from typing import Optional
 
 import numpy as np
+import pandas as pd
 
 from ..rendering import EnvRenderer
-from .cubic_spline import CubicSpline2D
+from .cubic_spline import CubicSplineND
 
 
 class Raceline:
@@ -32,7 +33,7 @@ class Raceline:
         acceleration along the raceline
     length : float
         length of the raceline
-    spline : CubicSpline2D
+    spline : CubicSplineND
         spline object through the waypoints
     """
 
@@ -45,7 +46,7 @@ class Raceline:
         psis: Optional[np.ndarray] = None,
         kappas: Optional[np.ndarray] = None,
         accxs: Optional[np.ndarray] = None,
-        spline: Optional[CubicSpline2D] = None,
+        spline: Optional[CubicSplineND] = None,
     ):
         assert xs.shape == ys.shape == velxs.shape, "inconsistent shapes for x, y, vel"
 
@@ -63,7 +64,12 @@ class Raceline:
         self.length = float(np.sum(np.sqrt(np.diff(xs) ** 2 + np.diff(ys) ** 2)))
 
         # compute spline through waypoints if not provided
-        self.spline = spline or CubicSpline2D(x=xs, y=ys)
+        self.spline = spline or CubicSplineND(x=xs, y=ys,
+                                            psis=psis,
+                                            ks=kappas,
+                                            vxs=velxs,
+                                            axs=accxs,
+                                            ss=ss)
 
         self.waypoint_render = None
 
@@ -94,41 +100,38 @@ class Raceline:
             raceline object
         """
         assert filepath.exists(), f"input filepath does not exist ({filepath})"
-        waypoints = np.loadtxt(filepath, delimiter=delimiter)
-        assert waypoints.shape[1] == 4, "expected waypoints as [x, y, w_left, w_right]"
+        df = pd.read_csv(filepath, delimiter=delimiter, header=0).astype(np.float32)
+
+        # Clean column names: remove '#' and strip whitespace
+        df.columns = df.columns.str.replace('#', '').str.strip()
+
+        # Required columns
+        required_cols = ["x_m", "y_m"]
+        missing_cols = [col for col in required_cols if col not in df.columns]
+        if missing_cols:
+            raise ValueError(
+                f"Missing required columns in raceline file: {missing_cols}\n"
+                f"Available columns: {list(df.columns)}"
+            )
 
         # fit cubic spline to waypoints
-        xx, yy = waypoints[:, 0], waypoints[:, 1]
+        xx, yy = df["x_m"].values, df["y_m"].values
         # scale waypoints
         xx, yy = xx * track_scale, yy * track_scale
         
+        # Velocity is constant along the raceline
+        vx = np.ones_like(xx) * fixed_speed
         # close loop
-        xx = np.append(xx, xx[0])
-        yy = np.append(yy, yy[0])
-        spline = CubicSpline2D(x=xx, y=yy)
-        ds = 0.1
-
-        ss, xs, ys, yaws, ks = [], [], [], [], []
-
-        for i_s in np.arange(0, spline.s[-1], ds):
-            x, y = spline.calc_position(i_s)
-            yaw = spline.calc_yaw(i_s)
-            k = spline.calc_curvature(i_s)
-
-            xs.append(x)
-            ys.append(y)
-            yaws.append(yaw)
-            ks.append(k)
-            ss.append(i_s)
+        spline = CubicSplineND(x=xx, y=yy, vxs=vx)
 
         return Raceline(
-            ss=np.array(ss).astype(np.float32),
-            xs=np.array(xs).astype(np.float32),
-            ys=np.array(ys).astype(np.float32),
-            psis=np.array(yaws).astype(np.float32),
-            kappas=np.array(ks).astype(np.float32),
-            velxs=np.ones_like(ss).astype(np.float32) * fixed_speed,  # constant speed
-            accxs=np.zeros_like(ss).astype(np.float32),  # constant acceleration
+            ss=spline.ss,
+            xs=spline.xs,
+            ys=spline.ys,
+            psis=spline.psis,
+            kappas=spline.ks,
+            velxs=spline.vxs,
+            accxs=spline.axs,
             spline=spline,
         )
 
@@ -155,30 +158,39 @@ class Raceline:
             filepath = pathlib.Path(filepath)
 
         assert filepath.exists(), f"input filepath does not exist ({filepath})"
-        waypoints = np.loadtxt(filepath, delimiter=delimiter, skiprows=
-        skip_rows).astype(np.float32)
+        df = pd.read_csv(filepath, delimiter=delimiter, skiprows=skip_rows - 1, header=0).astype(np.float32)
+        # Clean column names: remove '#' and strip whitespace
+        df.columns = df.columns.str.replace('#', '').str.strip()
+
+        # Required columns
+        required_cols = ["x_m", "y_m", "psi_rad", "vx_mps"]
+        missing_cols = [col for col in required_cols if col not in df.columns]
+        if missing_cols:
+            raise ValueError(
+                f"Missing required columns in raceline file: {missing_cols}\n"
+                f"Available columns: {list(df.columns)}"
+            )
 
         if track_scale != 1.0:
             # scale x-y waypoints and recalculate s, psi, and k
-            waypoints[:, 1] *= track_scale
-            waypoints[:, 2] *= track_scale
-            spline = CubicSpline2D(x=waypoints[:, 1], y=waypoints[:, 2])    
+            df["x_m"] *= track_scale
+            df["y_m"] *= track_scale
+            spline = CubicSplineND(x=df["x_m"].values, y=df["y_m"].values)    
             ss, yaws, ks = spline.ss, spline.psis, spline.ks
-            waypoints[:, 0] = ss
-            waypoints[:, 3] = yaws
-            waypoints[:, 4] = ks
+            df["psi_rad"] = yaws
+            if "kappa_radpm" in df.columns:
+                df["kappa_radpm"] = ks
+            if "s_m" in df.columns:
+                df["s_m"] = ss
         
-        assert (
-            waypoints.shape[1] == 7
-        ), "expected waypoints as [s, x, y, psi, k, vx, ax]"
         return Raceline(
-            ss=waypoints[:, 0],
-            xs=waypoints[:, 1],
-            ys=waypoints[:, 2],
-            psis=waypoints[:, 3],
-            kappas=waypoints[:, 4],
-            velxs=waypoints[:, 5],
-            accxs=waypoints[:, 6],
+            ss=df["s_m"].values,
+            xs=df["x_m"].values,
+            ys=df["y_m"].values,
+            psis=df["psi_rad"].values if "psi_rad" in df.columns else None,
+            kappas=df["kappa_radpm"].values if "kappa_radpm" in df.columns else None,
+            velxs=df["vx_mps"].values if "vx_mps" in df.columns else None,
+            accxs=df["ax_mps2"].values if "ax_mps2" in df.columns else None,
         )
 
     def render_waypoints(self, e: EnvRenderer) -> None:

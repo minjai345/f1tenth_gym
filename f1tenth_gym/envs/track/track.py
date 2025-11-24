@@ -12,7 +12,7 @@ from PIL.Image import Transpose
 from yamldataclassconfig.config import YamlDataClassConfig
 
 from . import Raceline
-from .cubic_spline import CubicSpline2D
+from .cubic_spline import CubicSplineND
 from .utils import find_track_dir
 
 
