@@ -117,7 +117,7 @@ class Track:
         try:
             track_dir = find_track_dir(track)
             track_spec = Track.load_spec(
-                track=track, filespec=str(track_dir / f"{track_dir.stem}_map.yaml")
+                track=track, filespec=str(track_dir / f"{track_dir.stem}.yaml")
             )
             track_spec.resolution = track_spec.resolution * track_scale
             track_spec.origin = (
@@ -189,10 +189,8 @@ class Track:
         try:
             if type(path) is str:
                 path = pathlib.Path(path)
-        
-            track_spec = Track.load_spec(
-                track=path.stem, filespec=path
-            )
+
+            track_spec = Track.load_spec(track=path.stem, filespec=path)
             track_spec.resolution = track_spec.resolution * track_scale
             track_spec.origin = (
                 track_spec.origin[0] * track_scale,
@@ -202,7 +200,7 @@ class Track:
 
             # load occupancy grid
             # Image path is from path + image name from track_spec
-            image_path = path.parent / track_spec.image  
+            image_path = path.parent / track_spec.image
             image = Image.open(image_path).transpose(Transpose.FLIP_TOP_BOTTOM)
             occupancy_map = np.array(image).astype(np.float32)
             occupancy_map[occupancy_map <= 128] = 0.0
@@ -210,13 +208,17 @@ class Track:
 
             # if exists, load centerline
             if (path / f"{path.stem}_centerline.csv").exists():
-                centerline = Raceline.from_centerline_file(path / f"{path.stem}_centerline.csv")
+                centerline = Raceline.from_centerline_file(
+                    path / f"{path.stem}_centerline.csv"
+                )
             else:
                 centerline = None
 
             # if exists, load raceline
             if (path / f"{path.stem}_raceline.csv").exists():
-                raceline = Raceline.from_raceline_file(path / f"{path.stem}_raceline.csv")
+                raceline = Raceline.from_raceline_file(
+                    path / f"{path.stem}_raceline.csv"
+                )
             else:
                 raceline = centerline
 
@@ -256,7 +258,14 @@ class Track:
         margin_perc = 0.1
 
         spline = CubicSpline2D(x=x, y=y)
-        ss, xs, ys, yaws, ks, vxs = spline.ss, spline.xs, spline.ys, spline.psis, spline.ks, velx
+        ss, xs, ys, yaws, ks, vxs = (
+            spline.ss,
+            spline.xs,
+            spline.ys,
+            spline.psis,
+            spline.ks,
+            velx,
+        )
 
         refline = Raceline(
             ss=np.array(ss).astype(np.float32),
@@ -301,21 +310,28 @@ class Track:
             raceline=refline,
             centerline=refline,
         )
-    
-    def from_raceline_file(filepath: pathlib.Path, delimiter: str = ";", skip_rows: int = 3, track_scale: float = 1.0) -> Track:
+
+    def from_raceline_file(
+        filepath: pathlib.Path,
+        delimiter: str = ";",
+        skip_rows: int = 3,
+        track_scale: float = 1.0,
+    ) -> Track:
         """
         Creates a Track object from a raceline file of the format [s, x, y, psi, k, vx, ax].
-        
+
         Args:
             filepath (pathlib.Path): path to the raceline file
             delimiter (str, optional): delimiter used in the file. Defaults to ";".
             skip_rows (int, optional): number of rows to skip. Defaults to 3.
             track_scale (float, optional): scale of the track. Defaults to 1.0.
-        
+
         Returns:
             Track: track object
         """
-        raceline = Raceline.from_raceline_file(filepath, delimiter, skip_rows, track_scale)
+        raceline = Raceline.from_raceline_file(
+            filepath, delimiter, skip_rows, track_scale
+        )
         xs = raceline.xs
         ys = raceline.ys
         resolution = 0.05
@@ -374,9 +390,13 @@ class Track:
         """
         raceline_filepath = outdir / f"{self.spec.name}_raceline.csv"
         with open(raceline_filepath, "w") as raceline_csv:
-            raceline_csv.write("# " + str(uuid.uuid4()) + "\n") # same as TUM opt
-            raceline_csv.write('# {}\n'.format(time.strftime('%Y-%m-%d %H:%M:%S'))) # TUM opt uses ggv hash, but no ggv here
-            raceline_csv.write("# s_m; x_m; y_m; psi_rad; kappa_radpm; vx_mps; ax_mps2\n")
+            raceline_csv.write("# " + str(uuid.uuid4()) + "\n")  # same as TUM opt
+            raceline_csv.write(
+                "# {}\n".format(time.strftime("%Y-%m-%d %H:%M:%S"))
+            )  # TUM opt uses ggv hash, but no ggv here
+            raceline_csv.write(
+                "# s_m; x_m; y_m; psi_rad; kappa_radpm; vx_mps; ax_mps2\n"
+            )
             for i in range(len(self.raceline.ss)):
                 raceline_csv.write(
                     f"{self.raceline.ss[i]}; {self.raceline.xs[i]}; {self.raceline.ys[i]}; {self.raceline.yaws[i]}; {self.raceline.ks[i]}; {self.raceline.vxs[i]}; {self.raceline.axs[i]}\n"
@@ -395,7 +415,7 @@ class Track:
         """
         raceline_filepath = outdir / f"{self.spec.name}_raceline.csv"
         with open(raceline_filepath, "w") as raceline_csv:
-            raceline_csv.write("# " + str(uuid.uuid4()) + "\n") # same as TUM opt
+            raceline_csv.write("# " + str(uuid.uuid4()) + "\n")  # same as TUM opt
             raceline_csv.write("# x_m, y_m, w_tr_right_m, w_tr_left_m\n")
             for i in range(len(self.centerline.ss)):
                 raceline_csv.write(
