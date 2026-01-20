@@ -265,7 +265,7 @@ class Track:
         """
         ds = 0.1
         resolution = 0.05
-        margin_perc = 0.1
+        margin = 5.0  # Fixed margin in meters around the track
 
         spline = CubicSplineND(x=x, y=y, vxs=velx)
         ss, xs, ys, yaws, ks, vxs = spline.ss, spline.xs, spline.ys, spline.psis, spline.ks, spline.vxs
@@ -283,17 +283,20 @@ class Track:
 
         min_x, max_x = np.min(xs), np.max(xs)
         min_y, max_y = np.min(ys), np.max(ys)
-        x_range = max_x - min_x
-        y_range = max_y - min_y
+
+        # Calculate map size with fixed margin (handles straight lines gracefully)
+        map_width = (max_x - min_x) + 2 * margin
+        map_height = (max_y - min_y) + 2 * margin
+
         occupancy_map = 255.0 * np.ones(
             (
-                int((1 + 2 * margin_perc) * x_range / resolution),
-                int((1 + 2 * margin_perc) * y_range / resolution),
+                int(map_width / resolution),
+                int(map_height / resolution),
             ),
             dtype=np.float32,
         )
         # origin is the bottom left corner
-        origin = (min_x - margin_perc * x_range, min_y - margin_perc * y_range, 0.0)
+        origin = (min_x - margin, min_y - margin, 0.0)
 
         track_spec = TrackSpec(
             name=None,
