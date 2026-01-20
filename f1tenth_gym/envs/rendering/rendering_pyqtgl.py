@@ -47,6 +47,9 @@ class PyQtEnvRendererGL(EnvRenderer):
         
         fmt = QtGui.QSurfaceFormat()
         fmt.setSwapInterval(0)  # 0 = no vsync, 1 = vsync
+        # Force desktop OpenGL instead of OpenGL ES for Wayland compatibility
+        # Use CompatibilityProfile to support legacy GL functions used by PyQtGraph
+        fmt.setRenderableType(QtGui.QSurfaceFormat.RenderableType.OpenGL)
         QtGui.QSurfaceFormat.setDefaultFormat(fmt)
         
         self.app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
