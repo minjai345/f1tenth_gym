@@ -116,8 +116,12 @@ class Track:
         """
         try:
             track_dir = find_track_dir(track)
+            # Try new naming convention first ({track}.yaml), then fall back to old ({track}_map.yaml)
+            yaml_path = track_dir / f"{track_dir.stem}.yaml"
+            if not yaml_path.exists():
+                yaml_path = track_dir / f"{track_dir.stem}_map.yaml"
             track_spec = Track.load_spec(
-                track=track, filespec=str(track_dir / f"{track_dir.stem}_map.yaml")
+                track=track, filespec=str(yaml_path)
             )
             track_spec.resolution = track_spec.resolution * track_scale
             track_spec.origin = (
