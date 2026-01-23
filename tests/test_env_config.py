@@ -210,3 +210,69 @@ class TestResetConfigValidation(unittest.TestCase):
         cfg = ResetConfig(strategy=ResetStrategy.RL_GRID_STATIC)
         updated = cfg.with_updates(strategy=ResetStrategy.RL_RANDOM_STATIC)
         self.assertNotEqual(cfg.strategy, updated.strategy)
+
+
+class TestLiDARConfigValidation(unittest.TestCase):
+    """Tests for LiDARConfig validation."""
+
+    def test_valid_config(self):
+        """Test creating valid LiDARConfig."""
+        import math
+        cfg = LiDARConfig(
+            num_beams=270,
+            angle_min=-math.pi / 2,
+            angle_max=math.pi / 2,
+        )
+        self.assertEqual(cfg.num_beams, 270)
+
+    def test_angle_min_too_small(self):
+        """Test that angle_min < -π raises ValueError (catches degrees instead of radians)."""
+        with self.assertRaises(ValueError) as ctx:
+            LiDARConfig(angle_min=-135.0, angle_max=135.0)
+        self.assertIn("radians", str(ctx.exception))
+
+    def test_angle_max_too_large(self):
+        """Test that angle_max > π raises ValueError (catches degrees instead of radians)."""
+        import math
+        with self.assertRaises(ValueError) as ctx:
+            LiDARConfig(angle_min=-math.pi / 2, angle_max=135.0)
+        self.assertIn("radians", str(ctx.exception))
+
+    def test_angle_min_greater_than_max(self):
+        """Test that angle_min >= angle_max raises ValueError."""
+        import math
+        with self.assertRaises(ValueError):
+            LiDARConfig(angle_min=math.pi / 2, angle_max=-math.pi / 2)
+
+    def test_valid_sick_tim_config(self):
+        """Test valid SICK TIM 571 config (270° FOV in radians)."""
+        import math
+        cfg = LiDARConfig(
+            num_beams=819,
+            angle_min=math.radians(-135.0),
+            angle_max=math.radians(135.0),
+            range_max=25.0,
+            range_min=0.05,
+        )
+        self.assertAlmostEqual(cfg.angle_min, -2.356, places=2)
+        self.assertAlmostEqual(cfg.angle_max, 2.356, places=2)
+
+    def test_zero_num_beams(self):
+        """Test that zero num_beams raises ValueError."""
+        with self.assertRaises(ValueError):
+            LiDARConfig(num_beams=0)
+
+    def test_negative_range_min(self):
+        """Test that negative range_min raises ValueError."""
+        with self.assertRaises(ValueError):
+            LiDARConfig(range_min=-1.0)
+
+    def test_range_min_greater_than_max(self):
+        """Test that range_min >= range_max raises ValueError."""
+        with self.assertRaises(ValueError):
+            LiDARConfig(range_min=30.0, range_max=10.0)
+
+    def test_negative_noise_std(self):
+        """Test that negative noise_std raises ValueError."""
+        with self.assertRaises(ValueError):
+            LiDARConfig(noise_std=-0.01)

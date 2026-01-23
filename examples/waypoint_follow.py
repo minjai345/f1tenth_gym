@@ -315,12 +315,12 @@ def main():
     work = {
         "mass": 3.463388126201571,
         "lf": 0.15597534362552312,
-        "tlad": 0.82461887897713965 * 2,
+        "tlad": 0.82461887897713965 * 1.5,
         "vgain": 1.,
     }
     num_agents = 1
     cfg = EnvConfig(
-        map_name="Spielberg_blank",
+        map_name="Spielberg",
         map_scale=1.0,
         num_agents=num_agents,
         control_config=ControlConfig(steer_delay_steps=1),
@@ -336,7 +336,7 @@ def main():
         reset_config=ResetConfig(strategy=ResetStrategy.RL_RANDOM_STATIC),
         # USE SICK TIM 571 CONFIGURATION (270° FOV)
         lidar_config=LiDARConfig(
-            enabled=False,
+            enabled=True,
             num_beams=819,
             angle_min=np.deg2rad(-135.0),  # Convert degrees to radians
             angle_max=np.deg2rad(135.0),   # Convert degrees to radians

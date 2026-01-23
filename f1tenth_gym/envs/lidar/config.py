@@ -58,6 +58,17 @@ class LiDARConfig:
             raise ValueError(
                 f"angle_min ({self.angle_min}) must be less than angle_max ({self.angle_max})"
             )
+        import math
+        if self.angle_min < -math.pi:
+            raise ValueError(
+                f"angle_min ({self.angle_min}) must be >= -π (-180°). "
+                f"Did you pass degrees instead of radians? Use np.deg2rad() to convert."
+            )
+        if self.angle_max > math.pi:
+            raise ValueError(
+                f"angle_max ({self.angle_max}) must be <= π (180°). "
+                f"Did you pass degrees instead of radians? Use np.deg2rad() to convert."
+            )
 
     @property
     def angle_increment(self) -> float:
