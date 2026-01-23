@@ -267,8 +267,6 @@ class F110Env(gym.Env):
             done (bool): if the simulation is done
             info (dict): auxillary information dictionary
         """
-        if seed is not None:
-            np.random.seed(seed=seed)
         super().reset(seed=seed)
 
         self.sim_time = 0.0
@@ -283,7 +281,7 @@ class F110Env(gym.Env):
             poses = options["states"]
             option = "state"
         else:
-            poses = self.reset_fn.sample()
+            poses = self.reset_fn.sample(self.np_random)
             option = "pose"
 
 

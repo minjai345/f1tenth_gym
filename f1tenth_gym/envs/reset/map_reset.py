@@ -31,16 +31,17 @@ class MapResetFn(ResetFn):
         self.mask = self.get_mask() 
 
 
-    def sample(self) -> np.ndarray:
-        # Random ample an x-y position from the mask
+    def sample(self, rng: np.random.Generator) -> np.ndarray:
+        # Random sample an x-y position from the mask
         valid_x, valid_y = np.where(self.mask)
-        idx = np.random.choice(len(valid_x))
+        idx = rng.choice(len(valid_x))
         pose_x = valid_x[idx] * self.track.spec.resolution + self.track.spec.origin[0]
         pose_y = valid_y[idx] * self.track.spec.resolution + self.track.spec.origin[1]
-        pose_theta = np.random.uniform(-np.pi, np.pi)
+        pose_theta = rng.uniform(-np.pi, np.pi)
         pose = np.array([pose_x, pose_y, pose_theta])
         
         poses = sample_around_pose(
+            rng=rng,
             pose=pose,
             n_agents=self.n_agents,
             min_dist=self.min_dist,
@@ -76,10 +77,10 @@ class AllMapResetFn(MapResetFn):
         dilated_inverted = (255 - dilated)
         return dilated_inverted == 255
 
-    def sample(self) -> np.ndarray:
-        poses = super().sample()
+    def sample(self, rng: np.random.Generator) -> np.ndarray:
+        poses = super().sample(rng)
 
         if self.shuffle:
-            np.random.shuffle(poses)
+            rng.shuffle(poses)
 
         return poses

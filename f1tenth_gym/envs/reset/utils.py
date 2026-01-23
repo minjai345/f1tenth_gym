@@ -4,6 +4,7 @@ from ..track import Raceline
 
 
 def sample_around_waypoint(
+    rng: np.random.Generator,
     reference_line: Raceline,
     waypoint_id: int,
     n_agents: int,
@@ -28,7 +29,7 @@ def sample_around_waypoint(
 
     poses = []
     rnd_sign = (
-        np.random.choice([-1.0, 1.0]) if move_laterally else 0.0
+        rng.choice([-1.0, 1.0]) if move_laterally else 0.0
     )  # random sign to sample lateral position (left/right)
     for i in range(n_agents):
         # compute pose from current wp_id
@@ -78,13 +79,14 @@ def sample_around_waypoint(
                 interval_len += 1
             pnt_id += 1
         # sample next waypoint
-        current_wp_id = (first_id + np.random.randint(0, interval_len + 1)) % (
+        current_wp_id = (first_id + rng.integers(0, interval_len + 1)) % (
             n_waypoints
         )
 
     return np.array(poses)
 
 def sample_around_pose(
+    rng: np.random.Generator,
     pose: np.ndarray,
     n_agents: int,
     min_dist: float,
@@ -109,8 +111,8 @@ def sample_around_pose(
         pose = np.array([x, y, theta])
         poses.append(pose)
         # sample next pose
-        dist = np.random.uniform(min_dist, max_dist)
-        theta = np.random.uniform(-np.pi, np.pi)
+        dist = rng.uniform(min_dist, max_dist)
+        theta = rng.uniform(-np.pi, np.pi)
         x += dist * np.cos(theta)
         y += dist * np.sin(theta)
         current_pose = np.array([x, y, theta])

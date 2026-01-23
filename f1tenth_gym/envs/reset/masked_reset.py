@@ -28,9 +28,10 @@ class MaskedResetFn(ResetFn):
         self.mask = self.get_mask()
         self.reference_line = reference_line
 
-    def sample(self) -> np.ndarray:
-        waypoint_id = np.random.choice(np.where(self.mask)[0])
+    def sample(self, rng: np.random.Generator) -> np.ndarray:
+        waypoint_id = rng.choice(np.where(self.mask)[0])
         poses = sample_around_waypoint(
+            rng=rng,
             reference_line=self.reference_line,
             waypoint_id=waypoint_id,
             n_agents=self.n_agents,
@@ -73,11 +74,11 @@ class GridResetFn(MaskedResetFn):
         mask[:n_wps] = 1
         return mask.astype(bool)
 
-    def sample(self) -> np.ndarray:
-        poses = super().sample()
+    def sample(self, rng: np.random.Generator) -> np.ndarray:
+        poses = super().sample(rng)
 
         if self.shuffle:
-            np.random.shuffle(poses)
+            rng.shuffle(poses)
 
         return poses
 
@@ -104,10 +105,10 @@ class AllTrackResetFn(MaskedResetFn):
     def get_mask(self) -> np.ndarray:
         return np.ones(self.reference_line.n).astype(bool)
 
-    def sample(self) -> np.ndarray:
-        poses = super().sample()
+    def sample(self, rng: np.random.Generator) -> np.ndarray:
+        poses = super().sample(rng)
 
         if self.shuffle:
-            np.random.shuffle(poses)
+            rng.shuffle(poses)
 
         return poses

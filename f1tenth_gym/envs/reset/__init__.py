@@ -13,8 +13,12 @@ __all__ = ["ResetFn", "ResetStrategy", "make_reset_fn", "GridResetFn", "AllTrack
 
 class ResetFn(ABC):
     @abstractmethod
-    def sample(self) -> np.ndarray:
-        """Return initial poses for all agents."""
+    def sample(self, rng: np.random.Generator) -> np.ndarray:
+        """Return initial poses for all agents.
+        
+        Args:
+            rng: numpy random number generator for reproducibility
+        """
 
 
 class ResetStrategy(IntEnum):
