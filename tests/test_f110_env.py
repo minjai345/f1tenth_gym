@@ -1,4 +1,6 @@
+import math
 import unittest
+from dataclasses import fields
 
 import gymnasium as gym
 import numpy as np
@@ -7,6 +9,17 @@ from f1tenth_gym.envs.action import LongitudinalActionType, SteerActionType
 from f1tenth_gym.envs.env_config import ControlConfig, EnvConfig, ObservationConfig, ResetConfig
 from f1tenth_gym.envs.observation import ObservationType
 from f1tenth_gym.envs.reset import ResetStrategy
+
+
+def assert_vehicle_params_equal(test_case, params1, params2, msg=""):
+    """Compare VehicleParameters with NaN-aware equality."""
+    for field in fields(params1):
+        val1 = getattr(params1, field.name)
+        val2 = getattr(params2, field.name)
+        if isinstance(val1, (float, np.floating)) and isinstance(val2, (float, np.floating)):
+            if math.isnan(val1) and math.isnan(val2):
+                continue  # Both NaN - considered equal
+        test_case.assertEqual(val1, val2, f"{msg} Field '{field.name}' mismatch: {val1} != {val2}")
 
 
 class TestEnvInterface(unittest.TestCase):
@@ -33,11 +46,12 @@ class TestEnvInterface(unittest.TestCase):
 
         base_params = base_env.unwrapped.vehicle_params
         extended_params = extended_env.unwrapped.vehicle_params
-        self.assertEqual(base_params, extended_params)
+        assert_vehicle_params_equal(self, base_params, extended_params)
 
         np.testing.assert_allclose(
             base_env.unwrapped.sim.params_array,
             extended_env.unwrapped.sim.params_array,
+            equal_nan=True,
         )
 
         obs0, _ = base_env.reset(options={"poses": np.array([[0.0, 0.0, np.pi / 2]])})
