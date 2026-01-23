@@ -25,7 +25,7 @@ IntegratorFn = Callable[[DynamicsFn, np.ndarray, np.ndarray, float, np.ndarray],
 AccelerationFn = Callable[[float, np.ndarray, VehicleParameters], float]
 SteeringFn = Callable[[float, np.ndarray, VehicleParameters], float]
 
-@dataclass(slots=True)
+@dataclass
 class ScanCache:
     angles: np.ndarray
     cosines: np.ndarray

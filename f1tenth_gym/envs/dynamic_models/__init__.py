@@ -30,7 +30,7 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class VehicleParameters:
     """Typed view over the vehicle parameters used by the dynamics models."""
 

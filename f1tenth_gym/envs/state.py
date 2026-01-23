@@ -7,7 +7,7 @@ from typing import Optional
 import numpy as np
 
 
-@dataclass(slots=True)
+@dataclass
 class SimulationState:
     """Collection of arrays describing the multi-agent simulation."""
 

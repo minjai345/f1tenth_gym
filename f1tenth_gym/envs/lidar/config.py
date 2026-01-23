@@ -5,7 +5,7 @@ from dataclasses import dataclass, replace
 __all__ = ["LiDARConfig"]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class LiDARConfig:
     """Configuration for the simulated LiDAR sensor."""
 

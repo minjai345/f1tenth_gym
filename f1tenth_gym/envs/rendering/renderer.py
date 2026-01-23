@@ -3,7 +3,7 @@ from __future__ import annotations
 from abc import abstractmethod, ABC
 from dataclasses import dataclass
 
-@dataclass(slots=True)
+@dataclass
 class RenderSpec:
     window_size: int = 800
     focus_on: str | None = "agent_0"

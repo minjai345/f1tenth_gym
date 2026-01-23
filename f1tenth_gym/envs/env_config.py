@@ -34,7 +34,7 @@ class LoopCounterMode(IntEnum):
     WINDING_ANGLE = 3
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class ControlConfig:
     longitudinal_mode: LongitudinalActionType = LongitudinalActionType.SPEED
     steering_mode: SteerActionType = SteerActionType.STEERING_ANGLE
@@ -44,7 +44,7 @@ class ControlConfig:
         return replace(self, **changes)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class SimulationConfig:
     timestep: float = 0.01
     integrator_timestep: float = 0.01
@@ -61,7 +61,7 @@ class SimulationConfig:
         return updated
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class ObservationConfig:
     type: ObservationType = ObservationType.DIRECT
     features: Optional[tuple[str, ...]] = None
@@ -70,7 +70,7 @@ class ObservationConfig:
         return replace(self, **changes)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class ResetConfig:
     strategy: ResetStrategy = ResetStrategy.RL_GRID_STATIC
 
@@ -78,7 +78,7 @@ class ResetConfig:
         return replace(self, **changes)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class EnvConfig:
     seed: int = 12345
     map_name: "Track | str" = "Spielberg"
