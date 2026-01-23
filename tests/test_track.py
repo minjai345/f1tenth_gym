@@ -56,8 +56,8 @@ class TestTrack(unittest.TestCase):
                 trackdirname[0].isupper(), f"trackdir {trackdirname} is not capitalized"
             )
 
-            # check map spec file exists
-            file_spec = trackdir / f"{trackdirname}_map.yaml"
+            # check map spec file exists (new convention: {track}.yaml)
+            file_spec = trackdir / f"{trackdirname}.yaml"
             self.assertTrue(
                 file_spec.exists(),
                 f"map spec file {file_spec} does not exist in {trackdir}",
