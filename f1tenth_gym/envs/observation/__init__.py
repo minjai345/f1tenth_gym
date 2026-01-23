@@ -14,6 +14,16 @@ __all__ = [
 
 
 class ObservationType(IntEnum):
+    """Type of observation returned by the environment.
+
+    DIRECT: Full observation dict with all base fields.
+    ORIGINAL: Same as DIRECT (backwards compatibility).
+    FEATURES: Custom subset of features specified via config.
+    KINEMATIC_STATE: Kinematic state features (x, y, delta, vx, theta).
+    DYNAMIC_STATE: Dynamic state features including angular velocity and slip angle.
+    FRENET_DYNAMIC_STATE: Dynamic state with separate vx/vy components.
+    """
+
     DIRECT = 1
     ORIGINAL = 2
     FEATURES = 3
@@ -103,6 +113,16 @@ def observation_factory(
     type: ObservationType | None = None,
     **kwargs,
 ) -> Observation:
+    """Create an Observation instance based on the specified type.
+
+    Args:
+        env: The F110Env environment instance.
+        type: Observation type to create (default: DIRECT).
+        **kwargs: Additional arguments (e.g., features for FEATURES type).
+
+    Returns:
+        Configured Observation instance.
+    """
     if type is None:
         obs_type = ObservationType.DIRECT
     elif isinstance(type, ObservationType):

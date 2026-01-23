@@ -28,11 +28,17 @@ from .track import Track
 
 class F110Env(gym.Env):
     """
-    OpenAI gym environment for F1TENTH.
+    OpenAI Gym environment for F1TENTH autonomous racing.
 
-    Args:
-        config: EnvConfig | None: Optional environment configuration.
-        render_mode: Rendering mode requested by Gymnasium.
+    Simulates 1/10th scale autonomous race cars with realistic physics,
+    LiDAR sensing, and collision detection.
+
+    Attributes:
+        track: The racing track used for simulation.
+        sim: The underlying F110Simulator instance.
+        num_agents: Number of agents in the environment.
+        ego_idx: Index of the ego agent.
+        vehicle_params: Vehicle parameters for dynamics.
     """
 
     metadata = {"render_modes": ["human", "human_fast", "rgb_array", "unlimited"], "render_fps": 100}
@@ -58,6 +64,12 @@ class F110Env(gym.Env):
         self._initialize_components()
 
     def configure(self, config: EnvConfig | None) -> None:
+        """
+        Reconfigure the environment with new settings.
+
+        Args:
+            config: New environment configuration, or None to skip.
+        """
         if config is None:
             return
         if not isinstance(config, EnvConfig):

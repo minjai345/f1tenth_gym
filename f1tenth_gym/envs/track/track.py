@@ -17,6 +17,18 @@ from .utils import find_track_dir
 
 @dataclass
 class TrackSpec(YamlDataClassConfig):
+    """Track specification loaded from YAML config file.
+
+    Attributes:
+        name: Track name identifier.
+        image: Filename of the occupancy map image.
+        resolution: Map resolution in meters/pixel.
+        origin: Map origin as (x, y, theta) in world coordinates.
+        negate: Whether to negate the image values.
+        occupied_thresh: Threshold for occupied cells.
+        free_thresh: Threshold for free cells.
+    """
+
     name: Optional[str]
     image: Optional[str]
     resolution: float
@@ -27,6 +39,20 @@ class TrackSpec(YamlDataClassConfig):
 
 @dataclass
 class Track:
+    """Racing track with occupancy map and reference lines.
+
+    Provides track geometry, collision detection via occupancy grid,
+    and Frenet frame coordinate transformations.
+
+    Attributes:
+        spec: Track specification with map metadata.
+        filepath: Path to the track files.
+        ext: File extension of the map image.
+        occupancy_map: 2D occupancy grid for collision detection.
+        centerline: Track centerline as a Raceline.
+        raceline: Optimal racing line as a Raceline.
+    """
+
     spec: TrackSpec
     filepath: Optional[str]
     ext: Optional[str]

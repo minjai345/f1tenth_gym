@@ -5,10 +5,23 @@ import numpy as np
 from .dynamic_models import VehicleParameters, pid_steer, pid_accl
 
 class LongitudinalActionType(IntEnum):
+    """Longitudinal control input mode.
+
+    ACCL: Direct acceleration command in m/s^2.
+    SPEED: Target speed command in m/s (uses PID control).
+    """
+
     ACCL = 1
     SPEED = 2
 
+
 class SteerActionType(IntEnum):
+    """Steering control input mode.
+
+    STEERING_ANGLE: Target steering angle in radians (uses PID control).
+    STEERING_SPEED: Direct steering velocity in rad/s.
+    """
+
     STEERING_ANGLE = 1
     STEERING_SPEED = 2
 

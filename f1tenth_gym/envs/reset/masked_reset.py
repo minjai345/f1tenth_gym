@@ -8,9 +8,11 @@ from ..track import Raceline
 
 
 class MaskedResetFn(ResetFn):
+    """Reset function that samples from masked waypoints on a reference line."""
+
     @abstractmethod
     def get_mask(self) -> np.ndarray:
-        pass
+        """Return boolean mask indicating valid waypoints for reset."""
 
     def __init__(
         self,
@@ -43,6 +45,8 @@ class MaskedResetFn(ResetFn):
 
 
 class GridResetFn(MaskedResetFn):
+    """Reset agents in a grid formation near the start/finish line."""
+
     def __init__(
         self,
         reference_line: Raceline,
@@ -84,6 +88,8 @@ class GridResetFn(MaskedResetFn):
 
 
 class AllTrackResetFn(MaskedResetFn):
+    """Reset agents at random positions anywhere along the track."""
+
     def __init__(
         self,
         reference_line: Raceline,

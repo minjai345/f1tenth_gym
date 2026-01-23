@@ -29,6 +29,13 @@ IntegratorFn = Callable[[DynamicsFn, np.ndarray, np.ndarray, float, np.ndarray],
 
 
 class LoopCounterMode(IntEnum):
+    """Mode for counting completed laps.
+
+    TOGGLE: Uses start/finish line crossing detection.
+    FRENET_BASED: Uses Frenet frame progress along centerline.
+    WINDING_ANGLE: Uses cumulative angle around track center.
+    """
+
     TOGGLE = 1
     FRENET_BASED = 2
     WINDING_ANGLE = 3
@@ -36,6 +43,14 @@ class LoopCounterMode(IntEnum):
 
 @dataclass(frozen=True)
 class ControlConfig:
+    """Configuration for vehicle control inputs.
+
+    Attributes:
+        longitudinal_mode: How longitudinal control is interpreted (speed or acceleration).
+        steering_mode: How steering control is interpreted (angle or angular velocity).
+        steer_delay_steps: Number of timesteps to delay steering commands.
+    """
+
     longitudinal_mode: LongitudinalActionType = LongitudinalActionType.SPEED
     steering_mode: SteerActionType = SteerActionType.STEERING_ANGLE
     steer_delay_steps: int = 0
@@ -50,6 +65,18 @@ class ControlConfig:
 
 @dataclass(frozen=True)
 class SimulationConfig:
+    """Configuration for physics simulation.
+
+    Attributes:
+        timestep: Simulation timestep in seconds.
+        integrator_timestep: Integration timestep (can be smaller than timestep).
+        integrator: Numerical integration method (Euler or RK4).
+        dynamics_model: Vehicle dynamics model to use.
+        loop_counter: Method for counting completed laps.
+        compute_frenet_frame: Whether to compute Frenet frame coordinates.
+        max_laps: Maximum laps before episode ends (None for infinite).
+    """
+
     timestep: float = 0.01
     integrator_timestep: float = 0.01
     integrator: IntegratorType = IntegratorType.RK4
@@ -75,6 +102,13 @@ class SimulationConfig:
 
 @dataclass(frozen=True)
 class ObservationConfig:
+    """Configuration for environment observations.
+
+    Attributes:
+        type: Observation format type.
+        features: Specific features to include (None for all).
+    """
+
     type: ObservationType = ObservationType.DIRECT
     features: Optional[tuple[str, ...]] = None
 
@@ -84,6 +118,12 @@ class ObservationConfig:
 
 @dataclass(frozen=True)
 class ResetConfig:
+    """Configuration for episode reset behavior.
+
+    Attributes:
+        strategy: Reset strategy for initial agent positions.
+    """
+
     strategy: ResetStrategy = ResetStrategy.RL_GRID_STATIC
 
     def with_updates(self, **changes: Any) -> "ResetConfig":
@@ -92,6 +132,24 @@ class ResetConfig:
 
 @dataclass(frozen=True)
 class EnvConfig:
+    """Main configuration for the F1TENTH environment.
+
+    Attributes:
+        seed: Random seed for reproducibility.
+        map_name: Track name, path, or Track instance.
+        map_scale: Scale factor for the map.
+        params: Vehicle physical parameters.
+        num_agents: Number of agents in the environment.
+        ego_index: Index of the ego agent (0-indexed).
+        control_config: Control input configuration.
+        simulation_config: Physics simulation configuration.
+        observation_config: Observation space configuration.
+        reset_config: Episode reset configuration.
+        lidar_config: LiDAR sensor configuration.
+        collision_check: Collision detection mode.
+        render_enabled: Whether rendering is enabled.
+    """
+
     seed: int = 12345
     map_name: "Track | str" = "Spielberg"
     map_scale: float = 1.0

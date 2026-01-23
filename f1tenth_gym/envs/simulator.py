@@ -27,13 +27,31 @@ SteeringFn = Callable[[float, np.ndarray, VehicleParameters], float]
 
 @dataclass
 class ScanCache:
+    """Precomputed LiDAR geometry for collision detection.
+
+    Attributes:
+        angles: Beam angles relative to vehicle heading.
+        cosines: Cosines of beam angles.
+        side_distances: Distance from vehicle center to edge per beam.
+    """
+
     angles: np.ndarray
     cosines: np.ndarray
     side_distances: np.ndarray
 
 
 class F110Simulator:
-    """State-driven simulator that steps all agents without per-agent objects."""
+    """Core simulator for F1TENTH multi-agent racing.
+
+    Handles vehicle dynamics integration, LiDAR simulation, and collision detection
+    for all agents in a single state-driven update loop.
+
+    Attributes:
+        state: Current simulation state containing poses, velocities, scans.
+        track: The racing track being simulated.
+        vehicle_params: Physical parameters of the vehicle.
+        num_agents: Number of agents in the simulation.
+    """
 
     ttc_threshold: float = 0.005
 
@@ -122,6 +140,12 @@ class F110Simulator:
     # Public API
     # ---------------------------------------------------------------------
     def set_map(self, track: Track, map_scale: float = 1.0) -> None:
+        """Set or update the track used for simulation.
+
+        Args:
+            track: Track object with occupancy map and reference lines.
+            map_scale: Scale factor applied to the map.
+        """
         self.track = track
         if not self.scan_enabled:
             return
@@ -129,6 +153,12 @@ class F110Simulator:
             simulator.set_map(track, map_scale)
 
     def update_params(self, vehicle_params: VehicleParameters, agent_idx: int = -1) -> None:
+        """Update vehicle parameters for all agents.
+
+        Args:
+            vehicle_params: New vehicle physical parameters.
+            agent_idx: Agent index (-1 for all agents, per-agent not supported).
+        """
         if agent_idx >= 0:
             raise NotImplementedError("Per-agent parameter updates are not supported")
         self.vehicle_params = vehicle_params
@@ -138,6 +168,13 @@ class F110Simulator:
                 self.scan_cache[i] = self._build_scan_cache(simulator, vehicle_params)
 
     def reset(self, poses: np.ndarray, *, option: str = "pose") -> None:
+        """Reset all agents to initial positions.
+
+        Args:
+            poses: Initial positions, shape (num_agents, 3) for poses or
+                   (num_agents, state_dim) for full state.
+            option: Reset mode - "pose" for (x, y, theta) or "state" for full state.
+        """
         if poses.shape[0] != self.num_agents:
             raise ValueError("Number of poses does not match number of agents")
 
@@ -174,6 +211,12 @@ class F110Simulator:
                     dtype=np.float32,
                 )
     def step(self, control_inputs: np.ndarray) -> None:
+        """Advance simulation by one timestep.
+
+        Args:
+            control_inputs: Control commands, shape (num_agents, 2) with
+                            [steering, acceleration/speed] per agent.
+        """
         if control_inputs.shape != (self.num_agents, self.control_dim):
             raise ValueError("Control input has incorrect shape")
 
