@@ -2,6 +2,12 @@ from __future__ import annotations
 
 from abc import abstractmethod, ABC
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, Optional, Union
+
+import numpy as np
+
+if TYPE_CHECKING:
+    pass
 
 @dataclass
 class RenderSpec:
@@ -74,6 +80,88 @@ class EnvRenderer(ABC):
         """
         raise NotImplementedError()
 
+    @abstractmethod
+    def get_points_renderer(
+        self,
+        points: Union[list, np.ndarray],
+        color: Optional[tuple[int, int, int]] = (0, 0, 255),
+        size: Optional[int] = 1,
+        **kwargs,
+    ) -> "ObjectRenderer":
+        """
+        Get a point renderer for visualizing points on the map.
+
+        Parameters
+        ----------
+        points : Union[list, np.ndarray]
+            Array of shape (N, 2) or (N, 3) with point coordinates.
+        color : tuple[int, int, int], optional
+            RGB color tuple, by default (0, 0, 255) (blue).
+        size : int, optional
+            Size of points in pixels, by default 1.
+
+        Returns
+        -------
+        ObjectRenderer
+            A renderer object that can be updated with new points.
+        """
+        raise NotImplementedError()
+
+    @abstractmethod
+    def get_lines_renderer(
+        self,
+        points: Union[list, np.ndarray],
+        color: Optional[tuple[int, int, int]] = (0, 0, 255),
+        size: Optional[int] = 1,
+        **kwargs,
+    ) -> "ObjectRenderer":
+        """
+        Get a line renderer for visualizing connected line segments.
+
+        Parameters
+        ----------
+        points : Union[list, np.ndarray]
+            Array of shape (N, 2) or (N, 3) with point coordinates forming line segments.
+        color : tuple[int, int, int], optional
+            RGB color tuple, by default (0, 0, 255) (blue).
+        size : int, optional
+            Line width in pixels, by default 1.
+
+        Returns
+        -------
+        ObjectRenderer
+            A renderer object that can be updated with new points.
+        """
+        raise NotImplementedError()
+
+    @abstractmethod
+    def get_closed_lines_renderer(
+        self,
+        points: Union[list, np.ndarray],
+        color: Optional[tuple[int, int, int]] = (0, 0, 255),
+        size: Optional[int] = 1,
+        **kwargs,
+    ) -> "ObjectRenderer":
+        """
+        Get a closed line renderer for visualizing polygons or closed paths.
+
+        Parameters
+        ----------
+        points : Union[list, np.ndarray]
+            Array of shape (N, 2) or (N, 3) with point coordinates forming a closed shape.
+        color : tuple[int, int, int], optional
+            RGB color tuple, by default (0, 0, 255) (blue).
+        size : int, optional
+            Line width in pixels, by default 1.
+
+        Returns
+        -------
+        ObjectRenderer
+            A renderer object that can be updated with new points.
+        """
+        raise NotImplementedError()
+
+
 class ObjectRenderer(ABC):
     
     @abstractmethod
@@ -85,9 +173,13 @@ class ObjectRenderer(ABC):
         pass
     
     @abstractmethod
-    def update(self):
+    def update(self, points: np.ndarray) -> None:
         """
-        Update the point renderer with new data.
-        This is called at every rendering call.
+        Update the renderer with new point data.
+        
+        Parameters
+        ----------
+        points : np.ndarray
+            Array of shape (N, 2) or (N, 3) with point coordinates.
         """
         raise NotImplementedError()

@@ -1,11 +1,20 @@
 import os
 from typing import Optional, TYPE_CHECKING
 
-from .renderer import RenderSpec, EnvRenderer
+from .renderer import RenderSpec, EnvRenderer, ObjectRenderer
+from .callbacks import make_lidar_scan_callback
 from ..dynamic_models import VehicleParameters
 
 if TYPE_CHECKING:
     from ..track import Track
+
+__all__ = [
+    "RenderSpec",
+    "EnvRenderer",
+    "ObjectRenderer",
+    "make_lidar_scan_callback",
+    "make_renderer",
+]
 
 def make_renderer(
     params: VehicleParameters,

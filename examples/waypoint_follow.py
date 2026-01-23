@@ -17,6 +17,7 @@ from f1tenth_gym.envs.env_config import (
     SimulationConfig,
 )
 from f1tenth_gym.envs.lidar import LiDARConfig
+from f1tenth_gym.envs.rendering import make_lidar_scan_callback
 
 """
 Planner Helpers
@@ -319,7 +320,7 @@ def main():
     }
     num_agents = 1
     cfg = EnvConfig(
-        map_name="Spielberg",
+        map_name="Spielberg_blank",
         map_scale=1.0,
         num_agents=num_agents,
         control_config=ControlConfig(steer_delay_steps=1),
@@ -333,13 +334,23 @@ def main():
         ),
         observation_config=ObservationConfig(type=ObservationType.KINEMATIC_STATE),
         reset_config=ResetConfig(strategy=ResetStrategy.RL_RANDOM_STATIC),
-        lidar_config=LiDARConfig(enabled=False, num_beams=270),
+        # USE SICK TIM 571 CONFIGURATION (270° FOV)
+        lidar_config=LiDARConfig(
+            enabled=False,
+            num_beams=819,
+            angle_min=np.deg2rad(-135.0),  # Convert degrees to radians
+            angle_max=np.deg2rad(135.0),   # Convert degrees to radians
+            range_max=25.0,
+            range_min=0.05,
+            noise_std=0.01,
+            base_link_to_lidar_tf=(0.275, 0.0, 0.0),
+        )
     )
 
     env = gym.make(
         "f1tenth_gym:f1tenth-v0",
         config=cfg,
-        render_mode="unlimited", # "human", "human_fast", "unlimited"
+        render_mode="unlimited", # "human", "human_fast", "unlimited"I want to add visualization of the lidar scan visualization as a "point cloud" similar to how I would see a scan in rviz. Can we add a render callback built-into the gym that someone can add after creating the gym? See how render callbacks are added in waypoint follow. The render callback for the scan would then be initialized per instance of the f1tenth gym (so we can visually confirm scans are working)
     )
     track = env.unwrapped.track
 
@@ -354,6 +365,10 @@ def main():
     track.raceline.render_waypoints(env.unwrapped.renderer)
     for r in planner.get_render_callbacks():
         env.unwrapped.add_render_callback(r)
+    
+    # Add lidar scan visualization
+    lidar_callback = make_lidar_scan_callback("agent_0", cfg.lidar_config, color=(255, 0, 0), size=2)
+    env.unwrapped.add_render_callback(lidar_callback)
 
     frenet_start = np.array(env.unwrapped.track.frenet_to_cartesian(0.0, 0, 0))
     frenet_start2 = np.array(env.unwrapped.track.frenet_to_cartesian(10, 0, 0))

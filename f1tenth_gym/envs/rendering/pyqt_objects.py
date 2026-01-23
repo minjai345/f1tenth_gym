@@ -52,7 +52,8 @@ class PointsRenderer(ObjectRenderer):
         env_renderer: EnvRenderer,
         points: Union[list, np.ndarray], 
         color: Optional[tuple[int, int, int]] = (0, 0, 255), 
-        size: Optional[int] = 1
+        size: Optional[int] = 1,
+        **kwargs,  # Accept additional kwargs for compatibility with 3D renderer
         ):
         self.renderer = env_renderer.canvas.plot(
             points[:, 0],
