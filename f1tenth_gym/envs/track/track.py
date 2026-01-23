@@ -165,9 +165,8 @@ class Track:
                 centerline=centerline,
                 raceline=raceline,
             )
-        except Exception as ex:
-            print(ex)
-            raise FileNotFoundError(f"It could not load track {track}") from ex
+        except (FileNotFoundError, ValueError, KeyError) as ex:
+            raise type(ex)(f"Could not load track '{track}': {ex}") from ex
 
     @staticmethod
     def from_track_path(path: pathlib.Path, track_scale: float = 1.0) -> Track:
@@ -228,9 +227,7 @@ class Track:
             if centerline is None:
                 centerline = raceline
             if raceline is None and centerline is None:
-                raise ValueError(
-                    f"Please provide a centerline/raceline."
-                )
+                raise ValueError("Please provide a centerline/raceline.")
 
             return Track(
                 spec=track_spec,
@@ -240,9 +237,8 @@ class Track:
                 centerline=centerline,
                 raceline=raceline,
             )
-        except Exception as ex:
-            print(ex)
-            raise FileNotFoundError(f"It could not load track {path}") from ex
+        except (FileNotFoundError, ValueError, KeyError) as ex:
+            raise type(ex)(f"Could not load track '{path}': {ex}") from ex
 
     @staticmethod
     def from_refline(x: np.ndarray, y: np.ndarray, velx: np.ndarray):

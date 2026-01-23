@@ -1,6 +1,5 @@
 from __future__ import annotations
 import numpy as np
-import time
 import pyqtgraph.opengl as gl
 
 from .renderer import RenderSpec, EnvRenderer, ObjectRenderer

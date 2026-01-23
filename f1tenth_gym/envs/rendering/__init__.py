@@ -1,8 +1,11 @@
 import os
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 from .renderer import RenderSpec, EnvRenderer
 from ..dynamic_models import VehicleParameters
+
+if TYPE_CHECKING:
+    from ..track import Track
 
 def make_renderer(
     params: VehicleParameters,
