@@ -96,13 +96,17 @@ class F110Simulator:
         self.scan_rngs: list[np.random.Generator] = []
         self.scan_cache: list[ScanCache] = []
         if self.scan_enabled:
+            lidar_cfg = env_config.lidar_config
             for agent_index in range(self.num_agents):
                 rng = np.random.default_rng(seed + agent_index)
                 simulator = ScanSimulator2D(
-                    env_config.lidar_config.num_beams,
-                    env_config.lidar_config.field_of_view,
-                    std_dev=env_config.lidar_config.noise_std,
-                    max_range=env_config.lidar_config.maximum_range,
+                    lidar_cfg.num_beams,
+                    lidar_cfg.field_of_view,
+                    angle_min=lidar_cfg.angle_min,
+                    angle_max=lidar_cfg.angle_max,
+                    std_dev=lidar_cfg.noise_std,
+                    min_range=lidar_cfg.range_min,
+                    max_range=lidar_cfg.range_max,
                 )
                 if self.track is not None:
                     simulator.set_map(self.track, env_config.map_scale)
@@ -256,9 +260,9 @@ class F110Simulator:
             raise ValueError("Vehicle length and width must be finite to build LiDAR cache")
 
         increment = simulator.get_increment()
-        fov = simulator.fov
+        angle_min = simulator.angle_min
         for idx in range(num_beams):
-            angle = -fov / 2.0 + idx * increment
+            angle = angle_min + idx * increment
             angles[idx] = angle
             cosines[idx] = math.cos(angle)
             sin_angle = math.sin(angle)

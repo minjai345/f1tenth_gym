@@ -177,7 +177,7 @@ def trace_ray(
 def get_scan(
     pose,
     theta_dis,
-    fov,
+    angle_min,
     num_beams,
     theta_index_increment,
     sines,
@@ -199,7 +199,7 @@ def get_scan(
         Args:
             pose (numpy.ndarray(3, )): current pose of the scan frame in the map
             theta_dis (int): number of steps to discretize the angles between 0 and 2pi for look up
-            fov (float): field of view of the laser scan
+            angle_min (float): start angle of the scan in radians (relative to robot heading)
             num_beams (int): number of beams in the scan
             theta_index_increment (float): increment between angle indices after discretization
 
@@ -210,7 +210,8 @@ def get_scan(
     scan = np.empty((num_beams,))
 
     # make theta discrete by mapping the range [-pi, pi] onto [0, theta_dis]
-    theta_index = theta_dis * (pose[2] - fov / 2.0) / (2.0 * np.pi)
+    # Start at pose heading + angle_min
+    theta_index = theta_dis * (pose[2] + angle_min) / (2.0 * np.pi)
 
     # make sure it's wrapped properly
     theta_index = np.fmod(theta_index, theta_dis)
@@ -428,21 +429,48 @@ class ScanSimulator2D(object):
 
     Init params:
         num_beams (int): number of beams in the scan
-        fov (float): field of view of the laser scan
+        fov (float): field of view of the laser scan (used if angle_min/angle_max not specified)
+        angle_min (float, optional): start angle of the scan in radians
+        angle_max (float, optional): end angle of the scan in radians
         eps (float, default=0.0001): ray tracing iteration termination condition
         theta_dis (int, default=2000): number of steps to discretize the angles between 0 and 2pi for look up
+        std_dev (float, default=0.01): standard deviation of range noise
+        min_range (float, default=0.0): minimum range of the laser
         max_range (float, default=30.0): maximum range of the laser
     """
 
-    def __init__(self, num_beams, fov, eps=0.0001, theta_dis=2000, std_dev=0.01, max_range=30.0):
+    def __init__(
+        self,
+        num_beams,
+        fov,
+        angle_min=None,
+        angle_max=None,
+        eps=0.0001,
+        theta_dis=2000,
+        std_dev=0.01,
+        min_range=0.0,
+        max_range=30.0,
+    ):
         # initialization
         self.num_beams = num_beams
-        self.fov = fov
         self.eps = eps
         self.std_dev = std_dev
         self.theta_dis = theta_dis
+        self.min_range = min_range
         self.max_range = max_range
-        self.angle_increment = self.fov / (self.num_beams - 1)
+
+        # Handle angle configuration
+        if angle_min is not None and angle_max is not None:
+            self.angle_min = angle_min
+            self.angle_max = angle_max
+            self.fov = angle_max - angle_min
+        else:
+            # Legacy mode: centered around 0
+            self.fov = fov
+            self.angle_min = -fov / 2.0
+            self.angle_max = fov / 2.0
+
+        self.angle_increment = self.fov / (self.num_beams - 1) if self.num_beams > 1 else 0.0
         self.theta_index_increment = theta_dis * self.angle_increment / (2.0 * np.pi)
         self.orig_c = None
         self.orig_s = None
@@ -514,11 +542,11 @@ class ScanSimulator2D(object):
         if self.map_height is None:
             raise ValueError("Map is not set for scan simulator.")
 
-            
+
         scan = get_scan(
             pose,
             self.theta_dis,
-            self.fov,
+            self.angle_min,
             self.num_beams,
             self.theta_index_increment,
             self.sines,
@@ -537,8 +565,8 @@ class ScanSimulator2D(object):
 
         if rng is not None:
             scan = scan + rng.normal(0.0, self.std_dev, size=self.num_beams)
-            
-        return np.clip(scan, 0.0, self.max_range)
+
+        return np.clip(scan, self.min_range, self.max_range)
 
     def get_increment(self):
         return self.angle_increment
