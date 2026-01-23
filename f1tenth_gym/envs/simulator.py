@@ -288,10 +288,24 @@ class F110Simulator:
         return ScanCache(angles=angles, cosines=cosines, side_distances=side_distances)
 
 
+    def _lidar_pose_from_base(self, pose: np.ndarray) -> np.ndarray:
+        tf = self.config.lidar_config.base_link_to_lidar_tf
+        dx, dy, dtheta = tf
+        if dx == 0.0 and dy == 0.0 and dtheta == 0.0:
+            return pose
+        cos_yaw = math.cos(pose[2])
+        sin_yaw = math.sin(pose[2])
+        scan_x = pose[0] + dx * cos_yaw - dy * sin_yaw
+        scan_y = pose[1] + dx * sin_yaw + dy * cos_yaw
+        scan_theta = pose[2] + dtheta
+        return np.array([scan_x, scan_y, scan_theta], dtype=pose.dtype)
+
+
     def _update_scans(self) -> None:
         for agent_idx, simulator in enumerate(self.scan_sims):
             pose = self.state.poses[agent_idx]
-            scan = simulator.scan(pose, self.scan_rngs[agent_idx])
+            scan_pose = self._lidar_pose_from_base(pose)
+            scan = simulator.scan(scan_pose, self.scan_rngs[agent_idx])
             cache = self.scan_cache[agent_idx]
             in_collision = check_ttc_jit(
                 scan,
@@ -307,7 +321,7 @@ class F110Simulator:
             else:
                 self.state.collisions[agent_idx] = 0.0
 
-            origin = pose.astype(np.float64)
+            origin = scan_pose.astype(np.float64)
             adjusted_scan = scan
             for opp_idx in range(self.num_agents):
                 if opp_idx == agent_idx:
