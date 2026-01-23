@@ -40,6 +40,10 @@ class ControlConfig:
     steering_mode: SteerActionType = SteerActionType.STEERING_ANGLE
     steer_delay_steps: int = 0
 
+    def __post_init__(self) -> None:
+        if self.steer_delay_steps < 0:
+            raise ValueError(f"steer_delay_steps must be >= 0, got {self.steer_delay_steps}")
+
     def with_updates(self, **changes: Any) -> "ControlConfig":
         return replace(self, **changes)
 
@@ -53,6 +57,14 @@ class SimulationConfig:
     loop_counter: LoopCounterMode = LoopCounterMode.FRENET_BASED
     compute_frenet_frame: bool = True
     max_laps: Optional[int] = 1
+
+    def __post_init__(self) -> None:
+        if self.timestep <= 0:
+            raise ValueError(f"timestep must be > 0, got {self.timestep}")
+        if self.integrator_timestep <= 0:
+            raise ValueError(f"integrator_timestep must be > 0, got {self.integrator_timestep}")
+        if self.max_laps is not None and self.max_laps < 1:
+            raise ValueError(f"max_laps must be >= 1 or None, got {self.max_laps}")
 
     def with_updates(self, **changes: Any) -> "SimulationConfig":
         updated = replace(self, **changes)
@@ -103,6 +115,16 @@ class EnvConfig:
         object.__setattr__(self, "num_agents", int(self.num_agents))
         object.__setattr__(self, "ego_index", int(self.ego_index))
         object.__setattr__(self, "render_enabled", bool(self.render_enabled))
+
+        # Validate numeric constraints
+        if self.map_scale <= 0:
+            raise ValueError(f"map_scale must be > 0, got {self.map_scale}")
+        if self.num_agents < 1:
+            raise ValueError(f"num_agents must be >= 1, got {self.num_agents}")
+        if not (0 <= self.ego_index < self.num_agents):
+            raise ValueError(
+                f"ego_index must be in range [0, num_agents), got {self.ego_index} with num_agents={self.num_agents}"
+            )
 
         control_cfg = self.control_config
         if not isinstance(control_cfg, ControlConfig):
