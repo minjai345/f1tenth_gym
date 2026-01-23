@@ -26,10 +26,10 @@ jobs:
     - name: Install openGL
       run: sudo apt install -y freeglut3-dev libglib2.0-0 libsm6 libxrender1 libxext6 libxkbcommon-x11-0 libdbus-1-dev
 
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
     
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v2
+      uses: actions/setup-python@v4
       with:
         python-version: ${{ matrix.python-version }}
         
