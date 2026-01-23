@@ -29,7 +29,7 @@ def find_track_dir(track_name: str) -> pathlib.Path:
 
     if not (map_dir / track_name).exists():
         print("Downloading Files for: " + track_name)
-        tracks_url = "http://api.f1tenth.org/" + track_name + ".tar.xz"
+        tracks_url = "https://api.f1tenth.org/" + track_name + ".tar.xz"
         tracks_r = requests.get(url=tracks_url, allow_redirects=True)
         if tracks_r.status_code == 404:
             raise FileNotFoundError(f"No maps exists for {track_name}.")
@@ -40,9 +40,8 @@ def find_track_dir(track_name: str) -> pathlib.Path:
             f.write(tracks_r.content)
 
         print("Extracting Files for: " + track_name)
-        tracks_file = tarfile.open(tempdir + track_name + ".tar.xz")
-        tracks_file.extractall(map_dir)
-        tracks_file.close()
+        with tarfile.open(tempdir + track_name + ".tar.xz") as tracks_file:
+            tracks_file.extractall(map_dir, filter="data")
 
     # search for map in the map directory
     for subdir in map_dir.iterdir():
