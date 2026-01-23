@@ -7,6 +7,7 @@ from f1tenth_gym.envs.observation import ObservationType
 from f1tenth_gym.envs.reset import ResetStrategy
 from f1tenth_gym.envs.env_config import EnvConfig, ObservationConfig, ResetConfig
 import gymnasium as gym
+from f1tenth_gym.envs.rendering import make_lidar_scan_callback
 
 
 
@@ -37,6 +38,10 @@ def main():
 
     env.unwrapped.add_render_callback(track.raceline.render_waypoints)
     env.unwrapped.add_render_callback(planner.render_lookahead_point)
+
+    # Add lidar scan visualization
+    lidar_callback = make_lidar_scan_callback("agent_0", cfg.lidar_config, color=(255, 0, 0), size=2)
+    env.unwrapped.add_render_callback(lidar_callback)
 
     obs, info = env.reset()
     done = False

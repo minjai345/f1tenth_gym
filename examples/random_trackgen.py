@@ -204,7 +204,7 @@ def convert_track(track, track_int, track_ext, track_width, track_id, outdir):
     ax.set_ylim(-300, 300)
     plt.axis("off")
 
-    track_filepath = outdir / f"map{track_id}_map.png"
+    track_filepath = outdir / f"map{track_id}.png"
     plt.savefig(track_filepath, dpi=80)
     plt.close()
 
