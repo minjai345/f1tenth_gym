@@ -292,6 +292,13 @@ class F110Simulator:
     # ------------------------------------------------------------------
 
     def _build_scan_cache(self, simulator: ScanSimulator2D, vehicle_params: VehicleParameters) -> ScanCache:
+        """Build precomputed scan geometry for collision detection.
+
+        Computes side_distances as the distance from the LiDAR position to the
+        vehicle body edge for each beam angle. This correctly accounts for the
+        LiDAR offset (base_link_to_lidar_tf) and collision body center offset
+        (collision_body_center_x/y) from the vehicle parameters.
+        """
         num_beams = simulator.num_beams
         angles = np.zeros(num_beams, dtype=np.float32)
         cosines = np.zeros(num_beams, dtype=np.float32)
@@ -302,36 +309,40 @@ class F110Simulator:
         if not np.isfinite(half_length) or not np.isfinite(half_width):
             raise ValueError("Vehicle length and width must be finite to build LiDAR cache")
 
+        # Get LiDAR offset from base_link
+        lidar_tf = self.config.lidar_config.base_link_to_lidar_tf
+        lidar_dx, lidar_dy, lidar_dtheta = lidar_tf
+
+        # Get collision body center offset from base_link
+        body_dx = vehicle_params.collision_body_center_x
+        body_dy = vehicle_params.collision_body_center_y
+
+        # Compute LiDAR position relative to collision body center
+        # (the collision body is centered at (body_dx, body_dy) from base_link)
+        lidar_x_in_body = lidar_dx - body_dx
+        lidar_y_in_body = lidar_dy - body_dy
+
         increment = simulator.get_increment()
         angle_min = simulator.angle_min
+
         for idx in range(num_beams):
-            angle = angle_min + idx * increment
-            angles[idx] = angle
-            cosines[idx] = math.cos(angle)
-            sin_angle = math.sin(angle)
-            cos_angle = cosines[idx]
-            if math.isclose(angle, 0.0, abs_tol=1e-9):
-                side_distances[idx] = half_length
-            elif 0.0 < angle < math.pi / 2:
-                side_distances[idx] = min(
-                    half_width / max(sin_angle, 1e-9),
-                    half_length / max(cos_angle, 1e-9),
-                )
-            elif math.pi / 2 <= angle <= math.pi:
-                side_distances[idx] = min(
-                    half_width / max(math.cos(angle - math.pi / 2), 1e-9),
-                    half_length / max(math.sin(angle - math.pi / 2), 1e-9),
-                )
-            elif -math.pi / 2 < angle < 0.0:
-                side_distances[idx] = min(
-                    half_width / max(math.sin(-angle), 1e-9),
-                    half_length / max(math.cos(-angle), 1e-9),
-                )
-            else:
-                side_distances[idx] = min(
-                    half_width / max(math.cos(-angle - math.pi / 2), 1e-9),
-                    half_length / max(math.sin(-angle - math.pi / 2), 1e-9),
-                )
+            # Beam angle relative to vehicle heading
+            beam_angle = angle_min + idx * increment
+            angles[idx] = beam_angle
+            cosines[idx] = math.cos(beam_angle)
+
+            # Ray angle accounts for LiDAR yaw offset
+            ray_angle = beam_angle + lidar_dtheta
+            dir_cos = math.cos(ray_angle)
+            dir_sin = math.sin(ray_angle)
+
+            # Compute distance from LiDAR to collision body edge
+            side_distances[idx] = self._ray_to_rect_distance(
+                lidar_x_in_body, lidar_y_in_body,
+                dir_cos, dir_sin,
+                half_length, half_width,
+            )
+
         return ScanCache(angles=angles, cosines=cosines, side_distances=side_distances)
 
 
@@ -347,15 +358,100 @@ class F110Simulator:
         scan_theta = pose[2] + dtheta
         return np.array([scan_x, scan_y, scan_theta], dtype=pose.dtype)
 
+    def _collision_pose_from_base(self, pose: np.ndarray) -> np.ndarray:
+        """Transform pose from base_link to collision body center.
+
+        Args:
+            pose: Base link pose (x, y, theta).
+
+        Returns:
+            Collision body center pose in world frame.
+        """
+        dx = self.vehicle_params.collision_body_center_x
+        dy = self.vehicle_params.collision_body_center_y
+        if dx == 0.0 and dy == 0.0:
+            return pose
+        cos_yaw = math.cos(pose[2])
+        sin_yaw = math.sin(pose[2])
+        body_x = pose[0] + dx * cos_yaw - dy * sin_yaw
+        body_y = pose[1] + dx * sin_yaw + dy * cos_yaw
+        return np.array([body_x, body_y, pose[2]], dtype=pose.dtype)
+
+    @staticmethod
+    def _ray_to_rect_distance(
+        origin_x: float,
+        origin_y: float,
+        dir_cos: float,
+        dir_sin: float,
+        half_length: float,
+        half_width: float,
+    ) -> float:
+        """Compute distance from a point to the rectangle boundary along a ray.
+
+        Args:
+            origin_x, origin_y: Ray origin point (e.g., LiDAR position in body frame).
+            dir_cos, dir_sin: Ray direction as (cos(angle), sin(angle)).
+            half_length: Half of vehicle length (x extent from center).
+            half_width: Half of vehicle width (y extent from center).
+
+        Returns:
+            Distance from origin to rectangle edge along the ray direction.
+            Returns 0.0 if origin is outside the rectangle.
+        """
+        x_min, x_max = -half_length, half_length
+        y_min, y_max = -half_width, half_width
+
+        eps = 1e-9
+        if not (x_min - eps <= origin_x <= x_max + eps and
+                y_min - eps <= origin_y <= y_max + eps):
+            return 0.0
+
+        min_t = float('inf')
+
+        if abs(dir_cos) > eps:
+            t = (x_max - origin_x) / dir_cos
+            if t > eps:
+                y_intersect = origin_y + t * dir_sin
+                if y_min - eps <= y_intersect <= y_max + eps:
+                    min_t = min(min_t, t)
+
+            t = (x_min - origin_x) / dir_cos
+            if t > eps:
+                y_intersect = origin_y + t * dir_sin
+                if y_min - eps <= y_intersect <= y_max + eps:
+                    min_t = min(min_t, t)
+
+        if abs(dir_sin) > eps:
+            t = (y_max - origin_y) / dir_sin
+            if t > eps:
+                x_intersect = origin_x + t * dir_cos
+                if x_min - eps <= x_intersect <= x_max + eps:
+                    min_t = min(min_t, t)
+
+            t = (y_min - origin_y) / dir_sin
+            if t > eps:
+                x_intersect = origin_x + t * dir_cos
+                if x_min - eps <= x_intersect <= x_max + eps:
+                    min_t = min(min_t, t)
+
+        if min_t == float('inf'):
+            return 0.0
+
+        return float(min_t)
+
 
     def _update_scans(self) -> None:
         for agent_idx, simulator in enumerate(self.scan_sims):
             pose = self.state.poses[agent_idx]
             scan_pose = self._lidar_pose_from_base(pose)
-            scan = simulator.scan(scan_pose, self.scan_rngs[agent_idx])
+
+            # Get noise-free scan for collision detection
+            scan_clean = simulator.scan(scan_pose, rng=None)
             cache = self.scan_cache[agent_idx]
+
+            # Collision check uses noise-free scan
             in_collision = check_ttc_jit(
-                scan,
+                scan_clean,
                 self.state.standard_state[agent_idx, 3],
                 cache.angles,
                 cache.cosines,
@@ -368,25 +464,35 @@ class F110Simulator:
             else:
                 self.state.collisions[agent_idx] = 0.0
 
+            # Ray cast against other agents (also noise-free)
             origin = scan_pose.astype(np.float64)
-            adjusted_scan = scan
+            adjusted_scan = scan_clean
             for opp_idx in range(self.num_agents):
                 if opp_idx == agent_idx:
                     continue
                 opp_pose = self.state.poses[opp_idx]
+                opp_collision_pose = self._collision_pose_from_base(opp_pose)
                 opp_vertices = get_vertices(
-                    np.array([opp_pose[0], opp_pose[1], opp_pose[2]], dtype=np.float64),
+                    np.array([opp_collision_pose[0], opp_collision_pose[1], opp_collision_pose[2]], dtype=np.float64),
                     self.vehicle_params.length,
                     self.vehicle_params.width,
                 )
                 adjusted_scan = ray_cast(origin, adjusted_scan, cache.angles, opp_vertices)
-            self.state.scans[agent_idx] = adjusted_scan.astype(np.float32)
+
+            # Add noise for observation output only
+            noisy_scan = adjusted_scan + self.scan_rngs[agent_idx].normal(
+                0.0, simulator.std_dev, size=simulator.num_beams
+            )
+            self.state.scans[agent_idx] = np.clip(
+                noisy_scan, simulator.min_range, simulator.max_range
+            ).astype(np.float32)
 
     def _update_agent_collisions(self) -> None:
         for agent_idx in range(self.num_agents):
             pose = self.state.poses[agent_idx]
+            collision_pose = self._collision_pose_from_base(pose)
             self.agent_vertices[agent_idx] = get_vertices(
-                np.array([pose[0], pose[1], pose[2]], dtype=np.float64),
+                np.array([collision_pose[0], collision_pose[1], collision_pose[2]], dtype=np.float64),
                 self.vehicle_params.length,
                 self.vehicle_params.width,
             )

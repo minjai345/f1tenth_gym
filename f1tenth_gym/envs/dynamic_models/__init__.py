@@ -54,6 +54,11 @@ class VehicleParameters:
     width: float = math.nan
     length: float = math.nan
 
+    # Collision body center offset from base_link (rear axle) in meters.
+    # For symmetric overhang: x = wheelbase/2 = (lf + lr)/2
+    collision_body_center_x: float = 0.0
+    collision_body_center_y: float = 0.0
+
     # Additional parameters for the multi-body model (defaulted to NaN)
     kappa_dot_max: float = math.nan
     kappa_dot_dot_max: float = math.nan
@@ -155,6 +160,7 @@ F1TENTH_VEHICLE_PARAMETERS = VehicleParameters(
     v_max=20.0,
     width=0.31,
     length=0.58,
+    collision_body_center_x=(0.15875 + 0.17145) / 2,  # wheelbase/2 = 0.1651m
 )
 
 F1FIFTH_VEHICLE_PARAMETERS = VehicleParameters(
@@ -176,6 +182,7 @@ F1FIFTH_VEHICLE_PARAMETERS = VehicleParameters(
     v_max=20.0,
     width=0.55,
     length=0.8,
+    collision_body_center_x=(0.2725 + 0.2585) / 2,  # wheelbase/2 = 0.2655m
 )
 
 FULLSCALE_VEHICLE_PARAMETERS = VehicleParameters(
@@ -197,6 +204,7 @@ FULLSCALE_VEHICLE_PARAMETERS = VehicleParameters(
     v_max=45.8,
     width=1.674,
     length=4.298,
+    collision_body_center_x=(0.88392 + 1.50876) / 2,  # wheelbase/2 = 1.1963m
     kappa_dot_max=0.4,
     kappa_dot_dot_max=20.0,
     j_max=10_000.0,
