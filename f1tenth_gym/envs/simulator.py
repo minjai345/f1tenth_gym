@@ -297,7 +297,8 @@ class F110Simulator:
         Computes side_distances as the distance from the LiDAR position to the
         vehicle body edge for each beam angle. This correctly accounts for the
         LiDAR offset (base_link_to_lidar_tf) and collision body center offset
-        (collision_body_center_x/y) from the vehicle parameters.
+        (collision_body_center_x/y) from the vehicle parameters, with an
+        adjustment for collision checks when the pose is at the center of gravity.
         """
         num_beams = simulator.num_beams
         angles = np.zeros(num_beams, dtype=np.float32)
@@ -317,9 +318,18 @@ class F110Simulator:
         body_dx = vehicle_params.collision_body_center_x
         body_dy = vehicle_params.collision_body_center_y
 
+        # If state is referenced at the center of gravity, base_link is behind it by lr.
+        # Leave LiDAR in the state frame to avoid shifting the scan origin.
+        base_dx = 0.0
+        if self.model != DynamicModel.KS:
+            base_dx = -float(vehicle_params.lr)
+            if not math.isfinite(base_dx):
+                base_dx = 0.0
+
         # Compute LiDAR position relative to collision body center
         # (the collision body is centered at (body_dx, body_dy) from base_link)
-        lidar_x_in_body = lidar_dx - body_dx
+        body_x = base_dx + body_dx
+        lidar_x_in_body = lidar_dx - body_x
         lidar_y_in_body = lidar_dy - body_dy
 
         increment = simulator.get_increment()
@@ -359,16 +369,22 @@ class F110Simulator:
         return np.array([scan_x, scan_y, scan_theta], dtype=pose.dtype)
 
     def _collision_pose_from_base(self, pose: np.ndarray) -> np.ndarray:
-        """Transform pose from base_link to collision body center.
+        """Transform pose to collision body center.
 
         Args:
-            pose: Base link pose (x, y, theta).
+            pose: Pose of the model state (base_link for KS, CoG for others).
 
         Returns:
             Collision body center pose in world frame.
         """
-        dx = self.vehicle_params.collision_body_center_x
-        dy = self.vehicle_params.collision_body_center_y
+        base_dx = 0.0
+        base_dy = 0.0
+        if self.model != DynamicModel.KS:
+            base_dx = -float(self.vehicle_params.lr)
+            if not math.isfinite(base_dx):
+                base_dx = 0.0
+        dx = base_dx + float(self.vehicle_params.collision_body_center_x)
+        dy = base_dy + float(self.vehicle_params.collision_body_center_y)
         if dx == 0.0 and dy == 0.0:
             return pose
         cos_yaw = math.cos(pose[2])
