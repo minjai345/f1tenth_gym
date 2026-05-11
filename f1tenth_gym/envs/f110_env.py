@@ -147,7 +147,8 @@ class F110Env(gym.Env):
 
         self.agent_ids = [f"agent_{i}" for i in range(self.num_agents)]
 
-        self.agents_prev_s = [None] * self.num_agents
+        self.cumulative_s = np.zeros((self.num_agents,))
+        self.agents_prev_s = np.zeros((self.num_agents,))
         self.lap_times = np.zeros((self.num_agents,))
         self.lap_times_finish = np.zeros((self.num_agents,))
         self.lap_counts = np.zeros((self.num_agents,))
@@ -209,17 +210,20 @@ class F110Env(gym.Env):
             s_frame_max = self.track.centerline.spline.s_frame_max
             for ind in range(self.num_agents):
                 current_s = float(self.sim.state.frenet[ind, 0])
-                if self.agents_prev_s[ind] is None:
-                    self.agents_prev_s[ind] = current_s
-                    continue
-                if (
-                    self.agents_prev_s[ind] - current_s > s_frame_max * 0.85
-                    and self.sim_time > self.timestep
-                ):
-                    self.lap_counts[ind] += 1
+                delta_s = current_s - self.agents_prev_s[ind]
+                # Correct for wraparound: a forward crossing makes delta_s
+                # sharply negative; a backward crossing makes it sharply positive.
+                if delta_s < -0.5 * s_frame_max:
+                    delta_s += s_frame_max
+                elif delta_s > 0.5 * s_frame_max:
+                    delta_s -= s_frame_max
+                self.cumulative_s[ind] += delta_s
+                self.agents_prev_s[ind] = current_s
+                new_lap_count = int(self.cumulative_s[ind] / s_frame_max)
+                if new_lap_count > self.lap_counts[ind] and self.sim_time > self.timestep:
+                    self.lap_counts[ind] = new_lap_count
                     self.lap_times[ind] = self.sim_time - self.lap_times_finish[ind]
                     self.lap_times_finish[ind] = self.sim_time
-                self.agents_prev_s[ind] = current_s
 
         done = bool(self.sim.collisions[self.ego_idx])
         if self.max_laps is not None:
@@ -282,7 +286,8 @@ class F110Env(gym.Env):
         super().reset(seed=seed)
 
         self.sim_time = 0.0
-        self.agents_prev_s = [None] * self.num_agents
+        self.cumulative_s.fill(0.0)
+        self.agents_prev_s.fill(0.0)
         self.lap_counts.fill(0.0)
         self.lap_times.fill(0.0)
         self.lap_times_finish.fill(0.0)
@@ -311,23 +316,6 @@ class F110Env(gym.Env):
             raise ValueError("Invalid reset option.")
 
         self.sim.reset(poses, option=option)
-
-        sim_poses = self.sim.state.poses
-        self.start_xs = sim_poses[:, 0]
-        self.start_ys = sim_poses[:, 1]
-        self.start_thetas = sim_poses[:, 2]
-        self.start_rot = np.array(
-            [
-                [
-                    np.cos(-self.start_thetas[self.ego_idx]),
-                    -np.sin(-self.start_thetas[self.ego_idx]),
-                ],
-                [
-                    np.sin(-self.start_thetas[self.ego_idx]),
-                    np.cos(-self.start_thetas[self.ego_idx]),
-                ],
-            ]
-        )
 
         obs = self.observation_type.observe()
         if self.render_enabled:
