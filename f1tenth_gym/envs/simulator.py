@@ -138,6 +138,10 @@ class F110Simulator:
         self.agent_vertices = np.zeros((self.num_agents, 4, 2), dtype=np.float64)
         self._adjusted_scans = np.zeros((self.num_agents, scan_size), dtype=np.float32)
 
+        self._collision_body_dx, self._collision_body_dy = self._compute_collision_body_offset(
+            self.vehicle_params, self.model
+        )
+
     # ---------------------------------------------------------------------
     # Public API
     # ---------------------------------------------------------------------
@@ -165,6 +169,9 @@ class F110Simulator:
             raise NotImplementedError("Per-agent parameter updates are not supported")
         self.vehicle_params = vehicle_params
         self.params_array = vehicle_params.to_array(self.model)
+        self._collision_body_dx, self._collision_body_dy = self._compute_collision_body_offset(
+            self.vehicle_params, self.model
+        )
         if self.scan_enabled:
             for i, simulator in enumerate(self.scan_sims):
                 self.scan_cache[i] = self._build_scan_cache(simulator, vehicle_params)
@@ -363,23 +370,21 @@ class F110Simulator:
         scan_theta = pose[2] + dtheta
         return np.array([scan_x, scan_y, scan_theta], dtype=pose.dtype)
 
-    def _collision_pose_from_base(self, pose: np.ndarray) -> np.ndarray:
-        """Transform pose to collision body center.
-
-        Args:
-            pose: Pose of the model state (base_link for KS, CoG for others).
-
-        Returns:
-            Collision body center pose in world frame.
-        """
+    @staticmethod
+    def _compute_collision_body_offset(
+        vehicle_params: VehicleParameters, model: DynamicModel
+    ) -> tuple[float, float]:
         base_dx = 0.0
-        base_dy = 0.0
-        if self.model != DynamicModel.KS:
-            base_dx = -float(self.vehicle_params.lr)
+        if model != DynamicModel.KS:
+            base_dx = -float(vehicle_params.lr)
             if not math.isfinite(base_dx):
                 base_dx = 0.0
-        dx = base_dx + float(self.vehicle_params.collision_body_center_x)
-        dy = base_dy + float(self.vehicle_params.collision_body_center_y)
+        dx = base_dx + float(vehicle_params.collision_body_center_x)
+        dy = float(vehicle_params.collision_body_center_y)
+        return dx, dy
+
+    def _collision_pose_from_base(self, pose: np.ndarray) -> np.ndarray:
+        dx, dy = self._collision_body_dx, self._collision_body_dy
         if dx == 0.0 and dy == 0.0:
             return pose
         cos_yaw = math.cos(pose[2])
