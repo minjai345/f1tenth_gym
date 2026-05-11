@@ -430,7 +430,7 @@ class Track:
         half_width : float
             half width of the track
         """
-        raceline_filepath = outdir / f"{self.spec.name}_raceline.csv"
+        raceline_filepath = outdir / f"{self.spec.name}_centerline.csv"
         with open(raceline_filepath, "w") as raceline_csv:
             raceline_csv.write("# " + str(uuid.uuid4()) + "\n") # same as TUM opt
             raceline_csv.write("# x_m, y_m, w_tr_right_m, w_tr_left_m\n")
