@@ -13,7 +13,7 @@ from .action import (
     longitudinal_action_from_type,
     steer_action_from_type,
 )
-from .collision_models import collision_multiple, get_vertices
+from .collision_models import CollisionCheckMode, collision_multiple, get_vertices
 from .dynamic_models import DynamicModel, VehicleParameters
 from .env_config import EnvConfig
 from .lidar import ScanSimulator2D, check_ttc_jit, ray_cast
@@ -84,6 +84,7 @@ class F110Simulator:
             raise ValueError("time_step must be an integer multiple of integrator_timestep")
         self.substeps = max(1, int(round(self.time_step / self.integrator_dt)))
 
+        self.collision_check_mode: CollisionCheckMode = env_config.collision_check
         self.longitudinal_fn: AccelerationFn = longitudinal_action_from_type(longitudinal_type)
         self.steering_fn: SteeringFn = steer_action_from_type(steering_type)
 
@@ -135,6 +136,7 @@ class F110Simulator:
 
         # Geometry buffers for collision checks
         self.agent_vertices = np.zeros((self.num_agents, 4, 2), dtype=np.float64)
+        self._adjusted_scans = np.zeros((self.num_agents, scan_size), dtype=np.float32)
 
     # ---------------------------------------------------------------------
     # Public API
@@ -465,16 +467,15 @@ class F110Simulator:
             scan_clean = simulator.scan(scan_pose, rng=None)
             cache = self.scan_cache[agent_idx]
 
-            # Collision check uses noise-free scan
-            in_collision = check_ttc_jit(
+            # Wall collision: TTC on the wall-only scan (always)
+            if check_ttc_jit(
                 scan_clean,
                 self.state.standard_state[agent_idx, 3],
                 cache.angles,
                 cache.cosines,
                 cache.side_distances,
                 self.ttc_threshold,
-            )
-            if in_collision:
+            ):
                 self.state.state[agent_idx, 3:] = 0.0
                 self.state.collisions[agent_idx] = 1.0
             else:
@@ -494,6 +495,7 @@ class F110Simulator:
                     self.vehicle_params.width,
                 )
                 adjusted_scan = ray_cast(origin, adjusted_scan, cache.angles, opp_vertices)
+            self._adjusted_scans[agent_idx] = adjusted_scan
 
             # Add noise for observation output only
             noisy_scan = adjusted_scan + self.scan_rngs[agent_idx].normal(
@@ -504,13 +506,32 @@ class F110Simulator:
             ).astype(np.float32)
 
     def _update_agent_collisions(self) -> None:
-        for agent_idx in range(self.num_agents):
-            pose = self.state.poses[agent_idx]
-            collision_pose = self._collision_pose_from_base(pose)
-            self.agent_vertices[agent_idx] = get_vertices(
-                np.array([collision_pose[0], collision_pose[1], collision_pose[2]], dtype=np.float64),
-                self.vehicle_params.length,
-                self.vehicle_params.width,
-            )
-        collisions, _ = collision_multiple(self.agent_vertices)
-        self.state.collisions = np.maximum(self.state.collisions, collisions.astype(np.float32))
+        """Detect agent-vs-agent collisions using the configured mode."""
+        if self.collision_check_mode is CollisionCheckMode.LIDAR_SCAN:
+            # Agent-vs-agent via TTC on opponent-shortened scans
+            for agent_idx in range(self.num_agents):
+                if self.state.collisions[agent_idx]:
+                    continue  # already in wall collision
+                cache = self.scan_cache[agent_idx]
+                if check_ttc_jit(
+                    self._adjusted_scans[agent_idx],
+                    self.state.standard_state[agent_idx, 3],
+                    cache.angles,
+                    cache.cosines,
+                    cache.side_distances,
+                    self.ttc_threshold,
+                ):
+                    self.state.state[agent_idx, 3:] = 0.0
+                    self.state.collisions[agent_idx] = 1.0
+        else:
+            # Agent-vs-agent via GJK bounding boxes
+            for agent_idx in range(self.num_agents):
+                pose = self.state.poses[agent_idx]
+                collision_pose = self._collision_pose_from_base(pose)
+                self.agent_vertices[agent_idx] = get_vertices(
+                    np.array([collision_pose[0], collision_pose[1], collision_pose[2]], dtype=np.float64),
+                    self.vehicle_params.length,
+                    self.vehicle_params.width,
+                )
+            collisions, _ = collision_multiple(self.agent_vertices)
+            self.state.collisions = np.maximum(self.state.collisions, collisions.astype(np.float32))
