@@ -124,7 +124,7 @@ class F110Env(gym.Env):
         raise TypeError("map must be a Track instance or a path/name string")
 
     def _initialize_components(self) -> None:
-        if self.renderer is not None:
+        if self.render_enabled and self.renderer is not None:
             self.renderer.close()
         self.renderer = None
         self.render_spec = None
@@ -252,12 +252,10 @@ class F110Env(gym.Env):
 
         # observation
         obs = self.observation_type.observe()
-        if self.render_enabled:
+        if self.render_enabled and self.renderer is not None:
             if self.observation_cfg.type is ObservationType.DIRECT:
-                # for direct observation, also update the render_obs
                 self.render_obs = copy.deepcopy(obs)
             else:
-                # for other observation types, update the render_obs
                 self.render_obs = copy.deepcopy(self.render_obs_type.observe())
 
         # times
@@ -318,7 +316,7 @@ class F110Env(gym.Env):
         self.sim.reset(poses, option=option)
 
         obs = self.observation_type.observe()
-        if self.render_enabled:
+        if self.render_enabled and self.renderer is not None:
             if self.observation_cfg.type is ObservationType.DIRECT:
                 self.render_obs = copy.deepcopy(obs)
             else:
@@ -412,6 +410,6 @@ class F110Env(gym.Env):
         """
         Ensure renderer is closed upon deletion
         """
-        if self.renderer is not None:
+        if self.render_enabled and self.renderer is not None:
             self.renderer.close()
         super().close()
