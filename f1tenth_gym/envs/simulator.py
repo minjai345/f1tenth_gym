@@ -337,25 +337,18 @@ class F110Simulator:
         increment = simulator.get_increment()
         angle_min = simulator.angle_min
 
-        for idx in range(num_beams):
-            # Beam angle relative to vehicle heading
-            beam_angle = angle_min + idx * increment
-            angles[idx] = beam_angle
-            cosines[idx] = math.cos(beam_angle)
+        beam_angles = (angle_min + np.arange(num_beams, dtype=np.float64) * increment).astype(np.float32)
+        cosines = np.cos(beam_angles).astype(np.float32)
+        ray_angles = beam_angles + lidar_dtheta
+        dir_cos = np.cos(ray_angles)
+        dir_sin = np.sin(ray_angles)
+        side_distances = self._ray_to_rect_distance_vec(
+            lidar_x_in_body, lidar_y_in_body,
+            dir_cos, dir_sin,
+            half_length, half_width,
+        ).astype(np.float32)
 
-            # Ray angle accounts for LiDAR yaw offset
-            ray_angle = beam_angle + lidar_dtheta
-            dir_cos = math.cos(ray_angle)
-            dir_sin = math.sin(ray_angle)
-
-            # Compute distance from LiDAR to collision body edge
-            side_distances[idx] = self._ray_to_rect_distance(
-                lidar_x_in_body, lidar_y_in_body,
-                dir_cos, dir_sin,
-                half_length, half_width,
-            )
-
-        return ScanCache(angles=angles, cosines=cosines, side_distances=side_distances)
+        return ScanCache(angles=beam_angles, cosines=cosines, side_distances=side_distances)
 
 
     def _lidar_pose_from_base(self, pose: np.ndarray) -> np.ndarray:
@@ -457,6 +450,53 @@ class F110Simulator:
 
         return float(min_t)
 
+    @staticmethod
+    def _ray_to_rect_distance_vec(
+        origin_x: float,
+        origin_y: float,
+        dir_cos: np.ndarray,
+        dir_sin: np.ndarray,
+        half_length: float,
+        half_width: float,
+    ) -> np.ndarray:
+        """Vectorised version of _ray_to_rect_distance for all beams at once."""
+        eps = 1e-9
+        inside = (
+            (-half_length - eps) <= origin_x <= (half_length + eps)
+            and (-half_width - eps) <= origin_y <= (half_width + eps)
+        )
+        if not inside:
+            return np.zeros(len(dir_cos), dtype=np.float64)
+
+        min_t = np.full(len(dir_cos), np.inf, dtype=np.float64)
+
+        mask_cx = np.abs(dir_cos) > eps
+        safe_dc = np.where(mask_cx, dir_cos, 1.0)
+
+        t = np.where(mask_cx, (half_length - origin_x) / safe_dc, np.inf)
+        yi = origin_y + t * dir_sin
+        valid = mask_cx & (t > eps) & (yi >= -half_width - eps) & (yi <= half_width + eps)
+        min_t = np.where(valid, np.minimum(min_t, t), min_t)
+
+        t = np.where(mask_cx, (-half_length - origin_x) / safe_dc, np.inf)
+        yi = origin_y + t * dir_sin
+        valid = mask_cx & (t > eps) & (yi >= -half_width - eps) & (yi <= half_width + eps)
+        min_t = np.where(valid, np.minimum(min_t, t), min_t)
+
+        mask_sy = np.abs(dir_sin) > eps
+        safe_ds = np.where(mask_sy, dir_sin, 1.0)
+
+        t = np.where(mask_sy, (half_width - origin_y) / safe_ds, np.inf)
+        xi = origin_x + t * dir_cos
+        valid = mask_sy & (t > eps) & (xi >= -half_length - eps) & (xi <= half_length + eps)
+        min_t = np.where(valid, np.minimum(min_t, t), min_t)
+
+        t = np.where(mask_sy, (-half_width - origin_y) / safe_ds, np.inf)
+        xi = origin_x + t * dir_cos
+        valid = mask_sy & (t > eps) & (xi >= -half_length - eps) & (xi <= half_length + eps)
+        min_t = np.where(valid, np.minimum(min_t, t), min_t)
+
+        return np.where(min_t == np.inf, 0.0, min_t)
 
     def _update_scans(self) -> None:
         for agent_idx, simulator in enumerate(self.scan_sims):
