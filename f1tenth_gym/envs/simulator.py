@@ -499,6 +499,17 @@ class F110Simulator:
         return np.where(min_t == np.inf, 0.0, min_t)
 
     def _update_scans(self) -> None:
+        # Precompute collision vertices for every agent once (reused by inner loop and _update_agent_collisions)
+        all_vertices = []
+        for i in range(self.num_agents):
+            cp = self._collision_pose_from_base(self.state.poses[i])
+            all_vertices.append(get_vertices(
+                np.array([cp[0], cp[1], cp[2]], dtype=np.float64),
+                self.vehicle_params.length,
+                self.vehicle_params.width,
+            ))
+        self._all_vertices = all_vertices
+
         for agent_idx, simulator in enumerate(self.scan_sims):
             pose = self.state.poses[agent_idx]
             scan_pose = self._lidar_pose_from_base(pose)
@@ -527,14 +538,7 @@ class F110Simulator:
             for opp_idx in range(self.num_agents):
                 if opp_idx == agent_idx:
                     continue
-                opp_pose = self.state.poses[opp_idx]
-                opp_collision_pose = self._collision_pose_from_base(opp_pose)
-                opp_vertices = get_vertices(
-                    np.array([opp_collision_pose[0], opp_collision_pose[1], opp_collision_pose[2]], dtype=np.float64),
-                    self.vehicle_params.length,
-                    self.vehicle_params.width,
-                )
-                adjusted_scan = ray_cast(origin, adjusted_scan, cache.angles, opp_vertices)
+                adjusted_scan = ray_cast(origin, adjusted_scan, cache.angles, all_vertices[opp_idx])
             self._adjusted_scans[agent_idx] = adjusted_scan
 
             # Add noise for observation output only
@@ -564,14 +568,8 @@ class F110Simulator:
                     self.state.state[agent_idx, 3:] = 0.0
                     self.state.collisions[agent_idx] = 1.0
         else:
-            # Agent-vs-agent via GJK bounding boxes
+            # Agent-vs-agent via GJK bounding boxes (reuse vertices already computed in _update_scans)
             for agent_idx in range(self.num_agents):
-                pose = self.state.poses[agent_idx]
-                collision_pose = self._collision_pose_from_base(pose)
-                self.agent_vertices[agent_idx] = get_vertices(
-                    np.array([collision_pose[0], collision_pose[1], collision_pose[2]], dtype=np.float64),
-                    self.vehicle_params.length,
-                    self.vehicle_params.width,
-                )
+                self.agent_vertices[agent_idx] = self._all_vertices[agent_idx]
             collisions, _ = collision_multiple(self.agent_vertices)
             self.state.collisions = np.maximum(self.state.collisions, collisions.astype(np.float32))
