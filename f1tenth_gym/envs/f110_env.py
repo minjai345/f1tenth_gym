@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import time
 from pathlib import Path
 from typing import Any
 
@@ -22,8 +23,90 @@ from .action import (
 )
 from .observation import ObservationType, observation_factory
 from .reset import make_reset_fn
-from .rendering import make_renderer
+from .rendering import make_renderer, RenderSpec
 from .track import Track
+
+
+_INF = float("inf")
+
+
+class RenderClock:
+    """Decouples rendering from stepping.
+
+    The user owns the step loop and calls ``env.render()`` explicitly, so all
+    pacing/frame-emission decisions live here and are driven from
+    ``F110Env.render()``. There are two independent clocks:
+
+    * A **sim-time frame accumulator** (advanced by ``timestep`` once per
+      ``step()``) that decides which steps emit a *distinct* rgb_array frame,
+      so recorded video stays smooth regardless of how fast the sim runs.
+    * A **wall-clock display gate** that, in human modes, caps redraws to at
+      most ``render_fps`` per wall-second -- so stepping the dynamics faster
+      than real time never forces more frames.
+
+    Human-mode pacing holds ``sim_time / wall_time == real_time_factor`` using
+    an absolute anchor so it self-corrects and never accumulates drift.
+    ``real_time_factor == inf`` disables pacing (free-run).
+    """
+
+    def __init__(self, render_fps: float, real_time_factor: float, timestep: float):
+        self.render_fps = float(render_fps)
+        self.frame_period = 1.0 / self.render_fps  # sim seconds (video) / wall seconds (human cap)
+        self.rtf = float(real_time_factor)
+        self.timestep = float(timestep)
+        self.reset()
+
+    def reset(self) -> None:
+        self._accum = 0.0
+        self._frame_is_new = True  # first frame after reset always emits
+        self._wall_anchor = None
+        self._sim_anchor = None
+        self._last_draw_wall = None
+
+    def advance(self) -> bool:
+        """Advance the sim-time accumulator by one timestep. Call once per ``step()``."""
+        self._accum += self.timestep
+        if self._accum + 1e-9 >= self.frame_period:
+            self._accum -= self.frame_period
+            if self._accum >= self.frame_period:
+                # timestep coarser than a frame period: emit every step, no backlog
+                self._accum = 0.0
+            self._frame_is_new = True
+        else:
+            self._frame_is_new = False
+        return self._frame_is_new
+
+    @property
+    def frame_is_new(self) -> bool:
+        return self._frame_is_new
+
+    def display_due(self) -> bool:
+        """Human-mode wall-clock gate: True at most ``render_fps`` times per wall-second."""
+        now = time.perf_counter()
+        if self._last_draw_wall is None or (now - self._last_draw_wall) >= self.frame_period - 1e-4:
+            self._last_draw_wall = now
+            return True
+        return False
+
+    def pace(self, sim_time: float) -> None:
+        """Sleep to hold ``sim/wall == rtf`` (human modes only). No-op if ``rtf == inf``."""
+        if self.rtf == _INF:
+            return
+        now = time.perf_counter()
+        if self._wall_anchor is None:
+            self._wall_anchor, self._sim_anchor = now, sim_time
+            return
+        target = self._wall_anchor + (sim_time - self._sim_anchor) / self.rtf
+        slack = target - now
+        if slack > 0:
+            time.sleep(slack)
+        elif slack < -0.25:
+            # fell far behind (e.g. a slow step or the sim can't keep up): re-anchor
+            self._wall_anchor, self._sim_anchor = now, sim_time
+
+    def set_rtf(self, rtf: float) -> None:
+        self.rtf = float(rtf)
+        self._wall_anchor = None  # re-anchor so a mid-episode change has no catch-up spike
 
 
 class F110Env(gym.Env):
@@ -53,6 +136,10 @@ class F110Env(gym.Env):
             resolved_config = config
         else:
             raise TypeError("config must be an EnvConfig instance")
+
+        # `metadata` is a class attribute; copy it per-instance so that mutating
+        # metadata["render_fps"] on one env never aliases another env's value.
+        self.metadata = dict(type(self).metadata)
 
         self.env_config = resolved_config
         self.render_mode = render_mode
@@ -96,6 +183,7 @@ class F110Env(gym.Env):
         self.observation_cfg = cfg.observation_config
         self.reset_cfg = cfg.reset_config
         self.lidar_cfg = cfg.lidar_config
+        self.render_cfg = cfg.render_config
 
         self.longitudinal_action_type = self.control_cfg.longitudinal_mode
         self.steer_action_type = self.control_cfg.steering_mode
@@ -205,22 +293,38 @@ class F110Env(gym.Env):
             type=self.reset_cfg.strategy,
         )
 
-        base_fps = int(1.0 / self.timestep) if self.timestep > 0 else 0
+        # metadata["render_fps"] is the RecordVideo *container* framerate. Frames are
+        # captured once per env.render() call (== once per step), so this must be
+        # round(1/timestep) for real-time video playback. It is deliberately NOT
+        # render_config.render_fps, which is the (separate) display/emit cadence.
+        base_fps = int(round(1.0 / self.timestep)) if self.timestep > 0 else 0
+        self.metadata["render_fps"] = base_fps
+
+        # render_mode picks the initial real-time factor; plain "human" uses the
+        # configured value, "human_fast" is legacy 10x sugar, "unlimited" is free-run.
         if self.render_mode == "human_fast":
-            render_fps = base_fps * 10
+            initial_rtf = 10.0
         elif self.render_mode == "unlimited":
-            render_fps = float("inf")
+            initial_rtf = float("inf")
         else:
-            render_fps = base_fps
-        self.metadata["render_fps"] = render_fps
+            initial_rtf = self.render_cfg.real_time_factor
+
+        self._render_clock = RenderClock(
+            render_fps=self.render_cfg.render_fps,
+            real_time_factor=initial_rtf,
+            timestep=self.timestep,
+        )
+        self._last_frame = None
 
         if self.render_enabled:
+            render_spec = RenderSpec(frame_output_method=self.render_cfg.frame_output_method)
             self.renderer, self.render_spec = make_renderer(
                 params=self.vehicle_params,
                 track=self.track,
                 agent_ids=self.agent_ids,
                 render_mode=self.render_mode,
-                render_fps=self.metadata["render_fps"],
+                render_fps=self.render_cfg.render_fps,
+                render_spec=render_spec,
             )
         else:
             self.renderer = None
@@ -297,6 +401,10 @@ class F110Env(gym.Env):
         # call simulation step
         self.sim.step(action)
 
+        # advance the render clock's sim-time frame accumulator (drives fixed-fps
+        # frame emission; decoupled from how often the user calls render()).
+        self._render_clock.advance()
+
         # check done
         done = self._check_done()
 
@@ -334,6 +442,8 @@ class F110Env(gym.Env):
         super().reset(seed=seed)
 
         self.sim_time = 0.0
+        self._render_clock.reset()
+        self._last_frame = None
         if self.loop_counter_mode is LoopCounterMode.FRENET_BASED:
             self.cumulative_s.fill(0.0)
             self.agents_prev_s.fill(0.0)
@@ -448,26 +558,85 @@ class F110Env(gym.Env):
         if self.render_enabled and self.renderer is not None:
             self.renderer.add_renderer_callback(callback_func)
 
-    def render(self, mode="human"):
-        """
-        Renders the environment with pyglet. Use mouse scroll in the window to zoom in/out, use mouse click drag to pan.
-        Shows the agents, the map, current fps (bottom left corner), and the race information near as text.
+    def set_real_time_factor(self, real_time_factor: float) -> None:
+        """Change the real-time factor at runtime (mid-episode is fine).
+
+        The real-time factor is sim-seconds simulated per wall-clock second in
+        the human render modes: ``1.0`` = real time, ``5.0`` = 5x faster,
+        ``float("inf")`` = no pacing (free-run). It has no effect on the
+        physics or on rgb_array output. The pacer re-anchors on change so there
+        is no catch-up sleep or fast-forward spike.
 
         Args:
-            mode (str, default='human'): rendering mode, currently supports:
-                'human': slowed down rendering such that the env is rendered in a way that sim time elapsed is close to real time elapsed
-                'human_fast': render as fast as possible
+            real_time_factor: positive float, or ``float("inf")`` for free-run.
+        """
+        if not (real_time_factor > 0):
+            raise ValueError(
+                f"real_time_factor must be > 0 (or float('inf')), got {real_time_factor}"
+            )
+        self._render_clock.set_rtf(real_time_factor)
+
+    @property
+    def real_time_factor(self) -> float:
+        """Current real-time factor (see :meth:`set_real_time_factor`)."""
+        return self._render_clock.rtf
+
+    @property
+    def render_fps(self) -> float:
+        """Target fixed frame rate (display cap in human modes, emit cadence in rgb_array)."""
+        return self._render_clock.render_fps
+
+    @property
+    def frame_is_new(self) -> bool:
+        """True on steps that emit a distinct frame at the render_fps sim-time cadence.
+
+        Use this for manual, exact-fps video capture (append a frame only when
+        it is True) rather than relying on RecordVideo's one-frame-per-step.
+        """
+        return self._render_clock.frame_is_new
+
+    def render(self, mode=None):
+        """
+        Render the current state. Rendering is decoupled from stepping by an
+        internal render clock (see ``RenderClock``): the frame rate is fixed by
+        ``render_config.render_fps`` and the pace is set by the real-time factor,
+        both independent of how fast the user steps the simulation.
+
+        Args:
+            mode (str, optional): overrides the mode set at ``gym.make`` for this
+                call. Defaults to the configured ``render_mode``. One of
+                "human", "human_fast", "unlimited", "rgb_array".
 
         Returns:
-            None
+            np.ndarray | None: an RGB frame (H, W, 3) in "rgb_array" mode; None in
+            the human modes.
         """
-        # NOTE: separate render (manage render-mode) from render_frame (actual rendering with pyglet)
+        m = mode or self.render_mode
+        if (
+            m not in self.metadata["render_modes"]
+            or not self.render_enabled
+            or self.renderer is None
+        ):
+            return None
 
-        if self.render_mode not in self.metadata["render_modes"] or not self.render_enabled:
-            return
+        clk = self._render_clock
 
-        self.renderer.update(obs=self.render_obs)
-        return self.renderer.render()
+        if m in ("human", "human_fast", "unlimited"):
+            # Wall-clock gate: draw at most render_fps times/second regardless of
+            # how fast the sim is stepped. Then pace the loop to the real-time factor.
+            if clk.display_due():
+                self.renderer.update(obs=self.render_obs)
+                self.renderer.render()
+            clk.pace(self.sim_time)
+            return None
+
+        # rgb_array / rgb_array_list: never sleep, always return a frame. Grab a
+        # fresh one only on the sim-time cadence; return the cached frame in
+        # between so RecordVideo (one capture per step) yields smooth video.
+        if clk.frame_is_new or self._last_frame is None:
+            self.renderer.update(obs=self.render_obs)
+            self._last_frame = self.renderer.render()
+        return self._last_frame
 
     def close(self):
         """

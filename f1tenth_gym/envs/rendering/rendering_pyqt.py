@@ -96,6 +96,7 @@ class PyQtEnvRenderer(EnvRenderer):
 
         self.cars = None
         self.sim_time = None
+        self.obs = None
         self.window = None
         self.canvas = None
 
@@ -232,6 +233,9 @@ class PyQtEnvRenderer(EnvRenderer):
 
         # update time
         self.sim_time = obs[self.agent_ids[0]]["sim_time"]
+        # expose the raw obs so render callbacks (e.g. LiDAR scan) can read it,
+        # matching the GL backend's contract.
+        self.obs = obs
 
     def update_params(self, params: VehicleParameters) -> None:
         """Update vehicle dimensions used by cached render objects."""
@@ -387,33 +391,35 @@ class PyQtEnvRenderer(EnvRenderer):
             if self.render_mode in ["human", "human_fast", 'unlimited']:
                 assert self.window is not None
 
-            else:  
+            else:
                 # rgb_array mode => extract the frame from the canvas
-                qImage = self.exporter.export(toBytes=True)
-
-                width = qImage.width()
-                height = qImage.height()
-
-                ptr = qImage.bits()
-                ptr.setsize(height * width * 4)
-                frame = np.array(ptr).reshape(height, width, 4)  #  Copies the data
-                
-                return frame[:, :, :3] # remove alpha channel
+                return self._export_rgb_frame()
         else:
             self.clock.update()
             self.app.processEvents()
 
             # if draw_flag is False, we just return the current frame without rendering anything
             if self.render_mode == "rgb_array":
-                qImage = self.exporter.export(toBytes=True)
+                return self._export_rgb_frame()
 
-                width = qImage.width()
-                height = qImage.height()
+    def _export_rgb_frame(self) -> np.ndarray:
+        """Export the canvas as a contiguous RGB (H, W, 3) uint8 array.
 
-                ptr = qImage.bits()
-                ptr.setsize(height * width * 4)
-                frame = np.array(ptr).reshape(height, width, 4)
-                return frame[:, :, :3]  # remove alpha channel
+        Converts to RGB888 (fixes the BGR channel order of the raw ARGB32
+        buffer) and pins the output to a square ``window_size`` (the exporter
+        otherwise returns a non-square frame that ignores the requested width).
+        """
+        qImage = self.exporter.export(toBytes=True)
+        qImage = qImage.convertToFormat(QtGui.QImage.Format.Format_RGB888)
+
+        target = int(self.render_spec.window_size)
+        if qImage.width() != target or qImage.height() != target:
+            qImage = qImage.scaled(target, target)
+
+        width, height = qImage.width(), qImage.height()
+        ptr = qImage.bits()
+        ptr.setsize(height * width * 3)
+        return np.frombuffer(ptr, dtype=np.uint8).reshape(height, width, 3).copy()
 
     def get_points_renderer(
         self,

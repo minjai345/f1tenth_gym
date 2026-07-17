@@ -131,6 +131,57 @@ class ResetConfig:
 
 
 @dataclass(frozen=True)
+class RenderConfig:
+    """Configuration for rendering pacing and frame output.
+
+    Rendering is decoupled from stepping: the environment does not own the
+    step loop (the user does), so pacing and frame emission are governed by a
+    small render clock driven from ``F110Env.render()``. See ``RenderClock``.
+
+    Attributes:
+        render_fps: Target fixed frame rate. In human modes this caps redraws
+            to at most ``render_fps`` per wall-clock second (so stepping the
+            dynamics faster than real time does not force more frames). In
+            rgb_array mode it sets the distinct-frame cadence in *sim* time
+            (a fresh frame is grabbed every ``1/render_fps`` sim-seconds; the
+            cached frame is returned in between). This is NOT the RecordVideo
+            container fps -- that stays ``round(1/timestep)`` for real-time
+            playback (see ``F110Env``).
+        real_time_factor: Sim-seconds simulated per wall-clock second in human
+            modes. ``1.0`` = real time, ``5.0`` = 5x faster, ``float("inf")``
+            = no pacing (free-run). Ignored in rgb_array mode (never paces).
+            Togglable at runtime via ``F110Env.set_real_time_factor``.
+        frame_output_method: How rgb_array frames are produced.
+            ``"auto"`` (default): fast GL framebuffer grab when a display is
+            available (real X server or ``xvfb-run``), else the 2D raster
+            exporter (works headless with zero setup, e.g. Colab without xvfb).
+            ``"gl"``: always use the GL grab (requires a display).
+            ``"2d"``: always use the 2D raster exporter.
+    """
+
+    render_fps: int = 60
+    real_time_factor: float = 1.0
+    frame_output_method: str = "auto"
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "render_fps", int(self.render_fps))
+        object.__setattr__(self, "real_time_factor", float(self.real_time_factor))
+        if self.render_fps <= 0:
+            raise ValueError(f"render_fps must be > 0, got {self.render_fps}")
+        if not (self.real_time_factor > 0):
+            raise ValueError(
+                f"real_time_factor must be > 0 (or float('inf')), got {self.real_time_factor}"
+            )
+        if self.frame_output_method not in ("auto", "gl", "2d"):
+            raise ValueError(
+                f"frame_output_method must be one of 'auto', 'gl', '2d', got {self.frame_output_method!r}"
+            )
+
+    def with_updates(self, **changes: Any) -> "RenderConfig":
+        return replace(self, **changes)
+
+
+@dataclass(frozen=True)
 class EnvConfig:
     """Main configuration for the F1TENTH environment.
 
@@ -146,6 +197,7 @@ class EnvConfig:
         observation_config: Observation space configuration.
         reset_config: Episode reset configuration.
         lidar_config: LiDAR sensor configuration.
+        render_config: Rendering pacing / frame-output configuration.
         collision_check: Collision detection mode.
         render_enabled: Whether rendering is enabled.
     """
@@ -161,6 +213,7 @@ class EnvConfig:
     observation_config: ObservationConfig = field(default_factory=ObservationConfig)
     reset_config: ResetConfig = field(default_factory=ResetConfig)
     lidar_config: LiDARConfig = field(default_factory=LiDARConfig)
+    render_config: RenderConfig = field(default_factory=RenderConfig)
     collision_check: CollisionCheckMode = CollisionCheckMode.LIDAR_SCAN
     render_enabled: bool = True
 
@@ -204,6 +257,10 @@ class EnvConfig:
         if not isinstance(lidar_cfg, LiDARConfig):
             raise TypeError("lidar must be a LiDARConfig instance")
 
+        render_cfg = self.render_config
+        if not isinstance(render_cfg, RenderConfig):
+            raise TypeError("render must be a RenderConfig instance")
+
         if (
             simulation_cfg.loop_counter is LoopCounterMode.FRENET_BASED
             and not simulation_cfg.compute_frenet_frame
@@ -215,6 +272,7 @@ class EnvConfig:
         object.__setattr__(self, "observation_config", observation_cfg)
         object.__setattr__(self, "reset_config", reset_cfg)
         object.__setattr__(self, "lidar_config", lidar_cfg)
+        object.__setattr__(self, "render_config", render_cfg)
 
     def with_updates(self, **changes: Any) -> "EnvConfig":
         return replace(self, **changes)

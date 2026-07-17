@@ -14,7 +14,6 @@ from ..dynamic_models import VehicleParameters
 from .renderer import EnvRenderer, RenderSpec, ObjectRenderer
 from .pyqtgl_objects import PointsRenderer, LinesRenderer, ClosedLinesRenderer, CarRenderer
 from .mesh_renderer import MeshRenderer
-from PIL import ImageFont
 import cv2
 
 class PyQtEnvRendererGL(EnvRenderer):
@@ -297,14 +296,11 @@ class PyQtEnvRendererGL(EnvRenderer):
             if self.init:
                 if self.render_mode != "rgb_array":
                     self.window.show()
-                else:
-                    self.font = ImageFont.truetype("arial.ttf", 20)
                 self.init = False
             if self.obs is not None and self.render_spec.frame_output_info_label:
-                self.lap_label.setText(f"Lap Time {self.obs[self.agent_ids[0]]['lap_time']:.2f}, " + 
+                self.lap_label.setText(f"Lap Time {self.obs[self.agent_ids[0]]['lap_time']:.2f}, " +
                     f"Lap {int(self.obs[self.agent_ids[0]]['lap_count']):d}")
-            start_time = time.time()
-            
+
             # call callbacks
             for callback_fn in self.callbacks:
                 callback_fn(self)
@@ -317,15 +313,13 @@ class PyQtEnvRendererGL(EnvRenderer):
             for i in range(len(self.agent_ids)):
                 self.cars[i].render(self.car_scale)
             self.app.processEvents()
-            
+
+            # NOTE: pacing/frame-rate is owned by F110Env's RenderClock, not here.
+            # This method only draws (and grabs a frame in rgb_array mode).
             self._update_fps()
-            if self.render_fps < float('inf'):
-                elapsed = time.time() - start_time
-                sleep_time = max(0.0, 1/self.render_fps - elapsed)
-                time.sleep(sleep_time)
-                
+
             if self.render_mode == "rgb_array":
-                # Use direct OpenGL framebuffer grab (current method)
+                # Direct OpenGL framebuffer grab (fast; requires a display/xvfb).
                 frame = self.grab_frame_as_rgb()
                 return frame
 
@@ -336,17 +330,30 @@ class PyQtEnvRendererGL(EnvRenderer):
         # Make sure OpenGL context is active
         self.view.makeCurrent()
         qimg = self.view.grabFramebuffer()
-        
+
         # Convert to RGB format for consistent pixel layout
         qimg = qimg.convertToFormat(QImage.Format.Format_RGB888)
+
+        # Pin the output to window_size regardless of the display's device-pixel
+        # ratio (a HiDPI X server grabs window_size*dpr; xvfb grabs window_size),
+        # so recorded frame shapes are deterministic across machines.
+        target = int(self.render_spec.window_size)
+        if qimg.width() != target or qimg.height() != target:
+            qimg = qimg.scaled(target, target)
 
         # Extract raw bytes
         width, height = qimg.width(), qimg.height()
         ptr = qimg.bits()
+        if ptr is None:
+            raise RuntimeError(
+                "grabFramebuffer returned an empty image (no GL framebuffer). "
+                "Offscreen GL needs a display: run under a real X server or `xvfb-run`, "
+                "or set render_config.frame_output_method='2d'."
+            )
         # Tell Python how many bytes to read (width*height*3 for RGB888)
         ptr.setsize(height * width * 3)  # 3 bytes per pixel for RGB888
         img_array = np.frombuffer(ptr, dtype=np.uint8).reshape((height, width, 3))
-        
+
         img_array = img_array.copy()  # Ensure we have a contiguous copy
         # img_array = np.flip(img_array, axis=0)
         
@@ -466,5 +473,13 @@ class PyQtEnvRendererGL(EnvRenderer):
         return ClosedLinesRenderer(self, points, color, size, **kwargs)
 
     def close(self):
-        if self.render_mode != "rgb_array":
+        # Release the GL widget/context in every mode. Previously rgb_array was a
+        # no-op, which leaked an OpenGL context per env and could crash on
+        # repeated env creation (notably under software GL / xvfb).
+        try:
             self.window.close()
+            self.view.setParent(None)
+            self.view.deleteLater()
+            self.app.processEvents()
+        except Exception:
+            pass
