@@ -224,13 +224,11 @@ Each ``step()`` advances the physics over ``timestep`` seconds, subdivided into
 substeps of ``integrator_timestep`` seconds. The integrator is invoked once per
 substep per agent (RK4 evaluates the derivative four times per substep).
 
-.. warning::
+.. note::
 
-   ``timestep`` must be an **integer multiple** of ``integrator_timestep``, and
-   the check is exact in IEEE-754 floating point. A seemingly valid pairing like
-   ``timestep=0.03, integrator_timestep=0.01`` is **rejected**, because
-   ``0.03 % 0.01`` is not ``0`` in float. Stick to values such as ``0.01``,
-   ``0.02``, ``0.04``, ``0.05``, or ``0.1``.
+   ``timestep`` must be an integer multiple of ``integrator_timestep``; the ratio
+   is the number of integrator substeps per environment step. See
+   :doc:`configuration` for how the pairing is validated.
 
 Runnable example: KS model with an overridden parameter
 -------------------------------------------------------

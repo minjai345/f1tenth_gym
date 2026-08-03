@@ -250,12 +250,14 @@ from ``f1tenth_gym.envs.env_config``.
    when ``loop_counter is FRENET_BASED`` — you cannot accidentally disable it
    while keeping Frenet lap counting.
 
-.. warning::
+.. note::
 
-   ``timestep`` must be an exact multiple of ``integrator_timestep`` and the
-   check uses IEEE-754 modulo. ``timestep=0.03, integrator_timestep=0.01`` is
-   **rejected** (``0.03 % 0.01`` is not exactly 0). Use values like
-   ``0.01 / 0.02 / 0.04 / 0.05 / 0.1``.
+   ``timestep`` must be an exact multiple of ``integrator_timestep``; the ratio
+   sets the number of integrator substeps taken per environment step. The check
+   is validated against that ratio, so any pair that divides evenly is accepted
+   — ``timestep=0.03, integrator_timestep=0.01`` gives 3 substeps. The pairing is
+   checked when the simulator is built, not when the config is constructed, so an
+   invalid pair raises from ``gym.make`` rather than from ``SimulationConfig``.
 
 ``ObservationConfig``
 ---------------------

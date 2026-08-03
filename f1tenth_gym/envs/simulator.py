@@ -79,9 +79,18 @@ class F110Simulator:
         self.ego_idx = env_config.ego_index
         self.time_step = env_config.simulation_config.timestep
         self.integrator_dt = env_config.simulation_config.integrator_timestep
-        if not np.isclose(self.time_step % self.integrator_dt, 0.0):
-            raise ValueError("time_step must be an integer multiple of integrator_timestep")
-        self.substeps = max(1, int(round(self.time_step / self.integrator_dt)))
+        # Validate the way we compute. Testing `time_step % integrator_dt` against 0
+        # rejects exact multiples that IEEE754 cannot represent: 0.03 % 0.01 is
+        # 0.00999999999999999847, not 0. Compare the ratio to the substep count that
+        # is actually used instead, which accepts every pair that divides evenly in
+        # real arithmetic.
+        ratio = self.time_step / self.integrator_dt
+        self.substeps = max(1, int(round(ratio)))
+        if not np.isclose(ratio, self.substeps, rtol=0.0, atol=1e-9):
+            raise ValueError(
+                f"timestep ({self.time_step}) must be an integer multiple of "
+                f"integrator_timestep ({self.integrator_dt}), got a ratio of {ratio}"
+            )
 
         self.collision_check_mode: CollisionCheckMode = env_config.collision_check
         self.longitudinal_fn: AccelerationFn = longitudinal_action_from_type(longitudinal_type)
