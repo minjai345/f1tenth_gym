@@ -61,11 +61,13 @@ To run fully headless, set ``render_enabled=False`` in ``build_config()`` and
 change ``render_mode`` in ``main()``; render callbacks are only wired up when a
 renderer actually exists.
 
-.. warning::
+.. note::
 
-   The planner's ``max_reacquire`` branch is a known footgun: it can raise a
-   numba ``TypingError`` if the car drifts more than the lookahead distance but
-   less than 20 m off the raceline. Keep the follower near the line.
+   The follower degrades in two stages as it leaves the raceline. Between the
+   lookahead radius and ``max_reacquire`` (20 m) it steers at the nearest
+   raceline point rather than an interpolated one; beyond 20 m ``plan()``
+   gives up and returns a fixed ``speed=4.0, steer=0.0`` until the car
+   drifts back within range.
 
 telemetry_plot.py
 -----------------
