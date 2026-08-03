@@ -89,7 +89,9 @@ Which one matters depends on the subsystem:
 
 .. warning::
 
-   The centerline and raceline are **different-length loops**. On Spielberg the centerline frame is ~343.3 m while the raceline is ~338.1 m. Because cars spawn on the raceline but Frenet is measured on the centerline, ``ey`` is **non-zero at spawn** (about 0.8 m on Spielberg), and FRENET_BASED lap counting carries a ~1.5% lap-length error. This is expected, not a bug in your code.
+   Cars spawn on the raceline but Frenet is measured against the centerline, so ``ey`` is **non-zero at spawn** — about 0.8 m on Spielberg. This is expected, not a bug in your code; subtract the spawn ``ey`` if you need a zero baseline.
+
+   Lap counting is unaffected. The two loops are different lengths (Spielberg: centerline 343.3 m, raceline 338.1 m), but both sides of the lap arithmetic are denominated in centerline arclength, so one physical lap measures exactly one lap whatever line the car drives. What the length difference does change is ``info["progress"]`` and the PROGRESS reward, which accrue ~343.3 m per lap rather than the ~338.1 m the car actually travels — deliberate, so that a longer racing line is not paid more.
 
 The Frenet frame ``(s, ey, ephi)``
 ----------------------------------
