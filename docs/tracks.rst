@@ -54,7 +54,7 @@ Only a subset of that metadata actually drives the simulator:
 
 .. warning::
 
-   The occupancy image is binarised at a **hard-coded threshold of 128** (``<=128`` → free/0, ``>128`` → occupied/255). The YAML's ``negate``, ``occupied_thresh`` and ``free_thresh`` fields are parsed into the :class:`~f1tenth_gym.envs.track.track.TrackSpec` but **never used** — do not rely on them to change how the map is thresholded.
+   The occupancy image is binarised at a **hard-coded threshold of 128**: a pixel ``<=128`` becomes ``0`` and is **occupied**, a pixel ``>128`` becomes ``255`` and is **free**. Dark pixels are walls. The LiDAR's distance transform measures the distance to the nearest zero, so inverting this convention makes the tracer treat open track as solid. The YAML's ``negate``, ``occupied_thresh`` and ``free_thresh`` fields are parsed into the :class:`~f1tenth_gym.envs.track.track.TrackSpec` but **never used** — do not rely on them to change how the map is thresholded.
 
 Reference-line CSVs are optional and looked up by name in the track directory: ``{name}_centerline.csv`` (columns ``x_m, y_m, ...``, comma-delimited) and ``{name}_raceline.csv`` (columns ``s_m; x_m; y_m; psi_rad; kappa_radpm; vx_mps; ax_mps2``, semicolon-delimited).
 
