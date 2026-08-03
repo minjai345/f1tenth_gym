@@ -51,7 +51,7 @@ follower can read ``obs["agent_0"]["pose_x"]`` / ``pose_y`` / ``pose_theta``
 directly. ``DIRECT`` does not expose those derived fields (see
 :doc:`observations`).
 
-Run it (needs an X display for the ``"human"`` render mode)::
+Run it (needs an X display for the ``"human"`` render mode):
 
 .. code-block:: bash
 
@@ -89,7 +89,7 @@ per plotted frame, decoupling dynamics speed from plot refresh. It builds the
 env with ``SimulationConfig(max_laps=None)`` so the rollout does not end after
 one lap.
 
-Run it::
+Run it:
 
 .. code-block:: bash
 
@@ -120,7 +120,7 @@ tracks.
    and lap counting all run over that loop. There is no open-path mode. See
    :doc:`tracks`.
 
-Run it::
+Run it:
 
 .. code-block:: bash
 
@@ -137,7 +137,7 @@ pure-pursuit before ``env.close()`` flushes the video. See :doc:`rendering` for
 how ``rgb_array`` and the render clock work.
 
 Run it (on a desktop with a display, or under ``xvfb-run`` on a headless
-server)::
+server):
 
 .. code-block:: bash
 
