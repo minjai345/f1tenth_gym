@@ -2,7 +2,7 @@ name: Linting Checks
 
 on:
   push:
-    branches: [ main , 'v*', 'dev_*']
+    branches: [ main , 'v*', 'dev*']
   pull_request:
     branches: [ main , 'v*' ]
 
