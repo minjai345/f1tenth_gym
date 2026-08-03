@@ -1,0 +1,39 @@
+# One canonical home per fact (ISSUES_PLAN.md #21, rule 3).
+# max_elsewhere starts at today's count so the check is green on day one;
+# lower it in whichever page-rewrite PR removes a duplicate. It must never rise.
+
+steering_column_zero:
+  pattern: 'steering is (action )?column 0|\[steering, longitudinal\]|\[steer, longitudinal\]'
+  canonical: actions.rst
+  max_elsewhere: 11
+
+pose_frame_ks_st:
+  pattern: 'rear[- ]axle|centre of gravity|center of gravity|\bCoG\b'
+  canonical: dynamics.rst
+  max_elsewhere: 5
+
+direct_no_pose_x:
+  pattern: '``DIRECT`` does not|no ``pose_x``|does not expose those derived'
+  canonical: observations.rst
+  max_elsewhere: 2
+
+field_of_view_noop:
+  pattern: 'field_of_view.{0,40}(no-op|silently does nothing|does nothing)'
+  canonical: configuration.rst
+  max_elsewhere: 0
+
+ey_nonzero_at_spawn:
+  pattern: '``ey`` is \*\*non-zero at spawn|non-zero at spawn'
+  canonical: tracks.rst
+  max_elsewhere: 1
+
+zero_scan_after_reset:
+  pattern: 'scan.{0,40}all zeros|zeros? (right )?after ``reset'
+  canonical: quickstart.rst
+  max_elsewhere: 1
+
+timestep_multiple:
+  pattern: 'exact multiple of ``integrator_timestep``|integer multiple of ``integrator_timestep``'
+  canonical: configuration.rst
+  max_elsewhere: 1
+

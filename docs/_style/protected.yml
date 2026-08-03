@@ -1,0 +1,63 @@
+# Verified, hard-won content that a voice pass must not delete
+# (ISSUES_PLAN.md #21). Keyed by a hash of the normalised paragraph, so it
+# survives being moved or rewrapped -- but not being removed or gutted.
+# Dropping one deliberately? Delete the entry in the same PR and say why.
+
+abi_append_only:
+  hash: dc09295b09e6e588
+  note: '``VehicleParameters`` is **append-only**. The parameters are marshalled to the numba dynam...'
+  page: dynamics.rst
+field_of_view_noop:
+  hash: 1e3729efe38c1ac5
+  note: '* - Field - Default - Allowed values / notes * - ``enabled`` - ``True`` - When ``False``, ...'
+  page: configuration.rst
+force_closed_loop:
+  hash: 6b65de3a2ef64a9f
+  note: "``from_refline`` **force-closes the reference line into a loop** \u2014 there is no open-path\
+    \ m..."
+  page: tracks.rst
+install_real_output:
+  hash: 710147c427d4aab0
+  note: A healthy install prints a speed near the commanded ``2.0`` m/s and a ``sim_time`` around ...
+  page: installation.rst
+metadata_render_fps:
+  hash: 17e8ea2fba9bec74
+  note: The env's ``metadata["render_fps"]`` is **not** ``render_config.render_fps``. It is set to...
+  page: rendering.rst
+occupancy_polarity:
+  hash: 4f5809180c28b081
+  note: 'The occupancy image is binarised at a **hard-coded threshold of 128**: a pixel ``<=128`` b...'
+  page: tracks.rst
+pid_steer_bangbang:
+  hash: 73d14ca6639af340
+  note: Under ``STEERING_ANGLE`` the target angle is realised by :func:`~f1tenth_gym.envs.dynamic_...
+  page: actions.rst
+progress_formula:
+  hash: 0a5792bf19c67405
+  note: "reward = progress_weight * (forward Frenet \u0394s this step, metres) + velocity_weight * (ego\
+    \ ..."
+  page: rewards_and_rl.rst
+rng_offset_2_20:
+  hash: 83479d86699024c1
+  note: "* **Spawn pose** \u2014 the reset strategy samples from ``np_random``. Under the default ``RL_G..."
+  page: reproducibility.rst
+ros_pythonpath:
+  hash: b6730ff18388674a
+  note: env -u PYTHONPATH uv run pytest...
+  page: installation.rst
+spawn_span_measured:
+  hash: 86a3a8470823085a
+  note: '* the current simulation state, * the action you pass to :func:`step`, and * the random dr...'
+  page: reproducibility.rst
+timestep_multiple:
+  hash: 421e388feba7bb2b
+  note: '``timestep`` must be an exact multiple of ``integrator_timestep``; the ratio sets the numb...'
+  page: configuration.rst
+uv_sync_prunes:
+  hash: c4b8e61aff22651c
+  note: '``uv sync`` is an *exact* sync: it uninstalls anything it cannot derive from ``pyproject.t...'
+  page: installation.rst
+zero_scan_after_reset:
+  hash: 29fcf5fc0c104e66
+  note: Immediately after ``reset`` the ``scan`` field is all zeros -- the reset path does not run...
+  page: quickstart.rst
