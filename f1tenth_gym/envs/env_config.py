@@ -488,6 +488,20 @@ class EnvConfig:
         if not isinstance(dr_cfg, DomainRandomizationConfig):
             raise TypeError("domain_randomization must be a DomainRandomizationConfig instance")
 
+        # The multi-body model needs the full 87-parameter ABI. The two small-scale
+        # presets leave all 69 multi-body fields at nan, which produced a NaN state
+        # with no error rather than a trajectory. Fail here instead, before the map
+        # download and the JIT.
+        if simulation_cfg.dynamics_model is DynamicModel.MB:
+            missing = self.params.missing_mb_parameters()
+            if missing:
+                raise ValueError(
+                    f"DynamicModel.MB needs the multi-body parameters, but "
+                    f"{len(missing)} are not finite (e.g. {', '.join(missing[:4])}). "
+                    f"Use FULLSCALE_VEHICLE_PARAMETERS, which is the only preset that "
+                    f"populates them, or supply your own values."
+                )
+
         if (
             simulation_cfg.loop_counter is LoopCounterMode.FRENET_BASED
             and not simulation_cfg.compute_frenet_frame

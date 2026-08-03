@@ -133,6 +133,21 @@ class VehicleParameters:
     def with_updates(self, **updates: float) -> "VehicleParameters":
         return replace(self, **updates)
 
+    def missing_mb_parameters(self) -> tuple[str, ...]:
+        """Names of multi-body ABI fields that are not finite.
+
+        ``F1TENTH_VEHICLE_PARAMETERS`` and ``F1FIFTH_VEHICLE_PARAMETERS`` leave the
+        entire multi-body block at ``nan``, so selecting ``DynamicModel.MB`` with
+        either of them yields a NaN state rather than a trajectory. Only
+        ``FULLSCALE_VEHICLE_PARAMETERS`` populates it.
+
+        Returns:
+            The unusable field names, empty if the parameters support MB.
+        """
+        return tuple(
+            name for name in _MB_PARAM_ABI if not math.isfinite(getattr(self, name))
+        )
+
     def to_array(self, model: "DynamicModel") -> np.ndarray:
         """Marshal the parameters into the flat float32 array the njit kernels index.
 
