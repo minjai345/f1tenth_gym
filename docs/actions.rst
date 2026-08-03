@@ -30,10 +30,11 @@ Single-agent code must still pass a 2-D array with a leading agent axis:
 .. warning::
 
    **Steering is column 0, longitudinal is column 1.** Both columns are
-   ``float32``, so swapping them fails **silently** — the environment happily
-   interprets your speed command as a steering command and vice versa, and you
-   just get nonsense trajectories with no error. Always order the pair
-   ``[steer, longitudinal]``.
+   ``float32`` with overlapping valid ranges, so a transposed action is still a
+   *valid* action: the simulator cannot detect the swap and will faithfully
+   execute it. Nothing raises, and the trajectory is simply wrong. Check the
+   order first when results look inexplicable. For a single agent:
+   ``np.array([[steer, speed]], dtype=np.float32)``.
 
 Longitudinal modes
 ------------------
