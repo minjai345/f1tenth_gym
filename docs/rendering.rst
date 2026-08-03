@@ -255,12 +255,10 @@ recorded resolution is ``window_size`` and the container fps is the env's
    env = RecordVideo(env, video_folder="videos")
    # ... reset / step / render loop ...
 
-.. warning::
-
-   ``RecordVideo`` requires **moviepy**, which is not declared as a dependency
-   of this project, and ``uv sync`` actively uninstalls it. Run
-   ``uv pip install moviepy`` after syncing, or you will get
-   ``gym.error.DependencyNotInstalled``.
+``RecordVideo`` encodes through **moviepy**, which ships in the ``examples``
+dependency group that ``uv sync`` installs by default. If you synced with
+``--no-group examples``, ``RecordVideo`` raises
+``gymnasium.error.DependencyNotInstalled``.
 
 Render callbacks
 ----------------

@@ -65,11 +65,18 @@ for example ``uv run python your_script.py``.
 
 .. warning::
 
-   ``uv sync`` also **uninstalls** anything not present in ``uv.lock``. A couple
-   of examples need extra packages that are not declared
-   (``moviepy`` for :doc:`examples` video recording, ``shapely`` for track
-   generation). Re-install them after a sync with, e.g.,
-   ``uv pip install moviepy``.
+   ``uv sync`` is an *exact* sync: it uninstalls anything it cannot derive from
+   ``pyproject.toml`` and ``uv.lock``. Install extra packages by adding them to
+   the project rather than with ``uv pip install``, which the next sync undoes.
+
+The dependencies the ``examples/`` scripts need beyond the library itself —
+``moviepy`` for video recording, ``shapely`` and ``matplotlib`` for track
+generation — are declared as the ``examples`` dependency group and installed by
+default. For a lean library environment without them::
+
+    uv sync --no-group examples
+
+pip users can opt into the same extras with ``pip install "f1tenth_gym[video,trackgen]"``.
 
 Install with pip
 ----------------

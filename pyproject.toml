@@ -44,6 +44,13 @@ Homepage = "https://f1tenth.org"
 Repository = "https://github.com/f1tenth/f1tenth_gym"
 Documentation = "https://f1tenth-gym.readthedocs.io/en/latest/"
 
+[project.optional-dependencies]
+# Extras used only by scripts in examples/ -- the library itself needs none of
+# these. They are extras rather than dev dependencies so that pip users can opt
+# in with `pip install f1tenth_gym[video]`.
+video = ["moviepy>=1.0.0"]                          # gymnasium RecordVideo backend
+trackgen = ["shapely>=2.0", "matplotlib>=3.8.2,<4"] # examples/random_trackgen.py
+
 [tool.pytest.ini_options]
 minversion = 6.0
 addopts = "-ra"
@@ -62,8 +69,13 @@ dev = [
     "matplotlib>=3.8.2,<4",
     "flake8>=7.0.0,<8",
 ]
+# `uv sync` is an exact sync: it prunes anything it cannot derive from
+# pyproject/uv.lock. Declaring the example dependencies here is what stops it
+# uninstalling moviepy and shapely on every sync.
+examples = ["f1tenth_gym[video,trackgen]"]
 
 [tool.uv]
+default-groups = ["dev", "examples"]
 
 [tool.uv.build-backend]
 module-name = ["f1tenth_gym"]

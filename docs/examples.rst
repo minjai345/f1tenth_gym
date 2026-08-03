@@ -145,29 +145,17 @@ server):
 
    xvfb-run -a python examples/video_recording.py
 
-.. note::
-
-   ``video_recording.py`` needs **moviepy**, which is *not* a declared
-   dependency -- and ``uv sync`` actively uninstalls it. Install it after every
-   sync::
-
-       pip install moviepy
-
-   Without it, ``RecordVideo`` raises ``gymnasium.error.DependencyNotInstalled``.
-   The output directory (``video_<timestamp>/``) is created next to where you run
-   the script.
+The output directory (``video_<timestamp>/``) is created next to where you run
+the script. Encoding goes through ``moviepy``, which is installed by default as
+part of the ``examples`` dependency group.
 
 random_trackgen.py
 ------------------
 
-Procedurally generates random closed tracks. Included for completeness.
-
-.. note::
-
-   ``random_trackgen.py`` imports **shapely**, which is declared nowhere (not in
-   ``pyproject.toml``, not in ``uv.lock``). Install it manually before running::
-
-       pip install shapely
+Procedurally generates random closed tracks, writing a ``.pgm``/``.png`` map, a
+``.yaml`` spec, and centerline and raceline CSVs per track. It needs ``shapely``
+and ``matplotlib``, both installed by default as part of the ``examples``
+dependency group.
 
 A note on running the examples
 ------------------------------
