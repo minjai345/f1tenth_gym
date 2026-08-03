@@ -134,12 +134,50 @@ class VehicleParameters:
         return replace(self, **updates)
 
     def to_array(self, model: "DynamicModel") -> np.ndarray:
-        values = np.asarray(astuple(self), dtype=np.float32)
-        return values[: model.parameter_count()].copy()
+        """Marshal the parameters into the flat float32 array the njit kernels index.
+
+        The layout is defined by ``_BASE_PARAM_ABI`` / ``_MB_PARAM_ABI``, not by the
+        dataclass field order, so fields may be added or reordered above without
+        disturbing the kernels.
+
+        Args:
+            model: The dynamics model whose ABI to marshal for.
+
+        Returns:
+            A contiguous ``float32`` array of ``model.parameter_count()`` values.
+        """
+        abi = _MB_PARAM_ABI if model is DynamicModel.MB else _BASE_PARAM_ABI
+        return np.asarray([getattr(self, name) for name in abi], dtype=np.float32)
+
+
+# THE ABI. Every @njit kernel indexes the flat array from `to_array` POSITIONALLY
+# (`mu = params[0]` ... `v_max = params[15]`), so these tuples -- not the dataclass
+# field order -- are the wire format. Reordering or inserting a dataclass field is
+# now safe; reordering THESE is not.
+#
+# Verified against the kernels: kinematic.py and single_track.py read indices 0-17
+# contiguously; multi_body/ and tire_model.py read 0-86 contiguously.
+_BASE_PARAM_ABI: tuple[str, ...] = (
+    "mu", "C_Sf", "C_Sr", "lf", "lr", "h", "m", "I",
+    "s_min", "s_max", "sv_min", "sv_max",
+    "v_switch", "a_max", "v_min", "v_max",
+    "width", "length",
+)
 
 _ALL_PARAMETER_FIELDS = tuple(field.name for field in fields(VehicleParameters))
-_BASE_PARAMETER_COUNT = 18
-_MB_PARAMETER_COUNT = len(_ALL_PARAMETER_FIELDS)
+
+# collision_body_center_x/y are deliberately absent: they are consumed by the
+# simulator's Python-level geometry helpers, never by a kernel. Including them --
+# which is what happened when they were inserted at dataclass positions 18/19 --
+# shifts every multi-body parameter by +2 and is what broke the MB model.
+_MB_PARAM_ABI: tuple[str, ...] = _BASE_PARAM_ABI + tuple(
+    name for name in _ALL_PARAMETER_FIELDS
+    if name not in _BASE_PARAM_ABI
+    and name not in ("collision_body_center_x", "collision_body_center_y")
+)
+
+_BASE_PARAMETER_COUNT = len(_BASE_PARAM_ABI)
+_MB_PARAMETER_COUNT = len(_MB_PARAM_ABI)
 
 F1TENTH_VEHICLE_PARAMETERS = VehicleParameters(
     mu=1.0489,
