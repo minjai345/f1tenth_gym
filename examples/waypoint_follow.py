@@ -376,7 +376,7 @@ def build_config() -> EnvConfig:
             timestep=0.01,                        # env step (s); must be a multiple
             integrator_timestep=0.01,             #   of integrator_timestep
             integrator=IntegratorType.RK4,        # RK4 | EULER
-            dynamics_model=DynamicModel.ST,       # ST (single-track) | KS | MB(broken)
+            dynamics_model=DynamicModel.ST,       # ST (single-track) | KS | MB (needs FULLSCALE params)
             loop_counter=LoopCounterMode.FRENET_BASED,  # FRENET_BASED | WINDING_ANGLE
             compute_frenet_frame=True,            # needed for FRENET_BASED laps + frenet obs
             max_laps=1,                           # None -> run forever

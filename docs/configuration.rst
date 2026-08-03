@@ -230,7 +230,8 @@ from ``f1tenth_gym.envs.env_config``.
    * - ``dynamics_model``
      - ``DynamicModel.ST``
      - ``KS`` (kinematic single-track, 5-state) or ``ST`` (single-track,
-       7-state). ``MB`` exists but is broken — see :doc:`dynamics`.
+       7-state). ``MB`` (multi-body, 29-state) requires
+       ``FULLSCALE_VEHICLE_PARAMETERS`` — see :doc:`dynamics`.
    * - ``loop_counter``
      - ``LoopCounterMode.FRENET_BASED``
      - ``FRENET_BASED`` (default) or ``WINDING_ANGLE``. ``TOGGLE`` is declared

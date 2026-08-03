@@ -49,7 +49,7 @@ The model is selected through
      - 29
      - multi-body + Pacejka tyres
      - CoG
-     - **BROKEN — returns NaN**
+     - needs ``FULLSCALE`` parameters
 
 Where ``x, y`` are the planar position (m), ``delta`` is the steering angle
 (rad), ``v`` is the longitudinal speed (m/s), ``yaw`` is the heading (rad),
@@ -73,14 +73,14 @@ understeer/oversteer behaviour that ``KS`` cannot. Its pose is referenced to
 the **centre of gravity**. ``ST`` is the default and is what all tuned presets
 target.
 
-.. warning::
-
-   The multi-body model (``DynamicModel.MB``) is reachable from configuration
-   but is **broken and returns NaN** — a parameter-ordering defect shifts the
-   multi-body parameters so that a stiffness term divides by zero. Treat ``MB``
-   as unavailable. Use ``KS`` or ``ST`` only. There is no ``MB`` test in the
-   suite, and only the ``FULLSCALE`` preset even populates the multi-body
-   fields.
+The multi-body model (``DynamicModel.MB``) integrates a 29-state body with
+Pacejka tyres. It needs the full 87-parameter block, and
+``FULLSCALE_VEHICLE_PARAMETERS`` is the only preset that populates it — the two
+small-scale presets leave all 69 multi-body fields at ``nan``. Selecting ``MB``
+with either of them raises at config construction rather than producing a NaN
+trajectory. ``MB`` is far more expensive per step than ``ST`` and is not
+exercised by a racing scenario at 1/10 scale; prefer ``ST`` unless you
+specifically need roll, pitch and load transfer.
 
 Standardized state
 ~~~~~~~~~~~~~~~~~~~
@@ -185,12 +185,13 @@ and :doc:`observations`.
    ``mass``), CoG height is ``h`` (not ``h_cg``), yaw inertia is ``I``. The
    steering and speed limits are ``s_min/s_max`` and ``v_min/v_max``.
 
-.. warning::
-
-   ``VehicleParameters`` is **append-only**. The parameters are marshalled to
-   the numba dynamics kernels as a flat ``float32`` array that is indexed
-   *positionally*, so field order is an ABI. Never insert or reorder fields —
-   only ``with_updates()`` existing ones (safe) or append new fields at the end.
+Parameters reach the numba kernels as a flat ``float32`` array that is indexed
+*positionally*, so the layout is a wire format. That layout is declared
+explicitly by ``_BASE_PARAM_ABI`` (18 entries, ``KS``/``ST``) and
+``_MB_PARAM_ABI`` (87 entries, ``MB``) in
+``f1tenth_gym.envs.dynamic_models``. Adding or reordering a *dataclass* field is
+therefore safe; changing those tuples is not, and requires updating every kernel
+that indexes them. ``tests/test_vehicle_params_abi.py`` pins the order.
 
 Overriding parameters
 ~~~~~~~~~~~~~~~~~~~~~~~
