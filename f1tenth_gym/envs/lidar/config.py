@@ -84,6 +84,10 @@ class LiDARConfig:
                 f"Did you pass degrees instead of radians? Use np.deg2rad() to convert."
             )
 
+        object.__setattr__(
+            self, "field_of_view", float(self.angle_max) - float(self.angle_min)
+        )
+
     @property
     def angle_increment(self) -> float:
         """Angular distance between consecutive measurements in radians."""
@@ -97,4 +101,16 @@ class LiDARConfig:
         return self.range_max
 
     def with_updates(self, **changes: object) -> "LiDARConfig":
+        """Return a re-validated copy with ``changes`` applied.
+
+        Updating ``field_of_view`` alone re-derives the scan angles symmetrically,
+        so it behaves like constructing a fresh ``LiDARConfig``. A plain
+        ``replace()`` would carry the previously materialised ``angle_min``/
+        ``angle_max`` over and silently ignore the new field of view. Passing an
+        angle explicitly still wins.
+        """
+        sets_fov = "field_of_view" in changes
+        sets_angle = "angle_min" in changes or "angle_max" in changes
+        if sets_fov and not sets_angle:
+            changes = {**changes, "angle_min": None, "angle_max": None}
         return replace(self, **changes)
