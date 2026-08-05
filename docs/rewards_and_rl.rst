@@ -278,12 +278,9 @@ Beyond the plain ``noise_std``,
    affect the **observed** scan only. Collision detection uses the clean,
    noise-free scan, so adding sensor noise never changes when a crash fires.
 
-.. note::
-
-   Setting ``field_of_view`` on an *existing* config via ``with_updates`` does
-   **not** change the actual FOV (``angle_min``/``angle_max`` are already
-   materialised). Pass ``field_of_view`` to a fresh ``LiDARConfig(...)``, or set
-   ``angle_min``/``angle_max`` explicitly. See :doc:`observations`.
+Narrowing or widening the scan works the same on a fresh config or a derived
+one — ``with_updates(field_of_view=...)`` re-derives the scan angles. See
+:doc:`configuration`.
 
 Wrappers
 --------

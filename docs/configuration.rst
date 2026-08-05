@@ -397,26 +397,25 @@ The simulated LiDAR. Import from ``f1tenth_gym.envs.lidar`` (or
 semantics are covered in :doc:`rewards_and_rl`. Convenience read-only
 properties: ``angle_increment`` and ``maximum_range``.
 
-.. warning::
+``angle_min`` and ``angle_max`` are the sensor's true extent — the scanner
+derives its own field of view as ``angle_max - angle_min``. ``field_of_view`` is
+a convenience for the symmetric case: leave the angles at ``None`` and they are
+materialised to ``∓field_of_view/2``; give the angles explicitly and
+``field_of_view`` is recomputed to match. The three can never disagree, whether
+you build a fresh config or derive one:
 
-   ``lidar_config.with_updates(field_of_view=X)`` is a **silent no-op** on the
-   actual FOV. ``__post_init__`` only derives ``angle_min``/``angle_max`` from
-   ``field_of_view`` when they are ``None``; a ``with_updates`` carries the
-   already-materialised angles over, and the scanner computes the effective FOV
-   as ``angle_max - angle_min``. So ``with_updates(field_of_view=2*np.pi)``
-   leaves ``angle_min``/``angle_max`` at ±2.356 (270°). To change the FOV,
-   build a **fresh** ``LiDARConfig(field_of_view=...)``, or set ``angle_min`` and
-   ``angle_max`` explicitly:
+.. code-block:: python
 
-   .. code-block:: python
+    import numpy as np
+    from f1tenth_gym.envs.lidar import LiDARConfig
 
-       import numpy as np
-       from f1tenth_gym.envs.lidar import LiDARConfig
+    LiDARConfig(field_of_view=np.deg2rad(180)).angle_min   # -pi/2
+    LiDARConfig(angle_min=-0.5, angle_max=1.5).field_of_view   # 2.0
+    LiDARConfig().with_updates(field_of_view=2.0).angle_max    # 1.0
 
-       # Correct: fresh config derives the angles
-       lidar = LiDARConfig(field_of_view=np.deg2rad(180))
-       # Or set the angles directly
-       lidar = LiDARConfig(angle_min=-np.pi / 2, angle_max=np.pi / 2)
+An explicit angle always wins: passing ``field_of_view`` together with
+``angle_min``/``angle_max`` keeps the angles you gave and derives the FOV from
+them.
 
 ``RenderConfig``
 ----------------
