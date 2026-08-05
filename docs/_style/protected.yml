@@ -1,15 +1,12 @@
-# Verified, hard-won content that a voice pass must not delete
-# (ISSUES_PLAN.md #21). Keyed by a hash of the normalised paragraph, so it
-# survives being moved or rewrapped -- but not being removed or gutted.
-# Dropping one deliberately? Delete the entry in the same PR and say why.
-
-abi_append_only:
-  hash: dc09295b09e6e588
-  note: '``VehicleParameters`` is **append-only**. The parameters are marshalled to the numba dynam...'
+abi_is_explicit:
+  hash: 992b14431f3eb036
+  note: The params wire format is declared explicitly by _BASE_PARAM_ABI/_MB_PARAM_ABI; reordering the
+    dataclass is safe, reordering those tuples is not.
   page: dynamics.rst
-field_of_view_noop:
-  hash: 1e3729efe38c1ac5
-  note: '* - Field - Default - Allowed values / notes * - ``enabled`` - ``True`` - When ``False``, ...'
+field_of_view_derived:
+  hash: 62942afc192b26d9
+  note: angle_min/angle_max are the sensor's true extent; field_of_view is derived from them and the three
+    can never disagree.
   page: configuration.rst
 force_closed_loop:
   hash: 6b65de3a2ef64a9f
