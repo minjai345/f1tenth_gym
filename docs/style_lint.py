@@ -59,6 +59,10 @@ BANNED_PHRASES = [
     "everything you need", "clean interfaces", "easy to use", "easy-to-use",
     "seamless", "state-of-the-art", "comprehensive", "powerful",
     "byte-identical to before", "see below.", "included for completeness",
+    # Blames the library for ordinary user error (ISSUES_PLAN.md #8). The action
+    # columns are both valid float ranges, so a transposed action is a *valid*
+    # action the simulator executes -- say that instead.
+    "fails silently", "fail silently",
 ]
 
 STOPWORDS = {
