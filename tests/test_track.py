@@ -327,3 +327,15 @@ class TestTrack(unittest.TestCase):
             # Handle edge case where we are checking for s=0 but s_ is the last s (same point, but different s)
             self.assertTrue(np.isclose(s, s_, atol=1e-4) or np.isclose(s + track.centerline.spline.s[-1], s_, atol=1e-4))
             self.assertAlmostEqual(d, d_, places=4)
+
+
+class TestSyntheticGridOrientation(unittest.TestCase):
+    """Pins ISSUES_PLAN.md #3's grid bug: synthetic grids are (rows=y, cols=x)."""
+
+    def test_from_refline_grid_is_height_by_width(self):
+        track = Track.from_refline(
+            x=np.linspace(0, 10, 50), y=np.zeros(50), velx=2.0 * np.ones(50)
+        )
+        # x-extent 20 m (10 m line + 2*5 m margin), y-extent 10 m, 0.05 m/px:
+        # set_map reads height = shape[0], so rows must be the y-extent
+        self.assertEqual(track.occupancy_map.shape, (200, 400))
