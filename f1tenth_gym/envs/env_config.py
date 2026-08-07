@@ -146,7 +146,7 @@ class ObservationConfig:
         features: Specific features to include (None for all).
     """
 
-    type: ObservationType = ObservationType.DIRECT
+    type: ObservationType = ObservationType.DEFAULT
     features: Optional[tuple[str, ...]] = None
 
     def __post_init__(self) -> None:

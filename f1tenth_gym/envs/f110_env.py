@@ -295,7 +295,7 @@ class F110Env(gym.Env):
             obs_kwargs["features"] = self.observation_cfg.features
         self.observation_type = observation_factory(env=self, **obs_kwargs)
         self.observation_space = self.observation_type.space()
-        self.render_obs_type = observation_factory(env=self, type=ObservationType.DIRECT)
+        self.render_obs_type = observation_factory(env=self, type=ObservationType.DEFAULT)
         self.render_obs = None
 
         single_action_space = get_action_space(
@@ -483,7 +483,7 @@ class F110Env(gym.Env):
         # observation
         obs = self.observation_type.observe()
         if self.render_enabled and self.renderer is not None:
-            if self.observation_cfg.type is ObservationType.DIRECT:
+            if self.observation_cfg.type is ObservationType.DEFAULT:
                 self.render_obs = copy.deepcopy(obs)
             else:
                 self.render_obs = copy.deepcopy(self.render_obs_type.observe())
@@ -605,7 +605,7 @@ class F110Env(gym.Env):
 
         obs = self.observation_type.observe()
         if self.render_enabled and self.renderer is not None:
-            if self.observation_cfg.type is ObservationType.DIRECT:
+            if self.observation_cfg.type is ObservationType.DEFAULT:
                 self.render_obs = copy.deepcopy(obs)
             else:
                 self.render_obs = copy.deepcopy(self.render_obs_type.observe())
