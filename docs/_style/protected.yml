@@ -60,7 +60,3 @@ uv_sync_prunes:
   hash: c4b8e61aff22651c
   note: '``uv sync`` is an *exact* sync: it uninstalls anything it cannot derive from ``pyproject.t...'
   page: installation.rst
-zero_scan_after_reset:
-  hash: 29fcf5fc0c104e66
-  note: Immediately after ``reset`` the ``scan`` field is all zeros -- the reset path does not run...
-  page: quickstart.rst

@@ -133,6 +133,9 @@ Reset strategies
 Rendering
 ---------
 
+One OpenGL backend sits behind the :class:`EnvRenderer` ABC; the factory
+picks it from the render mode.
+
 .. autosummary::
 
    f1tenth_gym.envs.rendering.make_renderer

@@ -1,209 +1,163 @@
 Quickstart
 ==========
 
-This page walks through a minimal, fully runnable episode: build an environment,
-reset it, step a constant action in a loop, and read the ego observation. Every
-snippet below runs as written against the real API on branch ``dev-humble``.
+An episode ends when the simulator decides it does — on a crash, or once the lap
+target is met — not when your loop runs out of iterations. Driving one to that
+end with no step budget of your own is the fastest way to see which of the two
+conditions fired, and to read enough of the car's state to do something about it.
 
-.. note::
+Drive one episode
+-----------------
 
-   The first time you use a map, the simulator downloads it from
-   ``https://api.f1tenth.org`` into a gitignored ``maps/`` directory, so the
-   first ``gym.make`` / ``reset`` needs network access. See :doc:`tracks`.
+A default :class:`~f1tenth_gym.envs.env_config.EnvConfig` places a single car on
+the Spielberg track under single-track dynamics, with speed and steering-angle
+commands and the ``DEFAULT`` observation preset. The loop below holds one
+constant command and stops only when the environment says to:
 
-A complete episode
-------------------
+>>> import gymnasium as gym
+>>> import numpy as np
+>>> from f1tenth_gym.envs.env_config import EnvConfig
+>>> env = gym.make("f1tenth_gym:f1tenth-v0", config=EnvConfig(render_enabled=False))
+>>> obs, info = env.reset(seed=42)
+>>> action = np.array([[0.0, 2.0]], dtype=np.float32)   # [[steering, speed]]
+>>> terminated = truncated = False
+>>> steps = 0
+>>> while not (terminated or truncated):
+...     obs, reward, terminated, truncated, info = env.step(action)
+...     steps += 1
+>>> print(steps, round(info["sim_time"], 2))
+1792 17.92
 
-.. code-block:: python
+The ``f1tenth_gym:`` prefix on the id is an instruction to import the package,
+whose side effect registers ``f1tenth-v0``; after an explicit
+``import f1tenth_gym`` the bare id works too. ``seed=42`` pins the spawn
+waypoint, so the run above replays step for step — :doc:`reproducibility` covers
+what a seed reaches, and how ``EnvConfig(seed=...)`` covers the first ``reset``
+you leave unseeded.
 
-   import gymnasium as gym
-   import numpy as np
+Find out why it ended
+---------------------
 
-   from f1tenth_gym.envs.env_config import EnvConfig, SimulationConfig
-   import f1tenth_gym  # noqa: F401  (import registers the "f1tenth-v0" id)
+Two conditions raise ``terminated``: contact, since ``terminate_on_collision``
+is on by default, and the ego reaching ``max_laps``. ``truncated`` is separate
+and comes only from ``max_episode_steps``, which is ``None`` unless you set it.
+The final ``info`` names the one that fired — it carries a per-agent array for
+each:
 
-   cfg = EnvConfig(
-       map_name="Spielberg",
-       num_agents=1,
-       # Default max_laps=1 ends the episode after ONE lap. Use None to run
-       # until you decide to stop (or set a step limit, see configuration).
-       simulation_config=SimulationConfig(max_laps=None),
-       render_enabled=False,
-   )
+>>> terminated, truncated
+(True, False)
+>>> info["collisions"], info["lap_counts"]
+(array([1.], dtype=float32), array([0.]))
 
-   env = gym.make("f1tenth_gym:f1tenth-v0", config=cfg)
+The car hit a wall after 17.92 simulated seconds without completing a lap, so
+the default ``max_laps=1`` was never in play. That figure is also the episode
+return: the default reward mode pays the physics timestep once per step, making
+the return pure survival time (:doc:`rl`). ``info`` from ``reset`` is smaller
+than ``info`` from ``step`` — ``collisions`` and ``progress`` appear only after
+a step (:doc:`observations`).
 
-   obs, info = env.reset(seed=0)
+Every config object is frozen, so changing the lap limit means rebuilding that
+branch of the tree with ``with_updates`` rather than assigning to it:
 
-   for _ in range(200):
-       # action columns are [steering, longitudinal] -- STEERING FIRST.
-       action = np.array([[0.0, 2.0]], dtype=np.float32)  # go straight at 2 m/s
-       obs, reward, terminated, truncated, info = env.step(action)
-       if terminated or truncated:
-           break
+>>> base = EnvConfig(render_enabled=False)
+>>> cfg = base.with_updates(
+...     simulation_config=base.simulation_config.with_updates(max_laps=None)
+... )
+>>> cfg.simulation_config.max_laps is None
+True
 
-   ego = obs["agent_0"]
-   print("speed:", float(ego["std_state"][3]), "sim_time:", float(ego["sim_time"]))
-   env.close()
+With the lap exit removed, a step limit is the exit you control. It ends the
+episode through ``truncated``, which keeps it distinguishable from a crash —
+bootstrapping RL algorithms depend on that distinction:
 
-Creating the environment
-------------------------
+>>> from f1tenth_gym.envs.env_config import TerminationConfig
+>>> cfg = cfg.with_updates(
+...     termination_config=TerminationConfig(max_episode_steps=500)
+... )
+>>> env = gym.make("f1tenth_gym:f1tenth-v0", config=cfg)
+>>> obs, info = env.reset(seed=42)
+>>> terminated = truncated = False
+>>> steps = 0
+>>> while not (terminated or truncated):
+...     obs, reward, terminated, truncated, info = env.step(action)
+...     steps += 1
+>>> steps, terminated, truncated
+(500, False, True)
+>>> env.close()
 
-The environment is configured with a single :class:`~f1tenth_gym.envs.env_config.EnvConfig`
-instance -- a **frozen dataclass tree**, not a dict or YAML file. Pass it as the
-``config`` keyword to ``gym.make``:
+Read the car's state
+--------------------
 
-.. code-block:: python
+Observations nest by agent id under ``agent_0``, ``agent_1``, …, and the default
+preset hands back eight fields per agent:
 
-   env = gym.make("f1tenth_gym:f1tenth-v0", config=EnvConfig(...))
+>>> env = gym.make("f1tenth_gym:f1tenth-v0", config=EnvConfig(render_enabled=False))
+>>> obs, info = env.reset(seed=42)
+>>> print(*sorted(obs["agent_0"]))
+collision frenet_pose lap_count lap_time scan sim_time state std_state
 
-The id is namespaced (``f1tenth_gym:f1tenth-v0``); the ``f1tenth_gym:`` prefix
-triggers the package import whose side effect registers the id. The defaults are
-a single agent on the ``Spielberg`` track with single-track (ST) dynamics,
-speed + steering-angle control, and the ``DIRECT`` observation set. To change any
-of these, see :doc:`configuration`.
+Position, heading and speed ride inside the seven-element ``std_state``, laid
+out ``[X, Y, delta, speed, yaw, yaw_rate, beta]``:
 
-Nested configuration mutates by nesting, since every config object is frozen:
+>>> std = obs["agent_0"]["std_state"]
+>>> print(f"x={std[0]:.4f} y={std[1]:.4f} yaw={std[4]:.4f}")
+x=-0.0441 y=-0.8492 yaw=-2.8798
 
-.. code-block:: python
+Scalars arrive as 0-d ``float32`` arrays rather than Python floats, so wrap a
+read in ``float(...)`` where a number is wanted. The first observation of an
+episode is already a real measurement rather than a placeholder: ``reset`` runs
+one LiDAR sweep, noise included, and deliberately does not adjudicate collisions
+at the spawn pose.
 
-   cfg2 = cfg.with_updates(
-       simulation_config=cfg.simulation_config.with_updates(max_laps=None)
-   )
+>>> scan = obs["agent_0"]["scan"]
+>>> print(scan.shape, round(float(scan.min()), 3), float(scan.max()))
+(1080,) 0.295 30.0
+>>> env.close()
 
-To reconfigure a live environment in place, call ``env.unwrapped.configure(cfg2)``.
+``pose_x``, ``pose_y`` and ``pose_theta`` are derived fields the default preset
+leaves out, and reading one raises ``KeyError``. Switching to
+``KINEMATIC_STATE`` supplies them as named scalars at the cost of everything
+else — five fields, no ``scan``, no ``frenet_pose``:
 
-reset() -> (obs, info)
-----------------------
+>>> from f1tenth_gym.envs.env_config import ObservationConfig
+>>> from f1tenth_gym.envs.observation import ObservationType
+>>> cfg = EnvConfig(
+...     observation_config=ObservationConfig(type=ObservationType.KINEMATIC_STATE),
+...     render_enabled=False,
+... )
+>>> env = gym.make("f1tenth_gym:f1tenth-v0", config=cfg)
+>>> obs, info = env.reset(seed=42)
+>>> print(*sorted(obs["agent_0"]))
+delta linear_vel_x pose_theta pose_x pose_y
+>>> env.close()
 
-``reset`` follows the Gymnasium API and returns a **2-tuple** ``(obs, info)``.
-Pass ``seed=`` for a reproducible start pose:
+Every preset, the shape and dtype of each field, and the bounds the space
+declares are listed in :doc:`observations`.
 
-.. code-block:: python
+Command the car
+---------------
 
-   obs, info = env.reset(seed=0)
+Both action columns are setpoints an actuator chases, not values written into
+the physics. One step of a left-hand command at 2 m/s, starting from rest,
+moves the steering angle 0.032 rad and the speed to 0.019 m/s:
 
-Without a seed, the spawn waypoint is drawn from OS entropy and the start pose
-varies between runs. See :doc:`reproducibility` for exactly which random streams
-a seed controls.
+>>> env = gym.make("f1tenth_gym:f1tenth-v0", config=EnvConfig(render_enabled=False))
+>>> obs, info = env.reset(seed=42)
+>>> obs, reward, terminated, truncated, info = env.step(
+...     np.array([[0.2, 2.0]], dtype=np.float32)
+... )
+>>> std = obs["agent_0"]["std_state"]
+>>> print(f"delta={std[2]:.4f} speed={std[3]:.4f}")
+delta=0.0320 speed=0.0190
+>>> env.close()
 
-.. note::
+That 0.032 rad is exactly ``sv_max * timestep``: the steering rate saturates at
+3.2 rad/s and one step lasts 0.01 s. The first four steps run at that limit,
+after which the proportional controller eases in and the 0.2 rad target is met
+to within a milliradian by step 13. Plan for a command to take several steps to
+be realised, and read column 0 as steering and column 1 as the longitudinal
+command — both are float32 with overlapping ranges, so a swapped pair is a
+perfectly valid action that the simulator executes as given (:doc:`actions`).
 
-   Immediately after ``reset`` the ``scan`` field is all zeros -- the reset path
-   does not run a LiDAR sweep. The first real scan appears after the first
-   ``step``.
-
-step(action) -> the 5-tuple
----------------------------
-
-``step`` returns the Gymnasium **5-tuple**
-``(obs, reward, terminated, truncated, info)`` -- never a 4-tuple and never a
-lone ``done``:
-
-- ``obs`` -- the observation dict (see below).
-- ``reward`` -- a float. With the default reward mode it is the physics
-  timestep (``0.01``), i.e. pure survival time. See :doc:`rl`.
-- ``terminated`` -- ``True`` on a collision (default) or when the lap target is
-  reached.
-- ``truncated`` -- driven by an optional step limit; ``False`` by default (no
-  limit is imposed unless you configure one).
-- ``info`` -- an auxiliary dict carrying per-agent quantities such as
-  ``"collisions"``, ``"progress"``, and ``"sim_time"``.
-
-Always end an episode on ``terminated or truncated``:
-
-.. code-block:: python
-
-   obs, reward, terminated, truncated, info = env.step(action)
-   if terminated or truncated:
-       obs, info = env.reset(seed=0)
-
-The action array
-----------------
-
-An action is an ``np.ndarray`` of shape ``(num_agents, 2)`` and dtype
-``float32``. The two columns are ``[steering, longitudinal]`` -- **steering is
-column 0**. For a single agent:
-
-.. code-block:: python
-
-   action = np.array([[steer_rad, speed_mps]], dtype=np.float32)
-
-With the default control config, column 0 is a steering angle in radians and
-column 1 is a target speed in m/s (a PID converts it to acceleration).
-The bounds and alternative control modes (acceleration, steering-speed) are
-documented in :doc:`actions`.
-
-.. warning::
-
-   Both columns are ``float32`` with overlapping valid ranges, so a transposed
-   action is still a valid action -- the simulator cannot detect the swap and
-   executes it. If your car spins or refuses to move, check column 0 first.
-
-Reading the ego observation
----------------------------
-
-The observation is a nested dict: ``obs[agent_id][field]``, with keys
-``"agent_0"``, ``"agent_1"``, ... Every scalar field is a **0-d float32
-ndarray**, so wrap reads in ``float(...)`` when you want a Python number.
-
-Under the default ``DIRECT`` observation set, the ego pose is available through
-the 7-element ``std_state`` array, laid out as
-``[X, Y, steering_angle, speed, yaw, yaw_rate, beta]``:
-
-.. code-block:: python
-
-   ego = obs["agent_0"]
-   x, y   = float(ego["std_state"][0]), float(ego["std_state"][1])
-   yaw    = float(ego["std_state"][4])
-   speed  = float(ego["std_state"][3])
-
-If you would rather read named pose fields, switch to the ``KINEMATIC_STATE``
-observation set, which adds ``pose_x``, ``pose_y``, ``pose_theta`` (and the
-velocity/steering derived fields):
-
-.. code-block:: python
-
-   import gymnasium as gym
-   import numpy as np
-   from f1tenth_gym.envs.env_config import EnvConfig, ObservationConfig
-   from f1tenth_gym.envs.observation import ObservationType
-
-   cfg = EnvConfig(
-       observation_config=ObservationConfig(type=ObservationType.KINEMATIC_STATE),
-       render_enabled=False,
-   )
-   env = gym.make("f1tenth_gym:f1tenth-v0", config=cfg)
-   obs, info = env.reset(seed=0)
-   obs, *_ = env.step(np.array([[0.0, 2.0]], dtype=np.float32))
-   ego = obs["agent_0"]
-   print(float(ego["pose_x"]), float(ego["pose_y"]), float(ego["pose_theta"]))
-
-The full field vocabulary of each observation set is documented in
-:doc:`observations`.
-
-The three classic traps
-------------------------
-
-.. warning::
-
-   Three defaults trip up nearly every newcomer:
-
-   1. **The episode ends after one lap.** ``max_laps`` defaults to ``1``, so a
-      long run stops early with ``terminated=True``. Set
-      ``SimulationConfig(max_laps=None)`` for an endless episode.
-
-   2. **Steering is action column 0.** The layout is ``[steering, longitudinal]``.
-      Both columns are ``float32``, so a swap is undetectable.
-
-   3. **``DIRECT`` has no ``pose_x``.** ``pose_x`` / ``pose_y`` / ``pose_theta``
-      are *derived* fields absent from the default ``DIRECT`` set --
-      ``obs["agent_0"]["pose_x"]`` raises ``KeyError``. Either read
-      ``std_state`` (indices 0, 1, 4) or use
-      ``ObservationConfig(type=ObservationType.KINEMATIC_STATE)``.
-
-Where to go next
-----------------
-
-- :doc:`configuration` -- the full frozen-config tree and every knob.
-- :doc:`examples` -- runnable scripts, including a pure-pursuit follower.
+Next: :doc:`examples` walks the bundled pure-pursuit follower, which is this
+loop with a controller in place of the constant action.

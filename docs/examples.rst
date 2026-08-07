@@ -1,168 +1,178 @@
-Examples
-========
+How to run the bundled examples
+===============================
 
-The ``examples/`` directory contains runnable scripts that exercise the
-simulator through the real Gymnasium API. This page is an annotated catalogue:
-what each script demonstrates and how to run it. All commands assume you are at
-the repository root with the package installed (see :doc:`installation`).
+Five scripts in ``examples/`` drive the simulator through the ordinary
+Gymnasium API — no private hooks, no test harness. Invoke any of them by file
+path from the repository root: Python puts the script's own directory on
+``sys.path``, which is what resolves their sibling imports of
+``PurePursuitPlanner``.
 
-.. note::
-
-   Every example creates the env the same way::
-
-       import gymnasium as gym
-       from f1tenth_gym.envs.env_config import EnvConfig
-       env = gym.make("f1tenth_gym:f1tenth-v0", config=EnvConfig(...))
-
-   and drives the gymnasium 5-tuple ``obs, reward, terminated, truncated, info =
-   env.step(action)`` with ``action`` of shape ``(num_agents, 2)`` and columns
-   ``[steering, longitudinal]`` (steering first). See :doc:`quickstart`,
-   :doc:`configuration`, and :doc:`actions`.
-
-waypoint_follow.py
-------------------
-
-The flagship example. It is two things at once:
-
-1. **A pure-pursuit waypoint follower.** ``PurePursuitPlanner`` binds to
-   ``track.raceline`` (the optimized racing line, not the centerline) and, each
-   step, reads the ego pose and returns a ``(speed, steering)`` command that
-   chases a lookahead point on the line. It uses numba-jitted geometry helpers
-   (``nearest_point_on_trajectory``, ``first_point_on_trajectory_intersecting_circle``,
-   ``get_actuation``). The planner also publishes render callbacks
-   (``render_lookahead_point``, ``render_local_plan``) so the lookahead point and
-   local plan draw on top of the map.
-
-2. **A fully-spelled-out configuration reference.** ``build_config()`` constructs
-   an :class:`~f1tenth_gym.envs.env_config.EnvConfig` with *every* field of
-   *every* nested config dataclass written out explicitly -- almost all set to
-   their real default. It is the canonical copy-paste template for seeing every
-   knob and its default at a glance: the top-level fields (``seed``,
-   ``map_name``, ``map_scale``, ``num_agents``, ``ego_index``,
-   ``collision_check``, ``render_enabled``, ``params``) plus ``ControlConfig``,
-   ``SimulationConfig``, ``ObservationConfig``, ``ResetConfig``, ``LiDARConfig``,
-   ``RenderConfig``, ``TerminationConfig``, ``RewardConfig``, and
-   ``DomainRandomizationConfig``. If you want to understand the configuration
-   tree, read this function alongside :doc:`configuration`.
-
-The one deliberate deviation from the defaults is the observation type: it uses
-``ObservationType.KINEMATIC_STATE`` instead of the default ``DIRECT`` so the
-follower can read ``obs["agent_0"]["pose_x"]`` / ``pose_y`` / ``pose_theta``
-directly. ``DIRECT`` does not expose those derived fields (see
-:doc:`observations`).
-
-Run it (needs an X display for the ``"human"`` render mode):
-
-.. code-block:: bash
-
-   python examples/waypoint_follow.py
-
-To run fully headless, set ``render_enabled=False`` in ``build_config()`` and
-change ``render_mode`` in ``main()``; render callbacks are only wired up when a
-renderer actually exists.
-
-.. note::
-
-   The follower degrades in two stages as it leaves the raceline. Between the
-   lookahead radius and ``max_reacquire`` (20 m) it steers at the nearest
-   raceline point rather than an interpolated one; beyond 20 m ``plan()``
-   gives up and returns a fixed ``speed=4.0, steer=0.0`` until the car
-   drifts back within range.
-
-telemetry_plot.py
------------------
-
-A standalone real-time telemetry dashboard. While a simple plain-NumPy
-pure-pursuit follower drives a lap, it live-plots four channels in a
-`pyqtgraph <https://www.pyqtgraph.org/>`_ window -- **speed**, **steering
-angle**, **yaw rate**, and **slip angle (beta)** -- all read out of
-``obs["agent_0"]["std_state"]`` (the ``(7,)`` standardized state
-``[X, Y, steering, speed, yaw, yaw_rate, beta]``).
-
-This example is intentionally **not** wired into the gym's OpenGL renderer
-(``render_enabled=False``); it is a self-contained pattern for low-latency
-plotting you can lift into your own training or evaluation scripts. Because it
-never imports the GL backend it runs without a GPU, though a display/X server is
-still needed for the Qt window (use ``xvfb-run`` for a virtual one).
-
-The GUI refreshes at a fixed rate (``--fps``) while the dynamics advance by a
-configurable real-time factor (``--rtf``): the sim can run several physics steps
-per plotted frame, decoupling dynamics speed from plot refresh. It builds the
-env with ``SimulationConfig(max_laps=None)`` so the rollout does not end after
-one lap.
-
-Run it:
-
-.. code-block:: bash
-
-   python examples/telemetry_plot.py --map Spielberg --rtf 1.0
-
-Flags: ``--map`` (track name, default ``Spielberg``), ``--rtf`` (real-time
-factor, default ``1.0``), ``--fps`` (plot refresh rate, default ``50``),
-``--window`` (seconds of history shown, default ``10``). Requires ``pyqtgraph``
-(a core dependency) and a Qt binding.
-
-run_in_empty_track.py
+Run the first example
 ---------------------
 
-Demonstrates building a **synthetic, mapless track** from a custom reference
-line with ``Track.from_refline(x, y, velx)`` instead of downloading a real map.
-The script lays down a straight-ish reference line and passes the resulting
-``Track`` instance directly as ``map_name`` in the
-:class:`~f1tenth_gym.envs.env_config.EnvConfig`, then drives it with the same
-``PurePursuitPlanner`` from ``waypoint_follow.py``. Useful for testing control
-logic without a full circuit. See :doc:`tracks` for the details of synthetic
-tracks.
-
-.. warning::
-
-   Every reference line is force-closed into a periodic loop. A line from
-   ``(0,0)`` to ``(10,0)`` is therefore **not** a 10 m open straight -- it
-   becomes a closed ~20 m path with a phantom return leg, and ``s``, curvature,
-   and lap counting all run over that loop. There is no open-path mode. See
-   :doc:`tracks`.
-
-Run it:
+``uv sync`` already installs what the scripts need beyond the library. The
+``examples`` dependency group pulls in two extras — ``video`` (``moviepy``,
+for the recorder) and ``trackgen`` (``shapely`` and ``matplotlib``, for the
+generator); under pip the equivalent is ``pip install -e ".[video,trackgen]"``
+(:doc:`installation`). From the repository root:
 
 .. code-block:: bash
 
-   python examples/run_in_empty_track.py
+   uv run python examples/waypoint_follow.py
 
-video_recording.py
-------------------
+A window opens on Spielberg, a car follows the optimised racing line for one
+lap, and the script prints::
 
-Records an ``rgb_array`` rollout to an MP4 using gymnasium's ``RecordVideo``
-wrapper. It builds the env with ``render_mode="rgb_array"`` (a fast OpenGL
-framebuffer grab), wraps it, resets from an explicit spawn pose via
-``env.reset(options={"poses": poses})``, and drives a few seconds of
-pure-pursuit before ``env.close()`` flushes the video. See :doc:`rendering` for
-how ``rgb_array`` and the render clock work.
+   Sim elapsed time: 45.99999999999942 Real elapsed time: 46.0000114440918
 
-Run it (on a desktop with a display, or under ``xvfb-run`` on a headless
-server):
+Simulated and wall time agree because ``render_mode="human"`` paces the loop
+at one simulated second per wall second; the same lap takes 4.5 s once
+``render_enabled=False`` removes the renderer. Anything that draws needs an X
+display, real or virtual — the OpenGL backend has no offscreen path
+(:doc:`rendering`) — and the first run of a script that names a track
+downloads it from the F1TENTH map server, so allow network access once.
+Stopping a script that holds a window is abrupt: the display render modes
+hand ``SIGINT`` back to the default handler, so Ctrl-C ends the process
+without unwinding through ``env.close()``.
+
+Pick a script
+-------------
+
+The five differ in what they draw and in what they cost to start:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 44 30 26
+
+   * - To see
+     - Run
+     - Needs
+   * - A lap on the racing line, and every config field written out
+     - ``waypoint_follow.py``
+     - display
+   * - An MP4 of a rollout
+     - ``video_recording.py``
+     - display, ``video``
+   * - Speed, steering, yaw rate and slip plotted live
+     - ``telemetry_plot.py``
+     - display (Qt, no GL)
+   * - A car on a hand-written reference line, no map
+     - ``run_in_empty_track.py``
+     - display
+   * - Randomly generated circuits written to disk
+     - ``random_trackgen.py``
+     - ``trackgen``
+
+Drive a lap with pure pursuit
+-----------------------------
+
+``waypoint_follow.py`` does two jobs at once. ``PurePursuitPlanner`` binds to
+``track.raceline`` — the optimised line, not the centerline — and each step
+turns the ego pose into a ``(speed, steering)`` command chasing a lookahead
+point, through numba-jitted geometry helpers. Its two render callbacks draw
+that point and the local plan over the map, and ``make_lidar_scan_callback``
+adds the live scan as a point cloud.
+
+``build_config()`` is the other job: an
+:class:`~f1tenth_gym.envs.env_config.EnvConfig` with every field of every
+nested config dataclass written out and annotated, almost all at their
+default. Three fields added in this release are the only omissions —
+``ControlConfig.steer_kp``, ``ResetConfig.reference_line`` and
+``ResetConfig.start_width``, each left at its default (:doc:`configuration`).
+The one deliberate deviation is the observation type:
+``ObservationType.KINEMATIC_STATE`` hands the follower ``pose_x``, ``pose_y``
+and ``pose_theta`` as separate scalars, which the default preset packs into
+``std_state`` instead (:doc:`observations`). Set ``render_enabled=False`` in
+``build_config()`` to run the whole thing headless — callbacks are wired up
+only when a renderer exists, so nothing else changes.
+
+The follower degrades in two stages as it leaves the line. Between the
+lookahead radius and ``max_reacquire`` (20 m) it steers at the nearest
+raceline point rather than an interpolated one; past 20 m ``plan()`` gives up
+and returns a fixed ``speed=4.0, steer=0.0`` until the car is back in range.
+
+Record the rollout to MP4
+-------------------------
+
+``video_recording.py`` wraps an ``rgb_array`` env in gymnasium's
+``RecordVideo``, resets from an explicit spawn pose
+(``env.reset(options={"poses": poses})``) at the first raceline point, and
+drives five simulated seconds of pure pursuit:
 
 .. code-block:: bash
 
-   xvfb-run -a python examples/video_recording.py
+   uv run python examples/video_recording.py
 
-The output directory (``video_<timestamp>/``) is created next to where you run
-the script. Encoding goes through ``moviepy``, which is installed by default as
-part of the ``examples`` dependency group.
+``env.close()`` flushes the encode, and moviepy writes 502 frames to
+``video_<timestamp>/rl-video-episode-0.mp4`` under the current working
+directory, at the frame rate the env advertises rather than ``render_fps``
+(:doc:`rendering`). Gymnasium's passive checker warns once at that reset: the
+raceline's stored yaw for the spawn point is 3.403 rad, outside the
+``pose_theta`` bound of ±π, and the wrap to -2.880 happens on the first step.
 
-random_trackgen.py
-------------------
+Watch the state live
+--------------------
 
-Procedurally generates random closed tracks, writing a ``.pgm``/``.png`` map, a
-``.yaml`` spec, and centerline and raceline CSVs per track. It needs ``shapely``
-and ``matplotlib``, both installed by default as part of the ``examples``
-dependency group.
+``telemetry_plot.py`` opens a `pyqtgraph <https://www.pyqtgraph.org/>`_
+window and plots four channels — speed, steering angle, yaw rate and slip
+angle — straight out of ``obs["agent_0"]["std_state"]``, the ``(7,)``
+standardized vector the default observation preset carries:
 
-A note on running the examples
-------------------------------
+.. code-block:: bash
 
-``run_in_empty_track.py`` and ``video_recording.py`` import ``PurePursuitPlanner``
-from ``waypoint_follow`` as a sibling module, so run them from inside the
-``examples/`` directory (or with ``examples/`` on ``PYTHONPATH``) so the import
-resolves. The first run of any example that uses a real map downloads the track
-from the F1TENTH map server, so network access is required once. See
-:doc:`installation` and :doc:`reproducibility`.
+   uv run python examples/telemetry_plot.py --map Spielberg --rtf 1.0
+
+Nothing in it imports the OpenGL backend — it builds the env with
+``render_enabled=False`` — so it runs without a GPU, though the Qt window
+still wants a display. Refresh rate and physics rate stay independent, so the
+sim can take several steps per plotted frame. ``max_laps=None`` keeps the
+rollout going and the dashboard resets itself if the car crashes.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 32 68
+
+   * - Flag (default)
+     - Meaning
+   * - ``--map`` (``Spielberg``)
+     - track name
+   * - ``--rtf`` (``1.0``)
+     - simulated seconds per wall second
+   * - ``--fps`` (``50``)
+     - plot refresh rate
+   * - ``--window`` (``10``)
+     - seconds of history on screen
+
+Build your own track
+--------------------
+
+Two scripts author a circuit instead of downloading one.
+``run_in_empty_track.py`` builds a mapless track from a hand-written
+reference line with ``Track.from_refline(x, y, velx)`` and passes the
+resulting ``Track`` object straight through as ``map_name``, which also skips
+the per-environment cost of rebuilding the LiDAR distance transform
+(:doc:`tracks`):
+
+.. code-block:: bash
+
+   uv run python examples/run_in_empty_track.py
+
+Its line runs from ``(0, 0)`` to ``(10, 0)`` and is force-closed into a 20 m
+loop with a phantom return leg; no open-path mode exists (:doc:`tracks`). The
+car reaches the far end, loses the line past ``max_reacquire``, and then
+drives straight ahead at 4 m/s indefinitely — it completes no lap and never
+terminates, so stop it yourself.
+
+``random_trackgen.py`` generates closed circuits with shapely and draws them
+with matplotlib:
+
+.. code-block:: bash
+
+   uv run python examples/random_trackgen.py --n-maps 1 --outdir my_tracks
+
+Each track lands as five flat files in ``--outdir`` (default ``./maps``):
+``map0.png`` and ``map0.pgm``, a ``map0.yaml`` spec, and
+``map0_centerline.csv`` / ``map0_raceline.csv``. ``--seed`` fixes the
+geometry. Load one back by its stem — ``EnvConfig(map_name="my_tracks/map0")``
+— which resolves through ``Track.from_track_path`` and drives like any
+downloaded map.

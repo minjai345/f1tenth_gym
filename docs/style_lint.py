@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Check the docs against the house style agreed in ISSUES_PLAN.md #21.
 
-Advisory by default: findings are printed and the exit status stays 0, so this can
-land before the pages are rewritten. Pass ``--strict`` to make findings fail the
-build; that is the end state once Batch F is complete.
+Advisory by default; ``--strict`` makes findings fail the build, which is how
+CI runs it (``.github/workflows/lint.yml``) now that the Batch F rewrite has
+landed and the tree is at zero findings.
 
     python docs/style_lint.py            # report, exit 0
     python docs/style_lint.py --strict   # report, exit 1 if anything is found

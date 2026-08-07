@@ -1,180 +1,272 @@
-Tracks, maps & the Frenet frame
-================================
+Maps, racelines and the Frenet frame
+====================================
 
-Every :class:`~f1tenth_gym.envs.f110_env.F110Env` runs on a :class:`~f1tenth_gym.envs.track.track.Track`: an occupancy map for LiDAR/wall-collision plus one or two reference lines (a *centerline* and a *raceline*). This page explains how a track is resolved from ``map_name``, the map file convention, how to build a synthetic track from scratch, the difference between the centerline and the raceline, and the Frenet ``(s, ey, ephi)`` frame that the simulator reports.
+.. seealso::
 
-The track is selected by :class:`~f1tenth_gym.envs.env_config.EnvConfig`'s ``map_name`` field (default ``"Spielberg"``). See :doc:`configuration` for the full config tree and :doc:`quickstart` for a first run.
+   :mod:`f1tenth_gym.envs.track` — ``Track``, ``Raceline``, ``CubicSplineND``.
 
-How a map is resolved
----------------------
+A track is an occupancy grid plus two closed reference lines, and they are not
+the same loop: Spielberg's centerline runs 343.32 m and its raceline 338.13 m.
+Most of the numbers that look wrong at first — a lateral error of 0.81 m at
+standstill, a lap that costs 343 m of progress for 338 m of driving — fall out
+of that one gap.
 
-``map_name`` may be a built-in name, a path, or a live ``Track`` instance. ``F110Env._resolve_track`` dispatches on the value:
+Two lines, and they are not the same loop
+-----------------------------------------
 
-- **A bare name** (no path separators, no file suffix), e.g. ``"Spielberg"`` — resolved with :meth:`Track.from_track_name <f1tenth_gym.envs.track.track.Track.from_track_name>`, which looks the map up under the repo-root ``maps/`` directory and **downloads it if missing**.
-- **A path** (contains ``/`` or ``\`` or a file suffix) — resolved with :meth:`Track.from_track_path <f1tenth_gym.envs.track.track.Track.from_track_path>` against a local track directory you provide.
-- **A ``Track`` instance** — used as-is, no I/O. This is how you feed a synthetic or programmatically built track (see `Synthetic tracks`_ below).
+A :class:`~f1tenth_gym.envs.track.track.Track` carries two
+:class:`~f1tenth_gym.envs.track.raceline.Raceline` objects, each backed by a
+periodic cubic spline over ``[x, y, cos ψ, sin ψ, k, vx, ax]``. ``centerline``
+is the geometric middle of the tarmac; ``raceline`` is an optimized line with a
+speed profile attached:
 
-Built-in tracks and the download
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+>>> from f1tenth_gym.envs.track.track import Track
+>>> track = Track.from_track_name("Spielberg")
+>>> (round(float(track.centerline.spline.s[-1]), 4),
+...  round(float(track.raceline.spline.s[-1]), 4))
+(343.3222, 338.1253)
+>>> track.centerline.vxs[:3]
+array([1., 1., 1.], dtype=float32)
+>>> track.raceline.vxs[:3]
+array([8., 8., 8.], dtype=float32)
 
-The bundled ``maps/`` directory is **git-ignored** (only ``maps/.gitkeep`` is tracked). The first time a built-in track is requested, ``find_track_dir`` fetches it from a hard-coded endpoint::
+The 1 m/s on the centerline is not a measurement. ``Raceline.from_centerline_file``
+fills ``vxs`` from a hard-coded ``fixed_speed=1.0``, because a bare
+``{stem}_centerline.csv`` carries only ``x_m`` and ``y_m`` columns — so
+``centerline.vxs`` is geometry, never a speed target. The raceline's 8 m/s comes
+from the ``vx_mps`` column of its own CSV.
 
-    https://api.f1tenth.org/<name>.tar.xz
+Spawning on one line, measured against the other
+------------------------------------------------
 
-and extracts it into the repo-root ``maps/`` folder (resolved by walking up from the source file, so this only works for an **editable / from-source install**). Extraction uses ``filter="data"`` (tar hardening); there is no checksum verification.
+Every ``RL_*`` reset strategy places its cars on ``track.raceline``, while the
+Frenet transform projects onto ``track.centerline``. The two lines do not
+coincide, so the reported lateral deviation is already large before the car has
+moved:
 
-.. code-block:: python
+>>> import gymnasium as gym
+>>> from f1tenth_gym.envs.env_config import EnvConfig
+>>> env = gym.make("f1tenth_gym:f1tenth-v0", config=EnvConfig(render_enabled=False))
+>>> obs, info = env.reset(seed=42)
+>>> s, ey, ephi = obs["agent_0"]["frenet_pose"]
+>>> print(f"{s:.4f} {ey:.4f} {ephi:.4f}")
+0.2630 0.8086 -0.0008
+>>> env.close()
 
-    import gymnasium as gym
-    from f1tenth_gym.envs.env_config import EnvConfig, SimulationConfig
+``ey`` is non-zero at spawn by construction, not by luck of the draw: across
+seeds 0–49 on Spielberg the spawn ``ey`` spans only ``[0.8080, 0.8086]``, while
+``x`` and ``y`` move through a window about a metre long (:doc:`reproducibility`).
+Subtract the spawn value if a lateral controller needs a zero baseline, or spawn
+on the line the frame actually measures against:
 
-    cfg = EnvConfig(
-        map_name="Spielberg",                                # downloaded on first use
-        simulation_config=SimulationConfig(max_laps=None),   # else the episode ends after 1 lap
-        render_enabled=False,
-    )
-    env = gym.make("f1tenth_gym:f1tenth-v0", config=cfg)
-    obs, info = env.reset(seed=42)
-    env.close()
+>>> from f1tenth_gym.envs.env_config import ResetConfig
+>>> from f1tenth_gym.envs.reset import ReferenceLine
+>>> cfg = EnvConfig(
+...     reset_config=ResetConfig(reference_line=ReferenceLine.CENTERLINE),
+...     render_enabled=False,
+... )
+>>> env = gym.make("f1tenth_gym:f1tenth-v0", config=cfg)
+>>> obs, info = env.reset(seed=42)
+>>> print(f"{obs['agent_0']['frenet_pose'][1]:.4f}")
+0.0000
+>>> env.close()
 
-.. note::
+Lap counting is untouched by the gap. The per-agent ``s`` is centerline
+arclength and the lap check divides it by the centerline's own
+``s_frame_max``, so one physical lap advances the projection by exactly one
+centerline length whatever line the car drives. What the gap does change is the
+odometer: ``info["progress"]`` and the PROGRESS reward (:doc:`rl`) are
+denominated in centerline arclength too, so a lap accrues 343.3 m even though
+the raceline reads 338.1 m — a longer racing line is not paid more for being
+longer. A lap also fires one centerline length after the spawn ``s``, not at a
+start/finish line.
 
-   The download needs network access and a writable, source-checkout ``maps/`` directory. A missing map raises ``FileNotFoundError("No maps exists for <name>.")`` on a 404. Other F1TENTH track names on the endpoint (for example ``"Monza"``, ``"Levine"``) resolve the same way.
+Reading ``(s, ey, ephi)``
+-------------------------
 
-The map file convention
------------------------
+With ``SimulationConfig.compute_frenet_frame`` left at its default ``True``,
+each step reports one 3-vector per agent, in metres, metres and radians:
 
-A track directory holds a **ROS-style occupancy map**: a YAML metadata file next to a single-channel image, plus optional reference-line CSVs. ``from_track_name`` tries ``{stem}.yaml`` first, then falls back to the legacy ``{stem}_map.yaml``. The YAML (:class:`~f1tenth_gym.envs.track.track.TrackSpec`) carries ``image``, ``resolution``, ``origin``, ``negate``, ``occupied_thresh`` and ``free_thresh``.
+* ``s`` — arclength along the centerline spline, wrapped into
+  ``[0, s_frame_max)``.
+* ``ey`` — signed lateral deviation, positive to the **left** of the direction
+  of travel; the sign comes from the spline normal ``[-sin ψ, cos ψ]``.
+* ``ephi`` — heading minus the centerline's heading there, wrapped to
+  ``[-π, π)``.
 
-The metadata drives the simulator as follows:
+The pose handed to the transform is the same physical reference point under
+every dynamics model, so ``frenet_pose`` is directly comparable across a KS/ST
+switch (:doc:`dynamics`). Turning ``compute_frenet_frame`` off removes
+``frenet_pose`` from the observation dict rather than zeroing it, and naming it
+explicitly in ``ObservationConfig(features=...)`` then raises at ``gym.make``
+(:doc:`observations`).
 
-- **resolution** — metres per pixel (multiplied by ``EnvConfig.map_scale``).
-- **origin** — the world coordinate of the map's **bottom-left corner**; only ``origin[0]`` and ``origin[1]`` are used (the ``origin[2]`` rotation is ignored). ``origin[:2]`` is scaled by ``map_scale``.
-- **image** — the occupancy image, loaded ``FLIP_TOP_BOTTOM`` so that grid row 0 is the smallest world ``y``.
-- **negate**, **occupied_thresh** — control the binarisation, ROS ``map_server`` style (below). ``free_thresh`` is accepted but has no separate effect: the "unknown" band it would delimit is treated as free.
+:meth:`~f1tenth_gym.envs.track.track.Track.cartesian_to_frenet` and
+:meth:`~f1tenth_gym.envs.track.track.Track.frenet_to_cartesian` are available on
+any track and round-trip. Offsetting a centerline point 0.5 m along the normal
+lands at ``ey = +0.5``:
+
+>>> import numpy as np
+>>> x, y = track.centerline.spline.calc_position(100.0)
+>>> yaw = float(track.centerline.spline.calc_yaw(100.0))
+>>> left = (float(x - 0.5 * np.sin(yaw)), float(y + 0.5 * np.cos(yaw)))
+>>> s, ey, ephi = track.cartesian_to_frenet(*left, yaw, use_s_guess=False)
+>>> print(f"{s:.4f} {ey:.4f} {ephi:.4f}")
+100.0000 0.5000 0.0000
+>>> print("{:.4f} {:.4f} {:.4f}".format(*track.frenet_to_cartesian(s, ey, ephi)))
+-69.4765 44.2699 2.3436
+
+``use_s_guess=False`` above buys correctness with a global search. The simulator
+cannot afford that every step, so it seeds each agent's projection with that
+agent's previous ``s`` and searches a window of roughly ±5 m of arclength around
+it — ±4.76 m on Spielberg, quantised to whole spline segments. The width comes
+from ``Track.frenet_search_range``, a plain attribute set to 10 m with no
+``EnvConfig`` field behind it: an agent that translates further than the window
+in a single step locks onto the wrong stretch of the loop and stays there. Both
+methods also take ``use_raceline=True``, but nothing in the simulator passes it,
+so the reported frame is always the centerline.
+
+Where the map comes from
+------------------------
+
+``EnvConfig.map_name`` accepts three kinds of value and ``_resolve_track``
+dispatches on which one it got:
+
+* a bare name — no path separator and no suffix, such as ``"Spielberg"`` —
+  goes to :meth:`Track.from_track_name
+  <f1tenth_gym.envs.track.track.Track.from_track_name>`, which looks under the
+  repository-root ``maps/`` directory and downloads the track if it is absent;
+* a path — anything containing ``/``, ``\`` or a file suffix — goes to
+  :meth:`Track.from_track_path
+  <f1tenth_gym.envs.track.track.Track.from_track_path>`, which accepts the track
+  directory, a stem inside it, or the map YAML itself, under either the
+  ``{stem}.yaml`` or the legacy ``{stem}_map.yaml`` naming convention;
+* a ``Track`` instance is used as-is, with no I/O at all.
+
+All three path forms reach the same map:
+
+>>> import pathlib
+>>> track_dir = pathlib.Path(Track.from_track_name("Spielberg").filepath).parent
+>>> stem = track_dir / "Spielberg"
+>>> for candidate in (track_dir, stem, stem.with_suffix(".yaml")):
+...     round(float(Track.from_track_path(candidate).centerline.s_frame_max), 4)
+343.3222
+343.3222
+343.3222
+
+The first request for a built-in name fetches
+``https://api.f1tenth.org/<name>.tar.xz`` and extracts it — with tar's
+``filter="data"`` hardening, and no checksum — into a ``maps/`` directory
+resolved four levels up from the package source, which an editable clone
+provides and a built wheel does not (:doc:`installation`). A name the endpoint
+does not serve raises ``FileNotFoundError("No maps exists for <name>.")``.
+
+Reaching for the third form is the highest-leverage change available when
+building many environments. Constructing the LiDAR's Euclidean distance
+transform over Spielberg's 2000×2000 grid dominates setup, and the result is
+cached on the ``Track``, so environments sharing one instance pay for it once:
+measured here, ``gym.make(config=EnvConfig(map_name=track))`` takes 1.2 ms
+against about 210 ms for the same map by name.
+
+Reference lines are optional files looked up beside the YAML:
+``{stem}_centerline.csv`` (comma-delimited, columns ``x_m, y_m, …``) and
+``{stem}_raceline.csv`` (semicolon-delimited, ``s_m; x_m; y_m; psi_rad;
+kappa_radpm; vx_mps; ax_mps2``). Ship only one and both loaders use it for the
+other, so a raceline-only directory loads and drives — with the frame measured
+against the same line the cars spawn on, and therefore ``ey = 0`` at spawn. Ship
+neither and loading raises ``ValueError``, naming both files it looked for.
+``EnvConfig.map_scale`` scales the YAML's ``resolution`` and ``origin[:2]``
+together with the reference-line coordinates, so the whole world grows or
+shrinks as a unit (:doc:`configuration`).
+
+What the occupancy image encodes
+--------------------------------
+
+A track directory pairs the YAML metadata with the greyscale bitmap it names.
+Three keys place the geometry in the world: ``resolution`` is metres per pixel;
+``origin`` is the world coordinate of the grid's bottom-left corner, of which
+only the first two components are used and the third, a rotation, is ignored;
+and ``image`` names the bitmap, which is loaded ``FLIP_TOP_BOTTOM`` so that grid
+row 0 is the smallest world ``y``.
 
 The image is binarised following ROS ``map_server`` semantics. Occupancy probability is
-``(255 - pixel) / 255``, or ``pixel / 255`` when ``negate: 1``, and a cell is an obstacle exactly
-when that probability exceeds ``occupied_thresh``; everything else — including the ROS "unknown"
-band — is free, because the ray tracer needs a binary world. In the resulting grid ``0`` is
-occupied and ``255`` is free; dark pixels are walls, and the LiDAR's distance transform measures
-the distance to the nearest zero. Releases before v1.0.0 ignored the YAML and cut at a hard-coded
-pixel value of 128; set ``occupied_thresh: 0.495`` to reproduce that grid exactly.
+``(255 - pixel) / 255``, or ``pixel / 255`` when ``negate: 1``, and a cell is an
+obstacle exactly when that probability exceeds ``occupied_thresh``; everything else —
+including the ROS "unknown" band — is free, because the ray tracer needs a binary world.
+In the resulting grid ``0`` is occupied and ``255`` is free; dark pixels are walls, and
+the LiDAR's distance transform measures the distance to the nearest zero. Releases
+before v1.0.0 ignored the YAML and cut at a hard-coded pixel value of 128; set
+``occupied_thresh: 0.495`` to reproduce that grid exactly.
 
-Reference-line CSVs are optional and looked up by name in the track directory: ``{name}_centerline.csv`` (columns ``x_m, y_m, ...``, comma-delimited) and ``{name}_raceline.csv`` (columns ``s_m; x_m; y_m; psi_rad; kappa_radpm; vx_mps; ax_mps2``, semicolon-delimited).
+Only those two values survive the binarisation, and walls are the rare ones —
+0.85% of Spielberg's four million pixels:
 
-.. warning::
+>>> np.unique(track.occupancy_map)
+array([  0., 255.], dtype=float32)
+>>> float((track.occupancy_map == 0.0).mean())
+0.0084995
 
-   ``from_track_name`` sets ``centerline=None`` when ``{name}_centerline.csv`` is absent, and — unlike ``from_track_path`` — it does **not** fall back to the raceline. A track directory that ships only a raceline CSV leaves ``track.centerline is None``, and the first ``reset()`` then raises ``AttributeError: 'NoneType' object has no attribute 'spline'`` because the Frenet transform reads the centerline. Provide a centerline CSV (or supply the ``Track`` yourself with ``centerline`` set) for custom tracks.
+``Track.load_spec`` validates the rest of the YAML before any of this runs.
+``image``, ``resolution`` and ``origin`` are required and their absence raises
+``ValueError`` naming the file and the missing keys; ``negate``,
+``occupied_thresh`` and ``free_thresh`` fall back to the ROS defaults ``0``,
+``0.65`` and ``0.196``; ``mode: trinary`` is accepted while ``raw`` and
+``scale`` are rejected; and an unrecognised key is dropped with a warning rather
+than crashing the load.
 
-Custom track directories
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Point ``map_name`` at a path (with a separator or a file suffix) to load your own map with the same ROS convention:
-
-.. code-block:: python
-
-    from f1tenth_gym.envs.env_config import EnvConfig
-
-    cfg = EnvConfig(map_name="/abs/path/to/mytrack/mytrack.yaml", render_enabled=False)
-    # F110Env resolves this via Track.from_track_path
-
-Centerline vs. raceline
------------------------
-
-A :class:`~f1tenth_gym.envs.track.track.Track` carries two :class:`~f1tenth_gym.envs.track.raceline.Raceline` objects, each backed by a periodic cubic spline over ``[x, y, cos ψ, sin ψ, k, vx, ax]``:
-
-- ``track.centerline`` — the geometric middle of the track. When built from a bare centerline CSV via ``from_centerline_file``, its speed profile is a **constant ``1.0`` m/s** (``fixed_speed=1.0`` is hard-coded), so ``centerline.vxs`` is *not* a usable racing speed profile.
-- ``track.raceline`` — the optimized racing line, carrying a real speed profile ``raceline.vxs``.
-
-Which one matters depends on the subsystem:
-
-- **Reset / spawning** — every ``RL_*`` reset strategy binds to ``track.raceline`` (never the centerline). See :doc:`reproducibility` and the reset section of :doc:`configuration`. Cars spawn *on the raceline*.
-- **Frenet frame** — the simulator's reported ``(s, ey, ephi)`` is always computed against the **centerline** (see below).
-
-.. warning::
-
-   Cars spawn on the raceline but Frenet is measured against the centerline, so ``ey`` is **non-zero at spawn** — about 0.8 m on Spielberg. This is expected, not a bug in your code; subtract the spawn ``ey`` if you need a zero baseline.
-
-   Lap counting is unaffected. The two loops are different lengths (Spielberg: centerline 343.3 m, raceline 338.1 m), but both sides of the lap arithmetic are denominated in centerline arclength, so one physical lap measures exactly one lap whatever line the car drives. What the length difference does change is ``info["progress"]`` and the PROGRESS reward, which accrue ~343.3 m per lap rather than the ~338.1 m the car actually travels — deliberate, so that a longer racing line is not paid more.
-
-The Frenet frame ``(s, ey, ephi)``
+Synthetic tracks are always closed
 ----------------------------------
 
-When ``SimulationConfig.compute_frenet_frame`` is ``True`` (the default), each step reports a per-agent Frenet pose in the observation as ``frenet_pose`` (a 3-vector ``(s, ey, ephi)``; see :doc:`observations`). Units are metres, metres, radians:
+Racing a shape with no map file takes one call. :meth:`Track.from_refline
+<f1tenth_gym.envs.track.track.Track.from_refline>` fits a periodic spline
+through ``x``, ``y`` and ``velx`` arrays, sets both reference lines to it, and
+synthesizes an all-free occupancy grid sized to the extents plus a 5 m margin.
+Pass the instance as ``map_name``:
 
-- **s** — arclength progress along the **centerline** spline, wrapped into ``[0, s_frame_max)``.
-- **ey** — signed lateral deviation from the centerline. **``+ey`` is to the LEFT** of the direction of travel (the sign comes from the spline normal ``[-sin ψ, cos ψ]``).
-- **ephi** — heading deviation ``psi - yaw_of_centerline``, wrapped to ``[-π, π)``.
+>>> from f1tenth_gym.envs.env_config import SimulationConfig
+>>> theta = np.linspace(0.0, 2.0 * np.pi, 200, endpoint=False)
+>>> circle = Track.from_refline(
+...     x=10.0 * np.cos(theta), y=10.0 * np.sin(theta), velx=np.full(200, 5.0)
+... )
+>>> env = gym.make("f1tenth_gym:f1tenth-v0", config=EnvConfig(
+...     map_name=circle,
+...     simulation_config=SimulationConfig(max_laps=None),
+...     render_enabled=False,
+... ))
+>>> obs, info = env.reset(seed=42)
+>>> for _ in range(50):
+...     obs, *_ = env.step(np.array([[0.0, 3.0]], dtype=np.float32))
+>>> s, ey, ephi = obs["agent_0"]["frenet_pose"]
+>>> print(f"{circle.centerline.s_frame_max:.4f} {s:.4f} {ey:.4f}")
+62.8293 0.8667 -0.0249
+>>> env.close()
 
-.. note::
-
-   The Frenet frame is **always centerline-based** — ``cartesian_to_frenet`` and ``frenet_to_cartesian`` default to ``use_raceline=False`` and both simulator call sites use that default. There is no config knob to measure Frenet against the raceline.
-
-Converting coordinates directly
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-You can transform points yourself on any ``Track``:
-
-.. code-block:: python
-
-    from f1tenth_gym.envs.track.track import Track
-
-    track = Track.from_track_name("Spielberg")
-
-    # Cartesian -> Frenet: returns (s, ey, ephi)
-    s, ey, ephi = track.cartesian_to_frenet(x=0.0, y=0.0, psi=0.0)
-
-    # Frenet -> Cartesian: returns (x, y, psi)
-    x, y, psi = track.frenet_to_cartesian(s=s, ey=ey, ephi=ephi)
-
-Pass ``use_raceline=True`` to either method to measure against the raceline instead of the centerline.
-
-Synthetic tracks
-----------------
-
-To race on a shape with no map file, build a :class:`~f1tenth_gym.envs.track.track.Track` from a reference line and pass the **instance** as ``map_name``. :meth:`Track.from_refline <f1tenth_gym.envs.track.track.Track.from_refline>` takes ``x``, ``y`` and per-waypoint velocity ``velx`` arrays, fits a periodic cubic spline, and synthesizes a free-space occupancy map sized to the extents plus a 5 m margin (both centerline and raceline are set to this same line).
-
-.. code-block:: python
-
-    import numpy as np
-    import gymnasium as gym
-    from f1tenth_gym.envs.env_config import EnvConfig, SimulationConfig
-    from f1tenth_gym.envs.track.track import Track
-
-    # A closed circle of radius 10 m, target speed 5 m/s everywhere
-    theta = np.linspace(0.0, 2.0 * np.pi, 200, endpoint=False)
-    x = 10.0 * np.cos(theta)
-    y = 10.0 * np.sin(theta)
-    velx = np.full_like(x, 5.0)
-
-    track = Track.from_refline(x=x, y=y, velx=velx)
-
-    cfg = EnvConfig(
-        map_name=track,                                      # pass the Track instance directly
-        simulation_config=SimulationConfig(max_laps=None),
-        render_enabled=False,
-    )
-    env = gym.make("f1tenth_gym:f1tenth-v0", config=cfg)
-    obs, info = env.reset(seed=42)
-
-    for _ in range(50):
-        action = np.array([[0.0, 3.0]], dtype=np.float32)    # [[steer, speed]] — steering first
-        obs, reward, terminated, truncated, info = env.step(action)
-        if terminated or truncated:
-            break
-    env.close()
+A 10 m radius makes a 62.83 m loop, the car has covered 0.87 m of it, and it
+sits 2.5 cm off the line rather than the 0.81 m of the previous section — on a
+synthetic track both reference lines are the same object, so that offset cannot
+arise.
 
 .. warning::
 
-   ``from_refline`` **force-closes the reference line into a loop** — there is no open-path mode. If the last point does not coincide with the first, an extra point is appended to close the loop (required by the periodic spline). A "straight line" input such as ``x=np.linspace(0, 10, N), y=np.zeros(N)`` therefore becomes a closed ~20 m path with a phantom return leg, and ``s``, curvature and lap counting all run over that closed loop. Design your reference line as an intentionally closed circuit.
+   ``from_refline`` **force-closes the reference line into a loop** — there is
+   no open-path mode. If the last point does not coincide with the first, an
+   extra point is appended to close the loop (required by the periodic spline).
+   A "straight line" input such as ``x=np.linspace(0, 10, N), y=np.zeros(N)``
+   therefore becomes a closed ~20 m path with a phantom return leg, and ``s``,
+   curvature and lap counting all run over that closed loop. Design your
+   reference line as an intentionally closed circuit.
 
-You can also swap the map on a live env with ``env.unwrapped.update_map(track_or_name)``, or reconfigure via ``env.unwrapped.configure(cfg.with_updates(map_name=...))`` (see :doc:`configuration`).
+Fifty points along a 10 m segment come back as 51 points over a 20 m loop:
 
-See also
---------
+>>> straight = Track.from_refline(
+...     x=np.linspace(0.0, 10.0, 50), y=np.zeros(50), velx=np.full(50, 5.0)
+... )
+>>> straight.centerline.spline.s.shape
+(51,)
+>>> float(straight.centerline.s_frame_max)
+20.0
 
-- :doc:`observations` — where ``frenet_pose`` and pose fields appear in the observation dict.
-- :doc:`rl` — PROGRESS reward uses the Frenet ``s`` and requires ``compute_frenet_frame=True``.
-- :doc:`reproducibility` — how reset strategies spawn agents on the raceline.
-- :doc:`api/index` — full ``Track`` / ``Raceline`` reference.
+``env.unwrapped.update_map(track_or_name)`` swaps the map on a live environment
+by re-running ``configure`` with the new ``map_name``, which rebuilds the
+simulator, the spaces and the renderer around it — so any render callbacks have
+to be registered again afterwards (:doc:`rendering`).
