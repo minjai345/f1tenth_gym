@@ -176,6 +176,10 @@ class Track:
             yaml_path = track_dir / f"{track_dir.stem}.yaml"
             if not yaml_path.exists():
                 yaml_path = track_dir / f"{track_dir.stem}_map.yaml"
+            if not yaml_path.exists():
+                raise FileNotFoundError(
+                    f"no map YAML in {track_dir} (tried '{track_dir.stem}.yaml' and '{track_dir.stem}_map.yaml')"
+                )
             track_spec = Track.load_spec(
                 track=track, filespec=str(yaml_path)
             )
@@ -212,6 +216,14 @@ class Track:
                 )
             else:
                 raceline = centerline
+
+            if centerline is None and raceline is None:
+                raise ValueError(
+                    f"no reference line in {track_dir}: neither '{track}_centerline.csv' "
+                    f"nor '{track}_raceline.csv' exists"
+                )
+            if centerline is None:
+                centerline = raceline
 
             return Track(
                 spec=track_spec,
