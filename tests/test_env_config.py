@@ -284,3 +284,74 @@ class TestLiDARConfigValidation(unittest.TestCase):
         """Test that negative noise_std raises ValueError."""
         with self.assertRaises(ValueError):
             LiDARConfig(noise_std=-0.01)
+
+
+class TestSubstepValidation(unittest.TestCase):
+    """`timestep` must divide evenly into `integrator_timestep`.
+
+    The check lives in ``F110Simulator.__init__``, not in ``SimulationConfig``,
+    so it fires at ``gym.make`` rather than at config construction. It is
+    validated against the substep ratio the simulator actually uses; an earlier
+    version tested ``timestep % integrator_timestep`` against zero, which
+    rejected exact multiples that IEEE-754 cannot represent (``0.03 % 0.01`` is
+    ``0.00999999999999999847``).
+    """
+
+    def _substeps(self, timestep, integrator_timestep):
+        from f1tenth_gym.envs.action import LongitudinalActionType, SteerActionType
+        from f1tenth_gym.envs.dynamic_models import DynamicModel
+        from f1tenth_gym.envs.integrators import integrator_from_type
+        from f1tenth_gym.envs.simulator import F110Simulator
+
+        cfg = EnvConfig(
+            simulation_config=SimulationConfig(
+                timestep=timestep, integrator_timestep=integrator_timestep
+            ),
+            render_enabled=False,
+        )
+        sim = F110Simulator(
+            env_config=cfg,
+            vehicle_params=cfg.params,
+            model=DynamicModel.ST,
+            dynamics_fn=DynamicModel.ST.f_dynamics,
+            integrator_fn=integrator_from_type(cfg.simulation_config.integrator),
+            longitudinal_type=LongitudinalActionType.SPEED,
+            steering_type=SteerActionType.STEERING_ANGLE,
+            track=None,
+            seed=0,
+        )
+        return sim.substeps
+
+    def test_float_inexact_multiples_are_accepted(self):
+        """Regression: these are exact multiples in real arithmetic, not in IEEE-754."""
+        for timestep, integrator_timestep, expected in [
+            (0.03, 0.01, 3),
+            (0.06, 0.02, 3),
+            (0.3, 0.1, 3),
+            (0.09, 0.03, 3),
+        ]:
+            with self.subTest(timestep=timestep, integrator_timestep=integrator_timestep):
+                self.assertEqual(self._substeps(timestep, integrator_timestep), expected)
+
+    def test_exactly_representable_multiples_still_accepted(self):
+        for timestep, integrator_timestep, expected in [
+            (0.01, 0.01, 1),
+            (0.02, 0.01, 2),
+            (0.05, 0.01, 5),
+            (0.1, 0.01, 10),
+            (0.03, 0.015, 2),
+        ]:
+            with self.subTest(timestep=timestep, integrator_timestep=integrator_timestep):
+                self.assertEqual(self._substeps(timestep, integrator_timestep), expected)
+
+    def test_non_multiples_are_rejected(self):
+        for timestep, integrator_timestep in [(0.025, 0.01), (0.01, 0.003), (0.007, 0.002)]:
+            with self.subTest(timestep=timestep, integrator_timestep=integrator_timestep):
+                with self.assertRaises(ValueError):
+                    self._substeps(timestep, integrator_timestep)
+
+    def test_the_rule_is_enforced_at_simulator_build_not_config_build(self):
+        """A bad pair constructs fine as config and only raises when the sim is built."""
+        SimulationConfig(timestep=0.025, integrator_timestep=0.01)
+        with self.assertRaises(ValueError):
+            self._substeps(0.025, 0.01)
