@@ -355,3 +355,47 @@ class TestScanOnReset(unittest.TestCase):
         self.assertAlmostEqual(float(obs["agent_0"]["std_state"][3]), 5.0, places=5)
         self.assertEqual(float(obs["agent_0"]["collision"]), 0.0)
         env.close()
+
+
+class TestConfigSeed(unittest.TestCase):
+    """Pins ISSUES_PLAN.md #7: EnvConfig.seed covers the first unseeded reset."""
+
+    @staticmethod
+    def _first_scan(cfg, seed=None):
+        env = gym.make("f1tenth_gym:f1tenth-v0", config=cfg)
+        obs, _ = env.reset(seed=seed)
+        scan = obs["agent_0"]["scan"].copy()
+        env.close()
+        return scan
+
+    def test_config_seed_makes_fresh_envs_identical(self):
+        cfg = EnvConfig(seed=7, render_enabled=False)
+        np.testing.assert_array_equal(self._first_scan(cfg), self._first_scan(cfg))
+
+    def test_default_none_seed_keeps_entropy(self):
+        cfg = EnvConfig(render_enabled=False)
+        self.assertFalse(np.array_equal(self._first_scan(cfg), self._first_scan(cfg)))
+
+    def test_explicit_reset_seed_wins(self):
+        seeded = self._first_scan(EnvConfig(seed=7, render_enabled=False), seed=42)
+        plain = self._first_scan(EnvConfig(render_enabled=False), seed=42)
+        np.testing.assert_array_equal(seeded, plain)
+
+    def test_episodes_differ_but_the_run_replays(self):
+        cfg = EnvConfig(seed=7, render_enabled=False)
+        env_a = gym.make("f1tenth_gym:f1tenth-v0", config=cfg)
+        a1, _ = env_a.reset()
+        a2, _ = env_a.reset()
+        env_a.close()
+        self.assertFalse(
+            np.array_equal(a1["agent_0"]["scan"], a2["agent_0"]["scan"]),
+            "consecutive unseeded episodes were identical",
+        )
+        env_b = gym.make("f1tenth_gym:f1tenth-v0", config=cfg)
+        env_b.reset()
+        b2, _ = env_b.reset()
+        env_b.close()
+        np.testing.assert_array_equal(
+            a2["agent_0"]["scan"], b2["agent_0"]["scan"],
+            "a rerun of the same config-seeded run diverged",
+        )
