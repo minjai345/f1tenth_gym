@@ -136,3 +136,52 @@ class TestCollisionModes(unittest.TestCase):
             env.step(np.array([[0.2, 3.0]], dtype=np.float32))
         self.assertIs(handle, env.unwrapped.sim.state.collisions, "collisions array was rebound")
         env.close()
+
+
+class TestHaltIsModelAware(unittest.TestCase):
+    """Pins ISSUES_PLAN.md #26: the halt zeroes velocities only, per model."""
+
+    def test_mb_stays_finite_after_a_halt(self):
+        from f1tenth_gym.envs.dynamic_models import DynamicModel, FULLSCALE_VEHICLE_PARAMETERS
+        from f1tenth_gym.envs.env_config import ResetConfig
+        from f1tenth_gym.envs.reset import ResetStrategy
+
+        cfg = EnvConfig(
+            map_scale=10.0,
+            params=FULLSCALE_VEHICLE_PARAMETERS,
+            simulation_config=SimulationConfig(
+                dynamics_model=DynamicModel.MB, max_laps=None
+            ),
+            reset_config=ResetConfig(strategy=ResetStrategy.RL_RANDOM_STATIC),
+            render_enabled=False,
+        )
+        env = gym.make("f1tenth_gym:f1tenth-v0", config=cfg)
+        env.reset(seed=3)
+        for _ in range(15):
+            env.step(np.array([[0.0, 2.0]], dtype=np.float32))
+        sim = env.unwrapped.sim
+        sim._halt_on_collision(0)
+        # ride height must survive the halt -- the old [5:]=0 wiped it and the
+        # suspension math divided by zero on the next step
+        self.assertNotEqual(float(sim.state.state[0, 11]), 0.0)
+        for _ in range(20):
+            env.step(np.array([[0.0, 2.0]], dtype=np.float32))
+            self.assertTrue(np.isfinite(sim.state.state[0]).all())
+        env.close()
+
+    def test_st_halt_semantics_unchanged(self):
+        env = gym.make("f1tenth_gym:f1tenth-v0", config=EnvConfig(render_enabled=False))
+        env.reset(seed=1)
+        for _ in range(10):
+            env.step(np.array([[0.2, 3.0]], dtype=np.float32))
+        sim = env.unwrapped.sim
+        yaw = float(sim.state.state[0, 4])
+        steer = float(sim.state.state[0, 2])
+        sim._halt_on_collision(0)
+        s = sim.state.state[0]
+        self.assertEqual(float(s[3]), 0.0)
+        self.assertEqual(float(s[5]), 0.0)
+        self.assertEqual(float(s[6]), 0.0)
+        self.assertEqual(float(s[4]), yaw)
+        self.assertEqual(float(s[2]), steer)
+        env.close()
