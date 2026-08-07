@@ -440,10 +440,33 @@ class VehicleParamRanges:
     def with_updates(self, **updates) -> "VehicleParamRanges":
         return replace(self, **updates)
 
+class PoseReference(IntEnum):
+    """Where a model's native x/y state (and ``state.poses``) is anchored.
+
+    ``standard_state`` and every derived observation are normalised to the COG
+    whatever the model; this enum describes the RAW ``state`` only.
+    """
+
+    REAR_AXLE = 1
+    COG = 2
+
+
 class DynamicModel(IntEnum):
     KS = 1  # Kinematic Single Track
     ST = 2  # Single Track
     MB = 3  # Multi-body Model
+
+    @property
+    def pose_reference(self) -> PoseReference:
+        """The frame of the model's native x/y state. Key conversions off THIS,
+        never off ``model != DynamicModel.KS`` — that test silently shifts any
+        future rear-axle model by ``lr``."""
+        if self is DynamicModel.KS:
+            return PoseReference.REAR_AXLE
+        elif self in (DynamicModel.ST, DynamicModel.MB):
+            return PoseReference.COG
+        else:
+            raise ValueError(f"no pose reference for model {self!r}")
 
     def parameter_count(self) -> int:
         return _MB_PARAMETER_COUNT if self is DynamicModel.MB else _BASE_PARAMETER_COUNT

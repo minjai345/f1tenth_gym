@@ -14,7 +14,7 @@ from .action import (
     steer_action_from_type,
 )
 from .collision_models import CollisionCheckMode, collision_multiple, get_vertices
-from .dynamic_models import DynamicModel, VehicleParameters
+from .dynamic_models import DynamicModel, PoseReference, VehicleParameters
 from .env_config import EnvConfig
 from .lidar import ScanSimulator2D, check_collision, ray_cast
 from .state import SimulationState
@@ -172,6 +172,27 @@ class F110Simulator:
         self._collision_body_dx, self._collision_body_dy = self._compute_collision_body_offset(
             self.vehicle_params, self.model
         )
+        self._cog_offset = self._compute_cog_offset(self.vehicle_params, self.model)
+
+    @staticmethod
+    def _compute_cog_offset(vehicle_params: VehicleParameters, model: DynamicModel) -> float:
+        """Forward shift from the model's native x/y anchor to the CoG.
+
+        ``standard_state`` (and every observation derived from it) is
+        CoG-anchored for all models; rear-axle models need +lr along the yaw.
+        """
+        if model.pose_reference is PoseReference.REAR_AXLE:
+            lr = float(vehicle_params.lr)
+            return lr if math.isfinite(lr) else 0.0
+        return 0.0
+
+    def _standardize(self, state: np.ndarray) -> np.ndarray:
+        """A ``standard_state`` row from a native state row, CoG-normalised."""
+        std = self.standard_state_fn(state).astype(np.float32)
+        if self._cog_offset != 0.0:
+            std[0] += self._cog_offset * math.cos(std[4])
+            std[1] += self._cog_offset * math.sin(std[4])
+        return std
 
     # ---------------------------------------------------------------------
     # Public API
@@ -203,6 +224,7 @@ class F110Simulator:
         self._collision_body_dx, self._collision_body_dy = self._compute_collision_body_offset(
             self.vehicle_params, self.model
         )
+        self._cog_offset = self._compute_cog_offset(self.vehicle_params, self.model)
         if self.scan_enabled:
             for i, simulator in enumerate(self.scan_sims):
                 self.scan_cache[i] = self._build_scan_cache(simulator, vehicle_params)
@@ -252,19 +274,19 @@ class F110Simulator:
                 self.state.state[i] = poses[i].astype(np.float32)
             else:
                 raise ValueError("Unsupported reset option")
-            self.state.standard_state[i] = self.standard_state_fn(self.state.state[i]).astype(
-                np.float32
-            )
+            self.state.standard_state[i] = self._standardize(self.state.state[i])
             self.state.poses[i] = np.array(
                 [self.state.state[i, 0], self.state.state[i, 1], self.state.state[i, 4]],
                 dtype=np.float32,
             )
             if self.config.simulation_config.compute_frenet_frame and self.track is not None:
+                # anchor Frenet at the CoG (standard_state), matching the
+                # observed pose_x/pose_y whatever the model's native frame
                 self.state.frenet[i] = np.array(
                     self.track.cartesian_to_frenet(
-                        float(self.state.state[i, 0]),
-                        float(self.state.state[i, 1]),
-                        float(self.state.state[i, 4]),
+                        float(self.state.standard_state[i, 0]),
+                        float(self.state.standard_state[i, 1]),
+                        float(self.state.standard_state[i, 4]),
                         use_s_guess=False,
                     ),
                     dtype=np.float32,
@@ -324,23 +346,22 @@ class F110Simulator:
                 )
             state[4] = (state[4] + np.pi) % (2 * np.pi) - np.pi
             self.state.state[agent_idx] = state.astype(np.float32)
-            self.state.standard_state[agent_idx] = self.standard_state_fn(state).astype(
-                np.float32
-            )
+            self.state.standard_state[agent_idx] = self._standardize(state)
             self.state.poses[agent_idx] = np.array(
                 [state[0], state[1], state[4]], dtype=np.float32
             )
 
         if self.config.simulation_config.compute_frenet_frame and self.track is not None:
             for agent_idx in range(self.num_agents):
-                pose = self.state.poses[agent_idx]
+                # CoG-anchored (standard_state), matching the observed pose
+                std = self.state.standard_state[agent_idx]
                 # Anchor the local arclength search to THIS agent's own previous s.
                 # Falling back to the shared Track.s_guess windows each agent around
                 # the *previous* agent's position, corrupting multi-agent Frenet.
                 prev_s = float(self.state.frenet[agent_idx, 0])
                 self.state.frenet[agent_idx] = np.array(
                     self.track.cartesian_to_frenet(
-                        float(pose[0]), float(pose[1]), float(pose[2]),
+                        float(std[0]), float(std[1]), float(std[4]),
                         s_guess=prev_s, use_s_guess=True,
                     ),
                     dtype=np.float32,
@@ -401,7 +422,7 @@ class F110Simulator:
         # If state is referenced at the center of gravity, base_link is behind it by lr.
         # Leave LiDAR in the state frame to avoid shifting the scan origin.
         base_dx = 0.0
-        if self.model != DynamicModel.KS:
+        if self.model.pose_reference is PoseReference.COG:
             base_dx = -float(vehicle_params.lr)
             if not math.isfinite(base_dx):
                 base_dx = 0.0
@@ -445,7 +466,7 @@ class F110Simulator:
         vehicle_params: VehicleParameters, model: DynamicModel
     ) -> tuple[float, float]:
         base_dx = 0.0
-        if model != DynamicModel.KS:
+        if model.pose_reference is PoseReference.COG:
             base_dx = -float(vehicle_params.lr)
             if not math.isfinite(base_dx):
                 base_dx = 0.0
