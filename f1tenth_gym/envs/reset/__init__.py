@@ -8,7 +8,15 @@ import numpy as np
 
 from ..track import Track
 
-__all__ = ["ResetFn", "ResetStrategy", "make_reset_fn", "GridResetFn", "AllTrackResetFn", "AllMapResetFn"]
+__all__ = [
+    "ResetFn",
+    "ResetStrategy",
+    "ReferenceLine",
+    "make_reset_fn",
+    "GridResetFn",
+    "AllTrackResetFn",
+    "AllMapResetFn",
+]
 
 
 class ResetFn(ABC):
@@ -46,6 +54,18 @@ class ResetStrategy(IntEnum):
     MAP_RANDOM_STATIC = 5
 
 
+class ReferenceLine(IntEnum):
+    """Which track line the RL_* reset strategies spawn agents on.
+
+    RACELINE: today's behaviour; spawns carry the raceline's lateral offset,
+        so the Frenet ``ey`` (measured from the centerline) is non-zero.
+    CENTERLINE: spawns sit on the centerline, giving ``ey == 0`` at reset.
+    """
+
+    RACELINE = 1
+    CENTERLINE = 2
+
+
 def _rl_reset_factory(
     *,
     builder: Callable[..., ResetFn],
@@ -54,8 +74,12 @@ def _rl_reset_factory(
 ) -> Callable[[Track, int, dict], ResetFn]:
     def factory(track: Track, num_agents: int, kwargs: dict) -> ResetFn:
         kwargs = dict(kwargs)  # don't mutate the caller's dict
+        reference = kwargs.pop("reference_line", ReferenceLine.RACELINE)
+        if not isinstance(reference, ReferenceLine):
+            raise TypeError("reference_line must be a ReferenceLine")
+        line = track.centerline if reference is ReferenceLine.CENTERLINE else track.raceline
         return builder(
-            reference_line=track.raceline,
+            reference_line=line,
             num_agents=num_agents,
             # config may override the strategy's shuffle / lateral defaults
             shuffle=kwargs.pop("shuffle", shuffle),

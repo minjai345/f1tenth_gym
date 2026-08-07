@@ -15,7 +15,7 @@ from .dynamic_models import (
 )
 from .action import LongitudinalActionType, SteerActionType
 from .observation import ObservationType
-from .reset import ResetStrategy
+from .reset import ReferenceLine, ResetStrategy
 from .lidar import LiDARConfig
 from .collision_models import CollisionCheckMode
 
@@ -170,6 +170,13 @@ class ResetConfig:
             the strategy default (STATIC strategies don't shuffle).
         move_laterally: Override whether spawns are offset laterally off the
             reference line. ``None`` uses the strategy default.
+        reference_line: Which line the RL_* strategies spawn on. ``None`` =
+            ``ReferenceLine.RACELINE`` (today's behaviour); ``CENTERLINE``
+            gives ``ey == 0`` at spawn. Not applicable to MAP strategies.
+        start_width: Length of the grid strategies' spawn window along the
+            reference line, in absolute metres (default 1.0). The window is
+            clamped to at least one waypoint, so scaled maps stay legal.
+            Only applicable to the two GRID strategies.
     """
 
     strategy: ResetStrategy = ResetStrategy.RL_GRID_STATIC
@@ -177,6 +184,8 @@ class ResetConfig:
     max_dist: Optional[float] = None
     shuffle: Optional[bool] = None
     move_laterally: Optional[bool] = None
+    reference_line: Optional[ReferenceLine] = None
+    start_width: Optional[float] = None
 
     def __post_init__(self) -> None:
         if self.min_dist is not None and self.min_dist < 0:
@@ -191,10 +200,23 @@ class ResetConfig:
             raise ValueError(
                 f"min_dist ({self.min_dist}) must be < max_dist ({self.max_dist})"
             )
+        if self.reference_line is not None:
+            if not isinstance(self.reference_line, ReferenceLine):
+                raise TypeError("reference_line must be a ReferenceLine")
+            if self.strategy is ResetStrategy.MAP_RANDOM_STATIC:
+                raise ValueError("reference_line does not apply to MAP strategies")
+        if self.start_width is not None:
+            if self.start_width <= 0:
+                raise ValueError(f"start_width must be > 0, got {self.start_width}")
+            if self.strategy not in (
+                ResetStrategy.RL_GRID_STATIC,
+                ResetStrategy.RL_GRID_RANDOM,
+            ):
+                raise ValueError("start_width only applies to the GRID strategies")
 
     def reset_kwargs(self) -> dict:
         """Non-None reset params, to forward to ``make_reset_fn``."""
-        keys = ("min_dist", "max_dist", "shuffle", "move_laterally")
+        keys = ("min_dist", "max_dist", "shuffle", "move_laterally", "reference_line", "start_width")
         return {k: getattr(self, k) for k in keys if getattr(self, k) is not None}
 
     def with_updates(self, **changes: Any) -> "ResetConfig":

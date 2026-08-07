@@ -70,9 +70,13 @@ class GridResetFn(MaskedResetFn):
         )
 
     def get_mask(self) -> np.ndarray:
-        # approximate the nr waypoints in the starting line
+        # approximate the nr waypoints in the starting line. start_width is
+        # absolute metres, so on a scaled map (map_scale > ~5 on Spielberg) the
+        # window can shrink below one waypoint spacing -- clamp to 1 so a legal
+        # config can never produce an empty mask (rng.choice on an empty mask
+        # raises on the first reset)
         step_size = self.reference_line.length / self.reference_line.n
-        n_wps = int(self.start_width / step_size)
+        n_wps = max(1, int(self.start_width / step_size))
 
         mask = np.zeros(self.reference_line.n)
         mask[:n_wps] = 1
