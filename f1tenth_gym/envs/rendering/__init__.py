@@ -55,9 +55,17 @@ def make_renderer(
         from ..env_config import RenderConfig  # local import avoids an import cycle
         render_config = RenderConfig()
 
-    if render_mode == "rgb_array":
-        # off-screen grab from the GL framebuffer under a real/virtual X server
-        os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
+    # Qt and PyOpenGL must agree on the windowing API: Qt forced onto xcb (GLX)
+    # with PyOpenGL auto-detecting EGL (its choice on a Wayland session) leaves
+    # PyOpenGL unable to see the current context -- every GLMeshItem.paint
+    # raises "no valid context", pyqtgraph swallows it, and the cars silently
+    # vanish from otherwise-valid rgb_array frames. Both pins must land BEFORE
+    # the backend import below: the FIRST make_renderer call in a process (any
+    # mode, even one that returns None) imports the GL stack, and every later
+    # renderer inherits whatever platform got resolved then. setdefault, so an
+    # explicit user choice always wins.
+    os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
+    os.environ.setdefault("PYOPENGL_PLATFORM", "x11")
 
     from .rendering_pyqtgl import PyQtEnvRendererGL as EnvRenderer
 
