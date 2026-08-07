@@ -275,7 +275,7 @@ What ``obs`` looks like. ``ObservationType`` from
      - Default
      - Allowed values / notes
    * - ``type``
-     - ``ObservationType.DIRECT``
+     - ``ObservationType.DEFAULT``
      - ``DIRECT`` / ``ORIGINAL`` (alias of DIRECT) / ``FEATURES`` /
        ``KINEMATIC_STATE`` / ``DYNAMIC_STATE`` / ``FRENET_DYNAMIC_STATE``.
    * - ``features``

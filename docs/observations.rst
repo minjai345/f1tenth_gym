@@ -62,13 +62,13 @@ tuple of fields they expose:
 
    * - Type
      - Fields exposed
-   * - ``DIRECT`` (default)
+   * - ``DEFAULT`` (default)
      - The **base** fields: ``scan``, ``std_state``, ``state``, ``collision``,
        ``lap_time``, ``lap_count``, ``sim_time``, and ``frenet_pose``
        (the last only when the Frenet frame is computed — see the warning
        below).
    * - ``ORIGINAL``
-     - Alias of ``DIRECT`` (kept for backwards compatibility).
+     - ``ORIGINAL`` is an alias of ``DEFAULT`` (kept for backwards compatibility); ``DIRECT`` now returns raw agent-batched arrays and warns.
    * - ``FEATURES``
      - A **custom** subset you specify via
        ``ObservationConfig(type=FEATURES, features=(...))``.
@@ -81,13 +81,13 @@ tuple of fields they expose:
      - ``pose_x``, ``pose_y``, ``delta``, ``linear_vel_x``, ``linear_vel_y``,
        ``pose_theta``, ``ang_vel_z``, ``beta``.
 
-The default config uses ``DIRECT``.
+The default config uses ``DEFAULT``.
 
 .. warning::
 
-   ``DIRECT`` does **not** contain ``pose_x`` — it is a *derived* field, not a
+   ``DEFAULT`` does **not** contain ``pose_x`` — it is a *derived* field, not a
    base field. Under the default config ``obs["agent_0"]["pose_x"]`` raises
-   ``KeyError``. To read the pose from ``DIRECT``, use ``std_state`` (indices
+   ``KeyError``. To read the pose from ``DEFAULT``, use ``std_state`` (indices
    0, 1, 4 are X, Y, yaw). To get named pose fields directly, use
    ``KINEMATIC_STATE`` / ``DYNAMIC_STATE`` / ``FRENET_DYNAMIC_STATE`` or a
    ``FEATURES`` tuple that includes them.
@@ -248,7 +248,7 @@ Gotchas
 
    ``frenet_pose`` exists only when the environment computes the Frenet frame
    (``SimulationConfig(compute_frenet_frame=True)``, the default). With
-   ``compute_frenet_frame=False``, ``DIRECT`` silently drops ``frenet_pose``,
+   ``compute_frenet_frame=False``, ``DEFAULT`` silently drops ``frenet_pose``,
    and requesting it explicitly via a ``FEATURES`` tuple raises
    ``ValueError: frenet_pose requested but environment does not compute the
    Frenet frame``.
