@@ -5,12 +5,15 @@ from dataclasses import dataclass, field, fields, replace
 from enum import IntEnum
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
+import warnings
+
 import numpy as np
 
 from .integrators import IntegratorType
 from .dynamic_models import (
     DynamicModel,
     VehicleParameters,
+    VehicleParamRanges,
     F1TENTH_VEHICLE_PARAMETERS,
 )
 from .action import LongitudinalActionType, SteerActionType
@@ -365,32 +368,43 @@ class RewardConfig:
 class DomainRandomizationConfig:
     """Per-episode randomization of vehicle parameters, applied at ``reset()``.
 
-    ``param_ranges`` maps a ``VehicleParameters`` field name to an ABSOLUTE
-    ``(low, high)`` range in physical units; each listed param is sampled
-    uniformly at every reset from the env RNG (so it is reproducible with
-    ``reset(seed=...)``). Only listed params are randomized. Example::
+    ``param_ranges`` is a :class:`VehicleParamRanges` giving an ABSOLUTE
+    ``(low, high)`` range in physical units per field; each set field is
+    sampled uniformly at every reset from the env RNG (so it is reproducible
+    with ``reset(seed=...)``). Only set fields are randomized. Example::
 
-        DomainRandomizationConfig(enabled=True, param_ranges={
-            "m": (3.0, 4.0), "mu": (0.9, 1.1), "lf": (0.14, 0.18),
-        })
+        DomainRandomizationConfig(enabled=True, param_ranges=VehicleParamRanges(
+            m=(3.0, 4.0), mu=(0.9, 1.1), lf=(0.14, 0.18),
+        ))
 
-    Note: field names are the actual ``VehicleParameters`` fields, e.g. ``m``
-    (mass) and ``h`` (CoG height) -- not ``mass``/``h_cg``. Prefer randomizing
-    *dynamics* params (m, mu, lf, lr, I, h).
-    Randomizing the actuation limits (v_min/v_max/s_min/s_max/...) is allowed
-    but desyncs the fixed action/observation spaces, so it is not recommended.
+    A plain ``{name: (low, high)}`` dict is still accepted for one release
+    (deprecated). Field names are the actual ``VehicleParameters`` fields,
+    e.g. ``m`` (mass) and ``h`` (CoG height) -- not ``mass``/``h_cg``. Prefer
+    randomizing *dynamics* params (m, mu, lf, lr, I, h). Randomizing the
+    actuation limits (v_min/v_max/s_min/s_max/...) is supported: the spaces
+    are built from :meth:`widest_params`, a fixed superset of every episode.
 
     Attributes:
         enabled: Whether to randomize at each reset.
-        param_ranges: ``{param_name: (low, high)}`` absolute ranges.
+        param_ranges: ``VehicleParamRanges`` (or a deprecated dict) of
+            absolute ``(low, high)`` ranges.
     """
 
     enabled: bool = False
-    param_ranges: dict = field(default_factory=dict)
+    param_ranges: VehicleParamRanges | dict = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        if isinstance(self.param_ranges, dict):
+            if self.param_ranges:
+                warnings.warn(
+                    "dict param_ranges is deprecated; pass a VehicleParamRanges",
+                    DeprecationWarning,
+                    stacklevel=3,
+                )
+        elif not isinstance(self.param_ranges, VehicleParamRanges):
+            raise TypeError("param_ranges must be a VehicleParamRanges (or a deprecated dict)")
         valid = {f.name for f in fields(VehicleParameters)}
-        for name, rng in self.param_ranges.items():
+        for name, rng in self.ranges().items():
             if name not in valid:
                 raise ValueError(
                     f"unknown vehicle parameter {name!r} in param_ranges "
@@ -401,8 +415,38 @@ class DomainRandomizationConfig:
                     f"param_ranges[{name!r}] must be (low, high) with low <= high, got {rng!r}"
                 )
 
+    def ranges(self) -> dict:
+        """The active ranges as a plain ``{name: (low, high)}`` dict."""
+        if isinstance(self.param_ranges, VehicleParamRanges):
+            return self.param_ranges.as_dict()
+        return dict(self.param_ranges)
+
+    def widest_params(self, base: VehicleParameters) -> VehicleParameters:
+        """``base`` with each randomized *limit* field at its widest extreme.
+
+        Spaces built from the result are a fixed valid superset of every
+        randomized episode (gymnasium requires fixed spaces). With DR disabled
+        this returns ``base`` unchanged, so spaces are byte-identical to a
+        non-DR env.
+        """
+        if not self.enabled:
+            return base
+        changes = {}
+        for name, (lo, hi) in self.ranges().items():
+            if name in _WIDEN_AT_LOW:
+                changes[name] = float(lo)
+            elif name in _WIDEN_AT_HIGH:
+                changes[name] = float(hi)
+        return base.with_updates(**changes) if changes else base
+
     def with_updates(self, **changes: Any) -> "DomainRandomizationConfig":
         return replace(self, **changes)
+
+
+# Which extreme of a randomized range widens the space built from it. Params
+# in neither table (m, mu, I, h, ...) don't feed any space bound.
+_WIDEN_AT_LOW = ("v_min", "s_min", "sv_min", "lf", "lr")   # shorter wheelbase -> higher yaw-rate cap
+_WIDEN_AT_HIGH = ("v_max", "s_max", "sv_max", "a_max")
 
 
 @dataclass(frozen=True)

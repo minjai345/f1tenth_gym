@@ -284,6 +284,12 @@ class F110Env(gym.Env):
             self._winding_point = None
             self._winding_direction = 1.0
 
+        # Spaces are fixed for the env's lifetime (gymnasium contract), while
+        # domain randomization redraws params per episode -- so build them from
+        # the WIDEST params across the randomization ranges. With DR disabled
+        # this is exactly self.vehicle_params.
+        self.space_vehicle_params = self.dr_cfg.widest_params(self.vehicle_params)
+
         obs_kwargs: dict[str, Any] = {"type": self.observation_cfg.type}
         if self.observation_cfg.features is not None:
             obs_kwargs["features"] = self.observation_cfg.features
@@ -295,7 +301,7 @@ class F110Env(gym.Env):
         single_action_space = get_action_space(
             self.longitudinal_action_type,
             self.steer_action_type,
-            self.vehicle_params,
+            self.space_vehicle_params,
         )
         self.action_space = from_single_to_multi_action_space(
             single_action_space, self.num_agents
@@ -407,7 +413,7 @@ class F110Env(gym.Env):
         """Draw a randomized VehicleParameters from the DR ranges (env RNG)."""
         changes = {
             name: float(self.np_random.uniform(lo, hi))
-            for name, (lo, hi) in self.dr_cfg.param_ranges.items()
+            for name, (lo, hi) in self.dr_cfg.ranges().items()
         }
         return self.vehicle_params.with_updates(**changes)
 
@@ -563,7 +569,7 @@ class F110Env(gym.Env):
         # Domain randomization: sample vehicle params for this episode (from the
         # env RNG, so it is reproducible with reset(seed=...)) and push them to
         # the sim (rebuilds params array + scan/collision caches).
-        if self.dr_cfg.enabled and self.dr_cfg.param_ranges:
+        if self.dr_cfg.enabled and self.dr_cfg.ranges():
             self.sim.update_params(self._sample_vehicle_params())
 
         # Derive the LiDAR-noise seed from the env RNG (which gymnasium seeds
@@ -649,15 +655,18 @@ class F110Env(gym.Env):
         self.sim.update_params(self.vehicle_params)
         if hasattr(self, "renderer") and self.renderer is not None:
             self.renderer.update_params(self.vehicle_params)
+        self.space_vehicle_params = self.dr_cfg.widest_params(self.vehicle_params)
         if hasattr(self, "action_space"):
             single_action_space = get_action_space(
                 self.longitudinal_action_type,
                 self.steer_action_type,
-                self.vehicle_params,
+                self.space_vehicle_params,
             )
             self.action_space = from_single_to_multi_action_space(
                 single_action_space, self.num_agents
-            )            
+            )
+        if hasattr(self, "observation_space"):
+            self.observation_space = self.observation_type.space()
 
     def add_render_callback(self, callback_func):
         """

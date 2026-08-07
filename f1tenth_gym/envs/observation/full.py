@@ -84,7 +84,9 @@ class FullObservation(Observation):
         """Finite, roughly-physical bounds for the observation fields, derived
         from the vehicle limits and track extents."""
         env = self.env.unwrapped
-        p = env.vehicle_params
+        # widest params across the DR ranges, so randomized episodes stay
+        # inside the fixed space (falls back for envs without the attribute)
+        p = getattr(env, "space_vehicle_params", None) or env.vehicle_params
         v_min, v_max = float(p.v_min), float(p.v_max)
         s_min, s_max = float(p.s_min), float(p.s_max)
         # One-integrator-step actuator overshoot: the steering/accel constraints
