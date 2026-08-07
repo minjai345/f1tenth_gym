@@ -2,102 +2,105 @@
   :width: 60
   :align: left
 
-F1TENTH Gym Documentation
-=========================
+F1TENTH Gym
+===========
 
-``f1tenth_gym`` is a multi-agent, deterministic 1/10th-scale autonomous-racing
-simulator that implements the `Gymnasium <https://gymnasium.farama.org/>`_
-``Env`` API. It provides realistic single-track / kinematic vehicle dynamics,
-a ray-cast 2D LiDAR, agent-and-wall collision detection, a Frenet-frame track
-representation, and an OpenGL renderer — everything needed to develop and
-evaluate planning and reinforcement-learning controllers.
+``f1tenth_gym`` races one or more 1/10th-scale cars on a real racetrack map
+behind a single Gymnasium ``Env`` — single-track or kinematic vehicle dynamics,
+a ray-cast 2D LiDAR, wall and car-to-car collisions, and a Frenet-frame view of
+the track. Every agent is a row in one shared state buffer, and a frozen
+:class:`~f1tenth_gym.envs.env_config.EnvConfig` is the only way in.
 
-.. note::
+The shortest complete program
+-----------------------------
 
-   This documentation covers the ``dev-humble`` line of ``f1tenth_gym``, which
-   is configured entirely through a typed, frozen
-   :class:`~f1tenth_gym.envs.env_config.EnvConfig` dataclass. It has **diverged
-   substantially** from the older ``f110_gym`` package (dict-config,
-   ``gym.make("f110_gym:f110-v0")``, 4-tuple ``step``); older tutorials will not
-   work here. Start with :doc:`quickstart`.
-
-Highlights
-----------
-
-- **Gymnasium-native** — ``reset() -> (obs, info)`` and
-  ``step() -> (obs, reward, terminated, truncated, info)``.
-- **Typed configuration** — one frozen
-  :class:`~f1tenth_gym.envs.env_config.EnvConfig` tree; no YAML, no dicts. See
-  :doc:`configuration`.
-- **Multi-agent** — every agent is a row in struct-of-arrays physics buffers,
-  stepped together and deterministically seedable.
-- **Faster than real time** — steady-state stepping runs ~40–55× real time.
-- **RL & sim2real ready** — pluggable rewards, domain randomization, actuator
-  and sensor noise, and thin single-agent / observation-delay wrappers. See
-  :doc:`rewards_and_rl`.
-
-Quick example
--------------
+Build, reset, apply one command, and read back what the car actually did:
 
 .. code-block:: python
 
    import gymnasium as gym
    import numpy as np
-   from f1tenth_gym.envs.env_config import EnvConfig, SimulationConfig
+   from f1tenth_gym.envs.env_config import EnvConfig
 
-   env = gym.make(
-       "f1tenth_gym:f1tenth-v0",
-       config=EnvConfig(simulation_config=SimulationConfig(max_laps=None)),
-   )
-   obs, info = env.reset(seed=0)
-   for _ in range(100):
-       action = np.array([[0.0, 2.0]], dtype=np.float32)   # [[steer_rad, speed_mps]]
-       obs, reward, terminated, truncated, info = env.step(action)
-       if terminated or truncated:
-           break
+   env = gym.make("f1tenth_gym:f1tenth-v0", config=EnvConfig(render_enabled=False))
+   obs, info = env.reset(seed=42)
+   action = np.array([[0.0, 2.0]], dtype=np.float32)   # [[steer_rad, speed_mps]]
+   obs, reward, terminated, truncated, info = env.step(action)
+   print(round(float(obs["agent_0"]["std_state"][3]), 3), reward)
    env.close()
+
+This prints ``0.019 0.01``. The commanded 2.0 m/s is a target, not a state
+write: one 10 ms step of the longitudinal controller reaches 0.019 m/s. The
+0.01 is one step of the default survival reward — simulated seconds alive.
+
+.. note::
+
+   The id is namespaced — ``"f1tenth_gym:f1tenth-v0"`` tells Gymnasium which
+   module to import first. Tutorials written for the legacy ``f110_gym``
+   package (dict config, 4-tuple ``step``) will not run against this one.
+
+Where to start
+--------------
+
+Pick the door that matches what you already have:
+
+- Never run the simulator: :doc:`quickstart` drives one episode to its end and
+  works out which of the two exit conditions stopped it.
+- No working install yet: :doc:`installation` gets you an editable clone whose
+  physics, map download and rendering are each verified by a printed number.
+- Loop already running, need a knob: :doc:`configuration` lists every
+  ``EnvConfig`` field, its default, and what it rejects.
 
 Citing
 ------
 
-If you use this environment, please cite:
+If you use this environment in your work, please cite:
 
 .. code-block:: bibtex
 
    @inproceedings{okelly2020f1tenth,
-     title={{F1TENTH}: An Open-source Evaluation Environment for Continuous Control and Reinforcement Learning},
-     author={O'Kelly, Matthew and Zheng, Hongrui and Karthik, Dhruv and Mangharam, Rahul},
+     title={{F1TENTH}: An Open-source Evaluation Environment for Continuous
+            Control and Reinforcement Learning},
+     author={O'Kelly, Matthew and Zheng, Hongrui and Karthik, Dhruv and
+             Mangharam, Rahul},
      booktitle={NeurIPS 2019 Competition and Demonstration Track},
      pages={77--89},
      year={2020},
      organization={PMLR}
    }
 
-To build a physical 1/10th-scale car, follow the guide at https://f1tenth.org/build.html.
+To build a physical 1/10th-scale car, follow the guide at
+https://f1tenth.org/build.html.
 
 .. toctree::
    :caption: Getting started
-   :maxdepth: 2
+   :hidden:
 
    installation
    quickstart
 
 .. toctree::
-   :caption: User guide
-   :maxdepth: 2
+   :caption: Guides
+   :hidden:
+
+   rl
+   rendering
+   examples
+
+.. toctree::
+   :caption: Explanation
+   :hidden:
+
+   dynamics
+   tracks
+   sim2real
+   reproducibility
+
+.. toctree::
+   :caption: Reference
+   :hidden:
 
    configuration
    observations
    actions
-   dynamics
-   tracks
-   rendering
-   rewards_and_rl
-   reproducibility
-   examples
-
-.. toctree::
-   :caption: Reference
-   :maxdepth: 2
-
    api/index

@@ -1,99 +1,122 @@
 Actions
 =======
 
-Every :class:`~f1tenth_gym.envs.f110_env.F110Env` consumes a single action array
-per :meth:`step`. This page explains the fixed shape of that array, what each
-column means, the two longitudinal and two steering interpretation modes, how to
-select them, and how to read the environment's :attr:`action_space`.
+Every :meth:`~f1tenth_gym.envs.f110_env.F110Env.step` consumes one
+``(num_agents, 2)`` float32 array — steering in column 0, the longitudinal
+command in column 1 — and the simulator checks only its shape. Bounds are
+advisory: an action outside ``env.action_space`` is executed rather than
+rejected or clipped, and an oversized command is limited only by the actuator
+constraints inside the dynamics (:doc:`dynamics`). A 500 m/s speed command is
+a legal input that accelerates the car at ``a_max``:
 
-For where these controls sit in the wider configuration tree, see
-:doc:`configuration`. For what the simulator gives back, see :doc:`observations`.
+>>> import gymnasium as gym
+>>> import numpy as np
+>>> from f1tenth_gym.envs.env_config import EnvConfig, SimulationConfig
+>>> cfg = EnvConfig(
+...     simulation_config=SimulationConfig(max_laps=None), render_enabled=False
+... )
+>>> env = gym.make("f1tenth_gym:f1tenth-v0", config=cfg)
+>>> env.action_space
+Box([[-0.4189 -5.    ]], [[ 0.4189 20.    ]], (1, 2), float32)
+>>> obs, info = env.reset(seed=42)
+>>> action = np.array([[0.0, 2.0]], dtype=np.float32)   # [[steering, speed]]
+>>> for _ in range(100):
+...     obs, reward, terminated, truncated, info = env.step(action)
+>>> print(f"{obs['agent_0']['std_state'][3]:.4f}")      # speed tracks the target
+1.9841
+>>> big = np.array([[0.0, 500.0]], dtype=np.float32)
+>>> env.action_space.contains(big)
+False
+>>> obs, *_ = env.step(big)                             # executed anyway
+>>> print(f"{obs['agent_0']['std_state'][3]:.4f}")      # one step of a_max
+2.0792
+>>> env.close()
 
-The action array
-----------------
+Column meanings by mode
+-----------------------
 
-The action space is **always** a ``gymnasium.spaces.Box`` of shape
-``(num_agents, 2)`` with ``dtype=np.float32``. There is one row per agent and
-exactly two columns:
+Two fields on :class:`~f1tenth_gym.envs.env_config.ControlConfig` select how
+the simulator interprets each column: ``steering_mode`` for column 0 and
+``longitudinal_mode`` for column 1 (:doc:`configuration` covers the nested
+``with_updates`` pattern for setting them). The four combinations, with the
+``Box`` bounds each one induces for the default ``F1TENTH_VEHICLE_PARAMETERS``:
 
-* **Column 0 — steering** (``[steer, ...]``)
-* **Column 1 — longitudinal** (``[..., longitudinal]``)
+.. list-table::
+   :header-rows: 1
+   :widths: 10 28 30 32
 
-Single-agent code must still pass a 2-D array with a leading agent axis:
+   * - Column
+     - Mode
+     - Command
+     - Bounds (per row)
+   * - 0
+     - ``STEERING_ANGLE`` *(default)*
+     - target steering angle, rad
+     - ``[s_min, s_max]`` = ``[-0.4189, 0.4189]``
+   * - 0
+     - ``STEERING_SPEED``
+     - steering velocity, rad/s
+     - ``[sv_min, sv_max]`` = ``[-3.2, 3.2]``
+   * - 1
+     - ``SPEED`` *(default)*
+     - target speed, m/s
+     - ``[v_min, v_max]`` = ``[-5.0, 20.0]``
+   * - 1
+     - ``ACCL``
+     - longitudinal acceleration, m/s²
+     - ``[-a_max, a_max]`` = ``[-9.51, 9.51]``
 
-.. code-block:: python
+Every bound comes from ``EnvConfig.params``, so swapping the vehicle preset
+moves them — read them off ``env.action_space`` instead of hardcoding, and use
+``env.action_space.sample()`` for a random command of the right shape and
+dtype under any mode pair:
 
-   import numpy as np
-
-   action = np.array([[0.0, 2.0]], dtype=np.float32)   # [[steer, speed]]
+>>> from f1tenth_gym.envs.env_config import ControlConfig
+>>> from f1tenth_gym.envs.action import LongitudinalActionType, SteerActionType
+>>> cfg = EnvConfig(
+...     control_config=ControlConfig(
+...         longitudinal_mode=LongitudinalActionType.ACCL,
+...         steering_mode=SteerActionType.STEERING_SPEED,
+...     ),
+...     render_enabled=False,
+... )
+>>> env = gym.make("f1tenth_gym:f1tenth-v0", config=cfg)
+>>> env.action_space
+Box([[-3.2  -9.51]], [[3.2  9.51]], (1, 2), float32)
+>>> env.close()
 
 .. warning::
 
-   **Steering is column 0, longitudinal is column 1.** Both columns are
-   ``float32`` with overlapping valid ranges, so a transposed action is still a
-   *valid* action: the simulator cannot detect the swap and will faithfully
-   execute it. Nothing raises, and the trajectory is simply wrong. Check the
-   order first when results look inexplicable. For a single agent:
-   ``np.array([[steer, speed]], dtype=np.float32)``.
+   A transposed pair — ``[speed, steer]`` instead of ``[steer, speed]`` — is
+   usually still inside the ``Box``: both columns are float32 with overlapping
+   valid ranges, and only the shape is checked, so the swapped pair is
+   indistinguishable from a deliberate command. The simulator executes it
+   faithfully and the trajectory is simply wrong. Check the column order first
+   when results look inexplicable.
 
-Longitudinal modes
-------------------
-
-The meaning of column 1 is set by
-:class:`~f1tenth_gym.envs.action.LongitudinalActionType`:
-
-.. list-table::
-   :header-rows: 1
-   :widths: 20 40 40
-
-   * - Mode
-     - Meaning of column 1
-     - Box bounds (per row)
-   * - ``SPEED`` *(default)*
-     - Target speed in m/s, tracked by a proportional controller
-     - ``[v_min, v_max]``
-   * - ``ACCL``
-     - Direct longitudinal acceleration in m/s², passed through unchanged
-     - ``[-a_max, a_max]``
+What each mode does to the command
+----------------------------------
 
 Under the default ``SPEED`` mode the commanded speed is turned into an
-acceleration by :func:`~f1tenth_gym.envs.dynamic_models.utils.pid_accl`, a real
-proportional controller with four gain quadrants (forward vs. reverse, and
-accelerating vs. braking). It is a P controller only — there is no I or D term.
+acceleration by :func:`~f1tenth_gym.envs.dynamic_models.pid_accl`, a
+proportional controller with four gain quadrants (forward vs. reverse,
+accelerating vs. braking) — there is no I or D term. The quadrant test is
+``current_speed > 0.0``, so a car at exactly rest gets the weaker reverse
+gains, and every ``reset()`` spawns at ``v = 0`` — the first step of every
+episode launches on that branch:
 
-Under ``ACCL`` mode the command is used as the acceleration directly
-(:func:`~f1tenth_gym.envs.action.accl_action` is the identity).
+>>> from f1tenth_gym.envs.dynamic_models import pid_accl
+>>> from f1tenth_gym.envs.dynamic_models import F1TENTH_VEHICLE_PARAMETERS as p
+>>> pid_accl(5.0, 0.0, p.a_max, p.v_max, p.v_min)    # exactly at rest
+4.755
+>>> pid_accl(5.0, 0.001, p.a_max, p.v_max, p.v_min)  # barely rolling: 5x jump
+23.770245
 
-.. note::
-
-   For the default ``F1TENTH_VEHICLE_PARAMETERS`` the speed bounds are
-   ``v_min = -5.0`` m/s and ``v_max = 20.0`` m/s, and the acceleration bound is
-   ``a_max = 9.51`` m/s². These come from the vehicle parameters, so they change
-   if you swap :attr:`EnvConfig.params` to another preset (``F1FIFTH_`` or
-   ``FULLSCALE_VEHICLE_PARAMETERS``).
-
-Steering modes
---------------
-
-The meaning of column 0 is set by
-:class:`~f1tenth_gym.envs.action.SteerActionType`:
-
-.. list-table::
-   :header-rows: 1
-   :widths: 20 40 40
-
-   * - Mode
-     - Meaning of column 0
-     - Box bounds (per row)
-   * - ``STEERING_ANGLE`` *(default)*
-     - Target steering angle in radians
-     - ``[s_min, s_max]``
-   * - ``STEERING_SPEED``
-     - Direct steering angular velocity in rad/s, passed through unchanged
-     - ``[sv_min, sv_max]``
+The returned effort may exceed ``a_max``: it is a raw command that
+``accl_constraints`` inside the dynamics then limits (:doc:`dynamics`).
 
 Under ``STEERING_ANGLE`` the target angle is realised by
-:func:`~f1tenth_gym.envs.dynamic_models.utils.pid_steer`, a saturated
+:func:`~f1tenth_gym.envs.dynamic_models.pid_steer`, a saturated
 proportional controller: ``sv = clip(kp * error, -sv_max, sv_max)``. The gain
 comes from ``ControlConfig.steer_kp`` — ``None`` (the default) derives
 ``10 * sv_max / (s_max - s_min)`` from the vehicle limits, and any value
@@ -102,147 +125,38 @@ at any error above ``1e-4`` rad and therefore limit-cycles around the target
 by about ``sv_max * timestep`` (0.032 rad at the defaults) instead of
 settling.
 
-Under ``STEERING_SPEED`` the command is the steering angular velocity directly
-(:func:`~f1tenth_gym.envs.action.steering_speed_action` is the identity).
+Under ``ACCL`` and ``STEERING_SPEED`` the command is applied as-is:
+:func:`~f1tenth_gym.envs.action.accl_action` and
+:func:`~f1tenth_gym.envs.action.steering_speed_action` are identities.
 
-.. note::
+Multi-agent action arrays
+-------------------------
 
-   For the default ``F1TENTH_VEHICLE_PARAMETERS`` the steering-angle bounds are
-   ``s_min = -0.4189`` rad and ``s_max = 0.4189`` rad, and the steering-velocity
-   bounds are ``sv_min = -3.2`` rad/s and ``sv_max = 3.2`` rad/s.
-
-Selecting the modes
--------------------
-
-Both modes live on :class:`~f1tenth_gym.envs.env_config.ControlConfig`, nested
-inside :class:`~f1tenth_gym.envs.env_config.EnvConfig` as
-``control_config``. The defaults are ``longitudinal_mode = SPEED`` and
-``steering_mode = STEERING_ANGLE``. Because the config tree is a tree of frozen
-dataclasses, mutate it by nesting ``with_updates`` calls:
+With ``num_agents=2`` the array gains a second row; row ``i`` commands agent
+``i``:
 
 .. code-block:: python
 
-   from f1tenth_gym.envs.env_config import EnvConfig
-   from f1tenth_gym.envs.action import LongitudinalActionType, SteerActionType
-
-   cfg = EnvConfig()
-   cfg = cfg.with_updates(
-       control_config=cfg.control_config.with_updates(
-           longitudinal_mode=LongitudinalActionType.ACCL,
-           steering_mode=SteerActionType.STEERING_SPEED,
-       ),
+   action = np.array(
+       [
+           [0.0, 2.0],   # agent_0: straight at 2 m/s
+           [0.2, 2.0],   # agent_1: steer left at 2 m/s
+       ],
+       dtype=np.float32,
    )
 
-``ControlConfig`` also carries the sim2real actuation knobs
-``steer_delay_steps``, ``throttle_delay_steps``, ``steer_noise_std`` and
-``accl_noise_std`` (all default ``0`` / no-op); see :doc:`configuration` and
-:doc:`rewards_and_rl`.
+The per-agent ``Box`` is repeated once per row, so the bounds are identical
+across agents:
 
-Reading the action space
-------------------------
+>>> cfg = EnvConfig(num_agents=2, render_enabled=False)
+>>> env = gym.make("f1tenth_gym:f1tenth-v0", config=cfg)
+>>> env.action_space.shape
+(2, 2)
+>>> env.action_space.low
+array([[-0.4189, -5.    ],
+       [-0.4189, -5.    ]], dtype=float32)
+>>> env.close()
 
-The environment builds its action space from the selected modes and the vehicle
-parameters, so you never need to hardcode the bounds — read them off
-``env.action_space``:
-
-.. code-block:: python
-
-   import gymnasium as gym
-   from f1tenth_gym.envs.env_config import EnvConfig
-
-   env = gym.make("f1tenth_gym:f1tenth-v0", config=EnvConfig(render_enabled=False))
-   env.reset(seed=0)
-
-   print(env.action_space.shape)   # (1, 2)  -> (num_agents, 2)
-   print(env.action_space.low)     # [[s_min, v_min]]  e.g. [[-0.4189, -5.0]]
-   print(env.action_space.high)    # [[s_max, v_max]]  e.g. [[ 0.4189, 20.0]]
-
-   # A valid random action always has the right shape and dtype:
-   action = env.action_space.sample()
-   obs, reward, terminated, truncated, info = env.step(action)
-   env.close()
-
-.. note::
-
-   The single-agent Box is repeated once per agent to form the
-   ``(num_agents, 2)`` space, so ``env.action_space.low[i]`` gives the
-   ``[steer, longitudinal]`` lower bounds for agent ``i`` — identical across
-   agents.
-
-Single-agent example
---------------------
-
-A minimal control loop under the default ``SPEED`` + ``STEERING_ANGLE`` modes:
-drive straight at 2 m/s.
-
-.. code-block:: python
-
-   import gymnasium as gym
-   import numpy as np
-   from f1tenth_gym.envs.env_config import EnvConfig, SimulationConfig
-
-   cfg = EnvConfig(
-       num_agents=1,
-       simulation_config=SimulationConfig(max_laps=None),   # otherwise ends after 1 lap
-       render_enabled=False,
-   )
-   env = gym.make("f1tenth_gym:f1tenth-v0", config=cfg)
-   obs, info = env.reset(seed=42)
-
-   for _ in range(200):
-       action = np.array([[0.0, 2.0]], dtype=np.float32)    # [steer_rad, speed_mps]
-       obs, reward, terminated, truncated, info = env.step(action)
-       if terminated or truncated:
-           break
-
-   env.close()
-
-Multi-agent example
--------------------
-
-With ``num_agents=2`` the action array has two rows — one command pair per agent.
-Here agent 0 goes straight and agent 1 steers left while both hold 2 m/s:
-
-.. code-block:: python
-
-   import gymnasium as gym
-   import numpy as np
-   from f1tenth_gym.envs.env_config import EnvConfig, SimulationConfig
-
-   cfg = EnvConfig(
-       num_agents=2,
-       simulation_config=SimulationConfig(max_laps=None),
-       render_enabled=False,
-   )
-   env = gym.make("f1tenth_gym:f1tenth-v0", config=cfg)
-   obs, info = env.reset(seed=42)
-
-   for _ in range(200):
-       action = np.array(
-           [
-               [0.0, 2.0],   # agent_0: steer straight, 2 m/s
-               [0.2, 2.0],   # agent_1: steer left,     2 m/s
-           ],
-           dtype=np.float32,
-       )
-       obs, reward, terminated, truncated, info = env.step(action)
-       if terminated or truncated:
-           break
-
-   env.close()
-
-.. note::
-
-   The single-agent :class:`~f1tenth_gym.envs.wrappers.SingleAgentWrapper`
-   reshapes a flat ``(2,)`` action into the ``(1, 2)`` array the env expects, so
-   wrapped single-agent code can pass ``np.array([steer, speed])`` directly. See
-   :doc:`rewards_and_rl`.
-
-See also
---------
-
-* :doc:`configuration` — the full ``EnvConfig`` / ``ControlConfig`` tree.
-* :doc:`observations` — what ``step`` returns.
-* :doc:`dynamics` — how the realised steering velocity and acceleration feed the
-  vehicle models, and where the ``s_min``/``v_max`` bounds come from.
-* :doc:`quickstart` — an end-to-end first program.
+:class:`~f1tenth_gym.envs.wrappers.SingleAgentWrapper` removes the leading
+axis for single-agent training — a flat ``(2,)`` action is reshaped to
+``(1, 2)`` — and it does not clip; see :doc:`rl`.
