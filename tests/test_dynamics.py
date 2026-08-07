@@ -657,3 +657,54 @@ class DynamicsTest(unittest.TestCase):
         ]
 
         np.testing.assert_array_almost_equal(x_left_st[-1], x_left_st_gt, decimal=2)
+
+
+class TestPoseReference(unittest.TestCase):
+    """Pins ISSUES_PLAN.md #18: one canonical (CoG) frame for observations."""
+
+    def test_pose_reference_property(self):
+        from f1tenth_gym.envs.dynamic_models import DynamicModel, PoseReference
+
+        self.assertIs(DynamicModel.KS.pose_reference, PoseReference.REAR_AXLE)
+        self.assertIs(DynamicModel.ST.pose_reference, PoseReference.COG)
+        self.assertIs(DynamicModel.MB.pose_reference, PoseReference.COG)
+
+    def test_ks_observations_are_cog_anchored(self):
+        import math
+
+        import gymnasium as gym
+
+        from f1tenth_gym.envs.dynamic_models import DynamicModel, F1TENTH_VEHICLE_PARAMETERS
+        from f1tenth_gym.envs.env_config import EnvConfig, SimulationConfig
+
+        lr = F1TENTH_VEHICLE_PARAMETERS.lr
+        env = gym.make(
+            "f1tenth_gym:f1tenth-v0",
+            config=EnvConfig(
+                simulation_config=SimulationConfig(
+                    dynamics_model=DynamicModel.KS, max_laps=None
+                ),
+                render_enabled=False,
+            ),
+        )
+        obs, _ = env.reset(seed=1, options={"poses": np.array([[1.0, 2.0, 0.5]])})
+        agent = obs["agent_0"]
+        # raw state keeps the model-native rear-axle anchor...
+        self.assertAlmostEqual(float(agent["state"][0]), 1.0, places=5)
+        self.assertAlmostEqual(float(agent["state"][1]), 2.0, places=5)
+        # ...while std_state (hence pose_x/pose_y and frenet) is the CoG
+        self.assertAlmostEqual(float(agent["std_state"][0]), 1.0 + lr * math.cos(0.5), places=4)
+        self.assertAlmostEqual(float(agent["std_state"][1]), 2.0 + lr * math.sin(0.5), places=4)
+        env.close()
+
+    def test_st_observations_unchanged(self):
+        import gymnasium as gym
+
+        from f1tenth_gym.envs.env_config import EnvConfig
+
+        env = gym.make("f1tenth_gym:f1tenth-v0", config=EnvConfig(render_enabled=False))
+        obs, _ = env.reset(seed=1, options={"poses": np.array([[1.0, 2.0, 0.5]])})
+        agent = obs["agent_0"]
+        self.assertEqual(float(agent["std_state"][0]), float(agent["state"][0]))
+        self.assertEqual(float(agent["std_state"][1]), float(agent["state"][1]))
+        env.close()
