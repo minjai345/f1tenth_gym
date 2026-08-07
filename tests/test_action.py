@@ -167,3 +167,44 @@ class TestMultiAgentActionSpace(unittest.TestCase):
         for i in range(num_agents):
             np.testing.assert_array_almost_equal(multi_space.low[i], single_space.low)
             np.testing.assert_array_almost_equal(multi_space.high[i], single_space.high)
+
+
+class TestSteeringPController(unittest.TestCase):
+    """Pins ISSUES_PLAN.md #16: STEERING_ANGLE is a saturated P controller."""
+
+    def test_proportional_saturation_and_relay_hatch(self):
+        from f1tenth_gym.envs.dynamic_models.utils import pid_steer
+
+        self.assertAlmostEqual(pid_steer(0.01, 0.0, 3.2, 10.0), 0.1, places=6)
+        self.assertAlmostEqual(pid_steer(1.0, 0.0, 3.2, 10.0), 3.2, places=6)
+        self.assertAlmostEqual(pid_steer(-1.0, 0.0, 3.2, 10.0), -3.2, places=6)
+        # kp <= 0 is the legacy relay: full authority for any error > deadband
+        self.assertAlmostEqual(pid_steer(0.01, 0.0, 3.2, -1.0), 3.2, places=6)
+        self.assertAlmostEqual(pid_steer(0.0, 0.0, 3.2, -1.0), 0.0, places=6)
+
+    def _tail_deltas(self, control_config):
+        from f1tenth_gym.envs.env_config import ControlConfig, EnvConfig, SimulationConfig
+
+        env = gym.make(
+            "f1tenth_gym:f1tenth-v0",
+            config=EnvConfig(
+                control_config=control_config,
+                simulation_config=SimulationConfig(max_laps=None),
+                render_enabled=False,
+            ),
+        )
+        env.reset(seed=42)
+        deltas = []
+        for _ in range(120):
+            obs, *_ = env.step(np.array([[0.2, 1.0]], dtype=np.float32))
+            deltas.append(float(obs["agent_0"]["std_state"][2]))
+        env.close()
+        return np.array(deltas[-30:])
+
+    def test_default_settles_where_the_relay_limit_cycles(self):
+        from f1tenth_gym.envs.env_config import ControlConfig
+
+        settled = self._tail_deltas(ControlConfig())
+        self.assertLess(float(np.abs(settled - 0.2).max()), 1e-3)
+        relay = self._tail_deltas(ControlConfig(steer_kp=-1.0))
+        self.assertGreater(float(np.ptp(relay)), 0.02, "relay hatch no longer limit-cycles")
