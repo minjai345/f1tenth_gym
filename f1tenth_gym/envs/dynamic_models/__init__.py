@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import math
 import warnings
-from dataclasses import astuple, dataclass, fields, replace
+from dataclasses import dataclass, fields, replace
 from enum import IntEnum
 
 import numpy as np
