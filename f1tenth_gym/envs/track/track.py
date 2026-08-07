@@ -43,6 +43,22 @@ class TrackSpec:
 _SPEC_REQUIRED_KEYS = ("image", "resolution", "origin")
 _SPEC_OPTIONAL_KEYS = ("negate", "occupied_thresh", "free_thresh", "mode")
 
+
+def _occupancy_from_image(image: Image.Image, spec: TrackSpec) -> np.ndarray:
+    """Binarise a map image following ROS map_server semantics.
+
+    Occupancy probability is ``(255 - pixel) / 255``, or ``pixel / 255`` when
+    ``spec.negate``; a cell is an obstacle (0.0) iff that probability exceeds
+    ``spec.occupied_thresh``, else free (255.0). The ROS "unknown" band
+    (between ``free_thresh`` and ``occupied_thresh``) maps to free: the EDT
+    and the ray tracer need a binary world.
+    """
+    gray = np.array(image.convert("L"), dtype=np.float32)
+    occ_prob = gray / 255.0 if spec.negate else (255.0 - gray) / 255.0
+    occupancy_map = np.full(gray.shape, 255.0, dtype=np.float32)
+    occupancy_map[occ_prob > spec.occupied_thresh] = 0.0
+    return occupancy_map
+
 @dataclass
 class Track:
     """Racing track with occupancy map and reference lines.
@@ -122,8 +138,8 @@ class Track:
         Raises
         ------
         ValueError
-            if a required key is missing, or a key has unsupported semantics
-            (``negate: 1``, ``mode: raw``/``scale``)
+            if a required key is missing, a threshold is out of range, or a
+            key has unsupported semantics (``mode: raw``/``scale``)
         """
         with open(filespec, "r") as yaml_stream:
             map_metadata = yaml.safe_load(yaml_stream)
@@ -139,8 +155,12 @@ class Track:
         mode = metadata.pop("mode", "trinary")
         if mode != "trinary":
             raise ValueError(f"{filespec}: mode '{mode}' is not supported (only 'trinary')")
-        if metadata.get("negate", 0):
-            raise ValueError(f"{filespec}: 'negate: 1' is not supported (the occupancy polarity would be inverted)")
+        if metadata.get("negate", 0) not in (0, 1):
+            raise ValueError(f"{filespec}: negate must be 0 or 1")
+        if not 0 < metadata.get("occupied_thresh", 0.65) <= 1:
+            raise ValueError(f"{filespec}: occupied_thresh must be in (0, 1]")
+        if not 0 <= metadata.get("free_thresh", 0.196) < 1:
+            raise ValueError(f"{filespec}: free_thresh must be in [0, 1)")
         if not isinstance(metadata["resolution"], (int, float)) or metadata["resolution"] <= 0:
             raise ValueError(f"{filespec}: resolution must be a positive number")
         origin = metadata["origin"]
@@ -195,9 +215,7 @@ class Track:
             image = Image.open(track_dir / str(map_filename)).transpose(
                 Transpose.FLIP_TOP_BOTTOM
             )
-            occupancy_map = np.array(image).astype(np.float32)
-            occupancy_map[occupancy_map <= 128] = 0.0
-            occupancy_map[occupancy_map > 128] = 255.0
+            occupancy_map = _occupancy_from_image(image, track_spec)
 
             # if exists, load centerline
             if (track_dir / f"{track}_centerline.csv").exists():
@@ -289,9 +307,7 @@ class Track:
             # load occupancy grid
             image_path = track_dir / track_spec.image
             image = Image.open(image_path).transpose(Transpose.FLIP_TOP_BOTTOM)
-            occupancy_map = np.array(image).astype(np.float32)
-            occupancy_map[occupancy_map <= 128] = 0.0
-            occupancy_map[occupancy_map > 128] = 255.0
+            occupancy_map = _occupancy_from_image(image, track_spec)
 
             # if exists, load centerline
             if (track_dir / f"{stem}_centerline.csv").exists():
