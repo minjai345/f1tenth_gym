@@ -46,15 +46,20 @@ The map file convention
 
 A track directory holds a **ROS-style occupancy map**: a YAML metadata file next to a single-channel image, plus optional reference-line CSVs. ``from_track_name`` tries ``{stem}.yaml`` first, then falls back to the legacy ``{stem}_map.yaml``. The YAML (:class:`~f1tenth_gym.envs.track.track.TrackSpec`) carries ``image``, ``resolution``, ``origin``, ``negate``, ``occupied_thresh`` and ``free_thresh``.
 
-Only a subset of that metadata actually drives the simulator:
+The metadata drives the simulator as follows:
 
 - **resolution** — metres per pixel (multiplied by ``EnvConfig.map_scale``).
 - **origin** — the world coordinate of the map's **bottom-left corner**; only ``origin[0]`` and ``origin[1]`` are used (the ``origin[2]`` rotation is ignored). ``origin[:2]`` is scaled by ``map_scale``.
 - **image** — the occupancy image, loaded ``FLIP_TOP_BOTTOM`` so that grid row 0 is the smallest world ``y``.
+- **negate**, **occupied_thresh** — control the binarisation, ROS ``map_server`` style (below). ``free_thresh`` is accepted but has no separate effect: the "unknown" band it would delimit is treated as free.
 
-.. warning::
-
-   The occupancy image is binarised at a **hard-coded threshold of 128**: a pixel ``<=128`` becomes ``0`` and is **occupied**, a pixel ``>128`` becomes ``255`` and is **free**. Dark pixels are walls. The LiDAR's distance transform measures the distance to the nearest zero, so inverting this convention makes the tracer treat open track as solid. The YAML's ``negate``, ``occupied_thresh`` and ``free_thresh`` fields are parsed into the :class:`~f1tenth_gym.envs.track.track.TrackSpec` but **never used** — do not rely on them to change how the map is thresholded.
+The image is binarised following ROS ``map_server`` semantics. Occupancy probability is
+``(255 - pixel) / 255``, or ``pixel / 255`` when ``negate: 1``, and a cell is an obstacle exactly
+when that probability exceeds ``occupied_thresh``; everything else — including the ROS "unknown"
+band — is free, because the ray tracer needs a binary world. In the resulting grid ``0`` is
+occupied and ``255`` is free; dark pixels are walls, and the LiDAR's distance transform measures
+the distance to the nearest zero. Releases before v1.0.0 ignored the YAML and cut at a hard-coded
+pixel value of 128; set ``occupied_thresh: 0.495`` to reproduce that grid exactly.
 
 Reference-line CSVs are optional and looked up by name in the track directory: ``{name}_centerline.csv`` (columns ``x_m, y_m, ...``, comma-delimited) and ``{name}_raceline.csv`` (columns ``s_m; x_m; y_m; psi_rad; kappa_radpm; vx_mps; ax_mps2``, semicolon-delimited).
 
