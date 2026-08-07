@@ -39,12 +39,18 @@ def speed_action(action: float, state: np.ndarray, params: VehicleParameters) ->
         params.v_min,
     )
 
-def steering_angle_action(action: float, state: np.ndarray, params: VehicleParameters) -> float:
-    """Steering angle control using PID"""
+def steering_angle_action(
+    action: float, state: np.ndarray, params: VehicleParameters, steer_kp: float | None = None
+) -> float:
+    """Steering angle control via a saturated P controller."""
+    if steer_kp is None:
+        # tracks the actuator authority: saturated beyond 1/10th of the range
+        steer_kp = 10.0 * params.sv_max / (params.s_max - params.s_min)
     return pid_steer(
         action,
         state[2],  # current steering angle
         params.sv_max,
+        steer_kp,
     )
 
 def steering_speed_action(action: float, state: np.ndarray, params: VehicleParameters) -> float:
@@ -60,10 +66,20 @@ def longitudinal_action_from_type(action_type: LongitudinalActionType):
     else:
         raise ValueError(f"Unknown longitudinal action type: {action_type}")
 
-def steer_action_from_type(action_type: SteerActionType):
-    """Get steering action function from type"""
+def steer_action_from_type(action_type: SteerActionType, steer_kp: float | None = None):
+    """Get steering action function from type.
+
+    ``steer_kp`` parameterizes STEERING_ANGLE's P controller: ``None`` derives
+    a gain from the vehicle limits, ``<= 0`` selects the legacy relay.
+    """
     if action_type == SteerActionType.STEERING_ANGLE:
-        return steering_angle_action
+        if steer_kp is None:
+            return steering_angle_action
+
+        def _steering_angle_with_kp(action, state, params):
+            return steering_angle_action(action, state, params, steer_kp=steer_kp)
+
+        return _steering_angle_with_kp
     elif action_type == SteerActionType.STEERING_SPEED:
         return steering_speed_action
     else:

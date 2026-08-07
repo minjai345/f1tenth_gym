@@ -94,7 +94,9 @@ class F110Simulator:
 
         self.collision_check_mode: CollisionCheckMode = env_config.collision_check
         self.longitudinal_fn: AccelerationFn = longitudinal_action_from_type(longitudinal_type)
-        self.steering_fn: SteeringFn = steer_action_from_type(steering_type)
+        self.steering_fn: SteeringFn = steer_action_from_type(
+            steering_type, steer_kp=env_config.control_config.steer_kp
+        )
 
         self.longitudinal_type = longitudinal_type
         self.steering_type = steering_type

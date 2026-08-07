@@ -72,6 +72,10 @@ class ControlConfig:
             each step (actuator/servo noise).
         accl_noise_std: Std of Gaussian noise added to the longitudinal command
             each step.
+        steer_kp: Gain of the STEERING_ANGLE P controller
+            (``sv = clip(kp * error, -sv_max, sv_max)``). ``None`` derives
+            ``10 * sv_max / (s_max - s_min)`` from the vehicle limits;
+            ``<= 0`` selects the legacy bang-bang relay.
     """
 
     longitudinal_mode: LongitudinalActionType = LongitudinalActionType.SPEED
@@ -80,6 +84,7 @@ class ControlConfig:
     throttle_delay_steps: int = 0
     steer_noise_std: float = 0.0
     accl_noise_std: float = 0.0
+    steer_kp: Optional[float] = None
 
     def __post_init__(self) -> None:
         if self.steer_delay_steps < 0:

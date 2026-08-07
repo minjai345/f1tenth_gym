@@ -84,14 +84,21 @@ def steering_constraint(
     return steering_velocity
 
 @njit(cache=True)
-def pid_steer(steer, current_steer, max_sv):
-    # steering
+def pid_steer(steer, current_steer, max_sv, kp):
+    # Saturated P controller: sv = clip(kp * error, -max_sv, +max_sv).
+    # kp <= 0 selects the legacy relay (+/-max_sv whenever |error| > 1e-4),
+    # kept as an explicit escape hatch -- the relay's minimum increment per
+    # step (max_sv * dt) dwarfs its deadband, so it limit-cycles forever.
     steer_diff = steer - current_steer
-    if np.fabs(steer_diff) > 1e-4:
-        sv = (steer_diff / np.fabs(steer_diff)) * max_sv
-    else:
-        sv = 0.0
-
+    if kp <= 0.0:
+        if np.fabs(steer_diff) > 1e-4:
+            return (steer_diff / np.fabs(steer_diff)) * max_sv
+        return 0.0
+    sv = kp * steer_diff
+    if sv > max_sv:
+        sv = max_sv
+    elif sv < -max_sv:
+        sv = -max_sv
     return sv
 
 
