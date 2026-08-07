@@ -158,3 +158,24 @@ class TestMultiBodyRuns(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestVehicleParamRangesParity(unittest.TestCase):
+    """ISSUES_PLAN.md #5: the typed ranges mirror VehicleParameters exactly."""
+
+    def test_field_names_match_vehicle_parameters(self):
+        from f1tenth_gym.envs.dynamic_models import VehicleParamRanges
+
+        self.assertEqual(
+            [f.name for f in dataclasses.fields(VehicleParamRanges)],
+            [f.name for f in dataclasses.fields(VehicleParameters)],
+        )
+
+    def test_typo_raises_and_as_dict_filters(self):
+        from f1tenth_gym.envs.dynamic_models import VehicleParamRanges
+
+        with self.assertRaises(TypeError):
+            VehicleParamRanges(mass=(1.0, 2.0))
+        r = VehicleParamRanges(m=(3.0, 4.0), mu=(0.9, 1.1))
+        self.assertEqual(r.as_dict(), {"mu": (0.9, 1.1), "m": (3.0, 4.0)})
+        self.assertIsInstance(hash(r), int)

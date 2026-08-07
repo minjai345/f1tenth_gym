@@ -66,3 +66,49 @@ class TestDomainRandomization(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestWidestParamSpaces(unittest.TestCase):
+    """ISSUES_PLAN.md #6: spaces are a fixed superset of every DR episode."""
+
+    def test_randomized_limits_stay_inside_the_spaces(self):
+        from f1tenth_gym.envs.dynamic_models import VehicleParamRanges
+
+        cfg = EnvConfig(
+            domain_randomization_config=DomainRandomizationConfig(
+                enabled=True,
+                param_ranges=VehicleParamRanges(s_max=(1.2, 1.4), s_min=(-1.4, -1.2)),
+            ),
+            render_enabled=False,
+        )
+        env = gym.make("f1tenth_gym:f1tenth-v0", config=cfg)
+        obs, _ = env.reset(seed=1)
+        for t in range(60):
+            action = np.array([[1.4 if t % 2 else -1.4, 3.0]], dtype=np.float32)
+            obs, *_ = env.step(action)
+            self.assertTrue(env.observation_space.contains(obs), f"step {t} left the space")
+        env.close()
+
+    def test_disabled_dr_leaves_spaces_untouched(self):
+        plain = gym.make("f1tenth_gym:f1tenth-v0", config=EnvConfig(render_enabled=False))
+        off = gym.make(
+            "f1tenth_gym:f1tenth-v0",
+            config=EnvConfig(
+                domain_randomization_config=DomainRandomizationConfig(enabled=False),
+                render_enabled=False,
+            ),
+        )
+        self.assertEqual(plain.observation_space, off.observation_space)
+        self.assertEqual(plain.action_space, off.action_space)
+        plain.close()
+        off.close()
+
+    def test_update_params_rebuilds_the_observation_space(self):
+        env = gym.make("f1tenth_gym:f1tenth-v0", config=EnvConfig(render_enabled=False))
+        before = float(env.observation_space["agent_0"]["std_state"].high[3])
+        env.unwrapped.update_params(
+            env.unwrapped.vehicle_params.with_updates(v_max=40.0)
+        )
+        after = float(env.observation_space["agent_0"]["std_state"].high[3])
+        self.assertGreater(after, before + 15.0)
+        env.close()
