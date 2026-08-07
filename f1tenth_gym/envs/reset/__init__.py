@@ -57,8 +57,7 @@ class ResetStrategy(IntEnum):
 class ReferenceLine(IntEnum):
     """Which track line the RL_* reset strategies spawn agents on.
 
-    RACELINE: today's behaviour; spawns carry the raceline's lateral offset,
-        so the Frenet ``ey`` (measured from the centerline) is non-zero.
+    RACELINE: spawns carry the raceline's lateral offset (non-zero ``ey``).
     CENTERLINE: spawns sit on the centerline, giving ``ey == 0`` at reset.
     """
 

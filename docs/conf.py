@@ -11,8 +11,8 @@ sys.path.insert(0, os.path.abspath(".."))
 project = "f1tenth_gym"
 copyright = "2020-2024, F1TENTH Foundation"
 author = "F1TENTH Foundation"
-release = "dev-humble"
-version = "dev-humble"
+release = "1.0.0"
+version = "1.0.0"
 
 # -- General configuration ---------------------------------------------------
 extensions = [
@@ -22,6 +22,7 @@ extensions = [
     "sphinx.ext.viewcode",       # [source] links
     "sphinx.ext.intersphinx",    # cross-links to numpy/gymnasium
     "sphinx.ext.autosectionlabel",
+    "sphinx.ext.doctest",        # `make doctest` runs the >>> examples in CI
 ]
 
 source_suffix = ".rst"
@@ -40,7 +41,8 @@ autodoc_member_order = "bysource"
 autodoc_typehints = "description"
 autodoc_default_options = {
     "members": True,
-    "undoc-members": True,
+    # undoc-members stays OFF: a symbol without a docstring is not yet public
+    # documentation (and it kept publishing test scaffolding like ScanTests)
     "show-inheritance": True,
 }
 # GUI / native-graphics deps that need not (and on a headless RTD builder cannot)
@@ -75,7 +77,7 @@ html_context = {
     "display_github": True,
     "github_user": "f1tenth",
     "github_repo": "f1tenth_gym",
-    "github_version": "dev-humble",
+    "github_version": "main",
     "conf_py_path": "/docs/",
 }
 html_static_path = ["_static"]

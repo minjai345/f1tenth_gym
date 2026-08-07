@@ -24,8 +24,7 @@ class ObservationType(IntEnum):
 
     DEFAULT: Per-agent dict of named fields (the packaged form; the default).
     ORIGINAL: Alias of DEFAULT (backwards compatibility).
-    DIRECT: Raw agent-batched SoA arrays (``RawObservation``). Changed meaning
-        in v1.0.0 — it used to be the packaged form and warns when selected.
+    DIRECT: Raw agent-batched arrays (changed meaning in v1.0.0; warns).
     FEATURES: Custom subset of fields specified via config.
     KINEMATIC_STATE: Kinematic state fields (x, y, delta, vx, theta).
     DYNAMIC_STATE: Dynamic state fields including angular velocity and slip angle.
