@@ -63,12 +63,21 @@ class FullObservation(Observation):
             self._fields = normalized
 
     def _selected_fields(self) -> tuple[str, ...]:
+        scan_enabled = self._sim.scan_enabled
         if self._fields is None:
-            if self.env.unwrapped.compute_frenet:
-                return _BASE_FIELDS
-            return tuple(field for field in _BASE_FIELDS if field != "frenet_pose")
+            fields = _BASE_FIELDS
+            if not self.env.unwrapped.compute_frenet:
+                fields = tuple(field for field in fields if field != "frenet_pose")
+            if not scan_enabled:
+                # dropped rather than shipped as a useless shape-(0,) array,
+                # mirroring frenet_pose above: indexing obs['scan'] with the
+                # LiDAR off is a loud KeyError instead of silently-empty data
+                fields = tuple(field for field in fields if field != "scan")
+            return fields
         if "frenet_pose" in self._fields and not self.env.unwrapped.compute_frenet:
             raise ValueError("frenet_pose requested but environment does not compute the Frenet frame")
+        if "scan" in self._fields and not scan_enabled:
+            raise ValueError("scan requested but the LiDAR is disabled (lidar_config.enabled=False)")
         return self._fields
 
     def _physical_bounds(self) -> dict:
