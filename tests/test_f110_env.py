@@ -54,9 +54,13 @@ class TestEnvInterface(unittest.TestCase):
             equal_nan=True,
         )
 
-        obs0, _ = base_env.reset(options={"poses": np.array([[0.0, 0.0, np.pi / 2]])})
+        # seed both: the reset observation carries LiDAR noise (drawn from the
+        # reset seed), so unseeded resets legitimately differ
+        obs0, _ = base_env.reset(
+            seed=42, options={"poses": np.array([[0.0, 0.0, np.pi / 2]])}
+        )
         obs1, _ = extended_env.reset(
-            options={"poses": np.array([[0.0, 0.0, np.pi / 2]])}
+            seed=42, options={"poses": np.array([[0.0, 0.0, np.pi / 2]])}
         )
         done0 = done1 = False
         t = 0
@@ -325,4 +329,29 @@ class TestLidarNoiseSeeding(unittest.TestCase):
         d = self._scan_at_fixed_pose(env, pose, None)
         e = self._scan_at_fixed_pose(env, pose, None)
         self.assertFalse(np.allclose(d, e), "no-seed noise was identical across episodes")
+        env.close()
+
+
+class TestScanOnReset(unittest.TestCase):
+    """Pins ISSUES_PLAN.md #15: reset() runs a LiDAR sweep, without collision adjudication."""
+
+    def test_first_scan_is_populated_and_reproducible(self):
+        env = gym.make("f1tenth_gym:f1tenth-v0", config=EnvConfig(render_enabled=False))
+        obs, _ = env.reset(seed=42)
+        scan = obs["agent_0"]["scan"]
+        self.assertTrue((scan > 0).any(), "reset scan is still all zeros")
+        obs2, _ = env.reset(seed=42)
+        np.testing.assert_array_equal(obs2["agent_0"]["scan"], scan)
+        env.close()
+
+    def test_states_reset_keeps_velocity_and_no_collision(self):
+        # A spawn pose is a given, not a crash: the reset sweep must not run the
+        # wall check, or a full-state reset would get _halt_on_collision'ed.
+        env = gym.make("f1tenth_gym:f1tenth-v0", config=EnvConfig(render_enabled=False))
+        state = np.zeros((1, 7), dtype=np.float32)
+        state[0, :2] = [-0.044, -0.849]
+        state[0, 3] = 5.0
+        obs, _ = env.reset(options={"states": state})
+        self.assertAlmostEqual(float(obs["agent_0"]["std_state"][3]), 5.0, places=5)
+        self.assertEqual(float(obs["agent_0"]["collision"]), 0.0)
         env.close()
