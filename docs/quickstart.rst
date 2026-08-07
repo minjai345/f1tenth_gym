@@ -136,9 +136,9 @@ documented in :doc:`actions`.
 
 .. warning::
 
-   Both columns are ``float32``, so swapping them fails **silently** -- the car
-   just drives wrong. If your car spins or refuses to move, check that steering
-   is in column 0.
+   Both columns are ``float32`` with overlapping valid ranges, so a transposed
+   action is still a valid action -- the simulator cannot detect the swap and
+   executes it. If your car spins or refuses to move, check column 0 first.
 
 Reading the ego observation
 ---------------------------
@@ -194,7 +194,7 @@ The three classic traps
       ``SimulationConfig(max_laps=None)`` for an endless episode.
 
    2. **Steering is action column 0.** The layout is ``[steering, longitudinal]``.
-      Because both are ``float32``, a swap fails silently.
+      Both columns are ``float32``, so a swap is undetectable.
 
    3. **``DIRECT`` has no ``pose_x``.** ``pose_x`` / ``pose_y`` / ``pose_theta``
       are *derived* fields absent from the default ``DIRECT`` set --

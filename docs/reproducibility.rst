@@ -146,9 +146,9 @@ seed passed to either ``rollout`` call and the trajectories differ.
 .. warning::
 
    The action layout is ``[steering, longitudinal]`` — **steering is
-   column 0**. Both columns are float32, so swapping them fails silently
-   rather than raising. For a single agent, pass
-   ``np.array([[steer, speed]], dtype=np.float32)``.
+   column 0**. Both columns are float32 with overlapping valid ranges, so a
+   transposed action is still a valid one and is executed faithfully. For a
+   single agent, pass ``np.array([[steer, speed]], dtype=np.float32)``.
 
 .. note::
 

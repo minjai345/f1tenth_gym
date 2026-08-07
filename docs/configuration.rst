@@ -201,7 +201,8 @@ semantics are covered in :doc:`rewards_and_rl`.
 
    The action array is always ``shape=(num_agents, 2)`` with columns
    ``[steering, longitudinal]`` — **steering is column 0**. Both columns are
-   ``float32``, so swapping them fails silently. Single agent:
+   ``float32`` with overlapping valid ranges, so a transposed action is
+   executed rather than rejected. Single agent:
    ``np.array([[steer, speed]], dtype=np.float32)``.
 
 ``SimulationConfig``
