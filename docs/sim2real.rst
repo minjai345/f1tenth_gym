@@ -135,8 +135,8 @@ long training run.
 
 The randomized values reach the physics but not the config: ``env.vehicle_params``
 and ``env.env_config.params`` keep reporting the nominal 3.74 kg while the
-kernels integrate 3.144. **The ground truth for what the car currently is is
-``sim.params_array``.**
+kernels integrate 3.144. The ground truth for what the car currently is is
+``sim.params_array``.
 
 Randomizing actuation limits — ``v_max``, ``s_max``, ``sv_max``, ``a_max`` and
 their minima — is supported. Gymnasium requires the action and observation

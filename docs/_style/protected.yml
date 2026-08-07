@@ -53,7 +53,7 @@ spawn_span_measured:
   note: '* the current simulation state, * the action you pass to :func:`step`, and * the random dr...'
   page: reproducibility.rst
 timestep_multiple:
-  hash: 421e388feba7bb2b
+  hash: d5cd5cf96e1110ba
   note: '``timestep`` must be an exact multiple of ``integrator_timestep``; the ratio sets the numb...'
   page: configuration.rst
 uv_sync_prunes:

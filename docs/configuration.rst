@@ -395,7 +395,7 @@ did-you-pass-degrees hint.
        raising beams past that buys nothing.
    * - ``field_of_view``
      - ``4.712389`` (270°)
-     - Total FOV in radians; ``> 0``. Derived from the angles — see below.
+     - Total FOV in radians; ``> 0``. Derived from ``angle_max - angle_min``.
    * - ``angle_min``
      - ``None``
      - ``None`` materialises to ``-field_of_view/2``; must be ``>= -π``.
