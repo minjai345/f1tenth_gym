@@ -171,6 +171,9 @@ class F110Env(gym.Env):
         cfg = self.env_config
 
         self.seed = cfg.seed
+        # re-armed on every (re)configure: a fresh config seed covers the next
+        # unseeded reset again
+        self._config_seed_used = False
         self.map = cfg.map_name
         self.map_scale = cfg.map_scale
 
@@ -512,6 +515,12 @@ class F110Env(gym.Env):
             done (bool): if the simulation is done
             info (dict): auxillary information dictionary
         """
+        # EnvConfig.seed covers the FIRST unseeded reset, so a whole run is a
+        # deterministic function of the config; later unseeded resets continue
+        # the stream (episodes still differ). An explicit seed always wins.
+        if seed is None and self.seed is not None and not self._config_seed_used:
+            seed = int(self.seed)
+        self._config_seed_used = True
         super().reset(seed=seed)
 
         self.sim_time = 0.0

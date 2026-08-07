@@ -119,6 +119,12 @@ class F110Simulator:
         self._steer_noise_std = float(cc.steer_noise_std)
         self._accl_noise_std = float(cc.accl_noise_std)
         self._throttle_delay_steps = int(cc.throttle_delay_steps)
+        # A None seed (EnvConfig.seed unset) still needs a concrete int here:
+        # the per-agent scan RNGs below are derived as seed + agent_index, and
+        # reset(noise_seed=None) falls back to self.seed the same way.
+        if self.seed is None:
+            self.seed = int(np.random.SeedSequence().generate_state(1)[0])
+            seed = self.seed
         self.control_rng = np.random.default_rng(seed)  # command-noise stream
         if self._throttle_delay_steps > 0:
             self._throttle_buffer = np.zeros((self.num_agents, self._throttle_delay_steps), dtype=np.float32)

@@ -410,7 +410,12 @@ class EnvConfig:
     """Main configuration for the F1TENTH environment.
 
     Attributes:
-        seed: Random seed for reproducibility.
+        seed: Optional seed making a whole run deterministic: the first
+            unseeded ``reset()`` behaves as ``reset(seed=seed)``, and every
+            later unseeded reset continues that stream. An explicit
+            ``reset(seed=...)`` always wins. ``None`` (default) seeds from OS
+            entropy. Caution: vectorized sub-envs sharing one config share the
+            seed and will produce identical rollouts — seed per sub-env there.
         map_name: Track name, path, or Track instance.
         map_scale: Scale factor for the map.
         params: Vehicle physical parameters.
@@ -429,7 +434,7 @@ class EnvConfig:
         render_enabled: Whether rendering is enabled.
     """
 
-    seed: int = 12345
+    seed: Optional[int] = None
     map_name: "Track | str" = "Spielberg"
     map_scale: float = 1.0
     params: VehicleParameters = F1TENTH_VEHICLE_PARAMETERS
@@ -453,7 +458,8 @@ class EnvConfig:
         if not isinstance(self.params, VehicleParameters):
             raise TypeError("params must be a VehicleParameters instance")
 
-        object.__setattr__(self, "seed", int(self.seed))
+        if self.seed is not None:
+            object.__setattr__(self, "seed", int(self.seed))
         object.__setattr__(self, "map_scale", float(self.map_scale))
         object.__setattr__(self, "num_agents", int(self.num_agents))
         object.__setattr__(self, "ego_index", int(self.ego_index))
