@@ -261,6 +261,11 @@ class F110Simulator:
                     ),
                     dtype=np.float32,
                 )
+
+        # One LiDAR sweep so the first observation is not all zeros (#15).
+        if self.scan_enabled:
+            self._update_scans(flag_collisions=False)
+
     def step(self, control_inputs: np.ndarray) -> None:
         """Advance simulation by one timestep.
 
@@ -605,11 +610,16 @@ class F110Simulator:
             ))
         return verts
 
-    def _update_scans(self) -> None:
+    def _update_scans(self, *, flag_collisions: bool = True) -> None:
         # Precompute collision vertices once (reused by the ray_cast loop and _update_agent_collisions)
         self._all_vertices = self._compute_all_vertices()
         all_vertices = self._all_vertices
-        wall_collision_enabled = self.collision_check_mode is not CollisionCheckMode.NONE
+        # flag_collisions=False fills the scans without adjudicating wall contact:
+        # a spawn pose is a given, not a crash, and halting there would zero the
+        # velocity of an options={"states": ...} reset.
+        wall_collision_enabled = (
+            flag_collisions and self.collision_check_mode is not CollisionCheckMode.NONE
+        )
 
         for agent_idx, simulator in enumerate(self.scan_sims):
             pose = self.state.poses[agent_idx]
