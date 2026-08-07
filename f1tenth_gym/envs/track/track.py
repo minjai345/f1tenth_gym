@@ -239,12 +239,16 @@ class Track:
     @staticmethod
     def from_track_path(path: pathlib.Path, track_scale: float = 1.0) -> Track:
         """
-        Load track from track path.
+        Load track from a track directory, a path stem, or a map YAML file.
 
         Parameters
         ----------
         path : pathlib.Path
-            path to the track yaml file
+            any of: the track directory (``maps/Spielberg``), a stem inside it
+            (``maps/Spielberg/Spielberg``), or the map YAML itself
+            (``maps/Spielberg/Spielberg.yaml``, legacy ``..._map.yaml``)
+        track_scale : float, optional
+            scale of the track, by default 1.0
 
         Returns
         -------
@@ -257,12 +261,24 @@ class Track:
             if the track cannot be loaded
         """
         try:
-            if type(path) is str:
-                path = pathlib.Path(path)
+            path = pathlib.Path(path)
+            if path.suffix in (".yaml", ".yml"):
+                track_dir = path.parent
+                stem = path.stem[: -len("_map")] if path.stem.endswith("_map") else path.stem
+                candidates = [path]
+            else:
+                track_dir = path if path.is_dir() else path.parent
+                stem = path.name if path.is_dir() else path.stem
+                candidates = [
+                    track_dir / f"{stem}.yaml",
+                    track_dir / f"{stem}_map.yaml",
+                ]
+            yaml_path = next((c for c in candidates if c.exists()), None)
+            if yaml_path is None:
+                tried = ", ".join(str(c) for c in candidates)
+                raise FileNotFoundError(f"no map YAML for '{path}' (tried: {tried})")
 
-            track_spec = Track.load_spec(
-                track=path.stem, filespec=path.parent / f"{path.stem}_map.yaml"
-            )
+            track_spec = Track.load_spec(track=stem, filespec=str(yaml_path))
             track_spec.resolution = track_spec.resolution * track_scale
             track_spec.origin = (
                 track_spec.origin[0] * track_scale,
@@ -271,35 +287,37 @@ class Track:
             )
 
             # load occupancy grid
-            # Image path is from path + image name from track_spec
-            image_path = path.parent / track_spec.image  
+            image_path = track_dir / track_spec.image
             image = Image.open(image_path).transpose(Transpose.FLIP_TOP_BOTTOM)
             occupancy_map = np.array(image).astype(np.float32)
             occupancy_map[occupancy_map <= 128] = 0.0
             occupancy_map[occupancy_map > 128] = 255.0
-            
+
             # if exists, load centerline
-            if (path.parent / f"{path.stem}_centerline.csv").exists():
-                centerline = Raceline.from_centerline_file(path.parent / f"{path.stem}_centerline.csv",
+            if (track_dir / f"{stem}_centerline.csv").exists():
+                centerline = Raceline.from_centerline_file(track_dir / f"{stem}_centerline.csv",
                                                            track_scale=track_scale,)
             else:
                 centerline = None
 
             # if exists, load raceline
-            if (path.parent / f"{path.stem}_raceline.csv").exists():
-                raceline = Raceline.from_raceline_file(path.parent / f"{path.stem}_raceline.csv",
+            if (track_dir / f"{stem}_raceline.csv").exists():
+                raceline = Raceline.from_raceline_file(track_dir / f"{stem}_raceline.csv",
                                                        track_scale=track_scale,)
             else:
                 raceline = centerline
-                
+
+            if centerline is None and raceline is None:
+                raise ValueError(
+                    f"no reference line in {track_dir}: neither '{stem}_centerline.csv' "
+                    f"nor '{stem}_raceline.csv' exists"
+                )
             if centerline is None:
                 centerline = raceline
-            if raceline is None and centerline is None:
-                raise ValueError("Please provide a centerline/raceline.")
 
             return Track(
                 spec=track_spec,
-                filepath=str(path.absolute()),
+                filepath=str((track_dir / stem).absolute()),
                 ext=image_path.suffix,
                 occupancy_map=occupancy_map,
                 centerline=centerline,
