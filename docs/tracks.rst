@@ -175,6 +175,6 @@ See also
 --------
 
 - :doc:`observations` — where ``frenet_pose`` and pose fields appear in the observation dict.
-- :doc:`rewards_and_rl` — PROGRESS reward uses the Frenet ``s`` and requires ``compute_frenet_frame=True``.
+- :doc:`rl` — PROGRESS reward uses the Frenet ``s`` and requires ``compute_frenet_frame=True``.
 - :doc:`reproducibility` — how reset strategies spawn agents on the raceline.
 - :doc:`api/index` — full ``Track`` / ``Raceline`` reference.

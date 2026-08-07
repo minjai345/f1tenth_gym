@@ -208,7 +208,7 @@ returns a new instance:
 
 Then place the modified parameters on the environment config via
 ``params=...``. For per-episode randomization of parameters instead, see the
-domain-randomization interface in :doc:`rewards_and_rl`.
+domain-randomization interface in :doc:`rl`.
 
 Integrators & timestep
 -----------------------
@@ -301,4 +301,4 @@ See also
 - :doc:`observations` — how ``state``, ``std_state``, and derived pose/velocity
   fields are produced from the model state.
 - :doc:`actions` — how commanded steering/speed map through the vehicle limits.
-- :doc:`rewards_and_rl` — per-episode vehicle-parameter randomization.
+- :doc:`sim2real` — per-episode vehicle-parameter randomization.

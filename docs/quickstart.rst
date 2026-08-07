@@ -102,7 +102,7 @@ lone ``done``:
 
 - ``obs`` -- the observation dict (see below).
 - ``reward`` -- a float. With the default reward mode it is the physics
-  timestep (``0.01``), i.e. pure survival time. See :doc:`rewards_and_rl`.
+  timestep (``0.01``), i.e. pure survival time. See :doc:`rl`.
 - ``terminated`` -- ``True`` on a collision (default) or when the lap target is
   reached.
 - ``truncated`` -- driven by an optional step limit; ``False`` by default (no

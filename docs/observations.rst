@@ -9,7 +9,7 @@ declare.
 
 For how to *reconfigure* the observation type on a live env, see
 :doc:`configuration`; for flattening the observation into a normalisable
-``Box`` suitable for RL, see :doc:`rewards_and_rl`.
+``Box`` suitable for RL, see :doc:`rl`.
 
 Structure
 ---------
@@ -225,7 +225,7 @@ Because the space is finite (not the old blanket ``±1e30``), it passes
 gymnasium's ``check_env`` and can be flattened and normalised. Compose
 ``gymnasium.wrappers.FlattenObservation`` (typically after
 ``SingleAgentWrapper`` for a single-agent env) to obtain a flat, finite
-``Box`` — see :doc:`rewards_and_rl`.
+``Box`` — see :doc:`rl`.
 
 .. code-block:: python
 
