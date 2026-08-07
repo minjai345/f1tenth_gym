@@ -27,9 +27,11 @@ occupancy_semantics:
     unknown band free, legacy 128 cut via occupied_thresh: 0.495. Replaced occupancy_polarity
     when #1 landed (75e9822): the hard-coded-128 warning it protected became false.'
   page: tracks.rst
-pid_steer_bangbang:
-  hash: 73d14ca6639af340
-  note: Under ``STEERING_ANGLE`` the target angle is realised by :func:`~f1tenth_gym.envs.dynamic_...
+pid_steer_p_controller:
+  hash: db6ba05a38b29de9
+  note: 'pid_steer is a saturated P controller (steer_kp knob, kp<=0 = legacy relay
+    that limit-cycles by ~sv_max*dt). Replaced pid_steer_bangbang when #16 landed
+    (2dd024e): the bang-bang warning it protected became false.'
   page: actions.rst
 progress_formula:
   hash: 0a5792bf19c67405

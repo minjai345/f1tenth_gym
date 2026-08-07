@@ -92,14 +92,15 @@ The meaning of column 0 is set by
      - Direct steering angular velocity in rad/s, passed through unchanged
      - ``[sv_min, sv_max]``
 
-.. warning::
-
-   Under ``STEERING_ANGLE`` the target angle is realised by
-   :func:`~f1tenth_gym.envs.dynamic_models.utils.pid_steer`, which despite its
-   name is **not a PID controller — it is bang-bang**. Whenever the angle error
-   exceeds ``1e-4`` rad it commands the full ``±sv_max`` steering velocity toward
-   the target, and zero otherwise. Expect the steering rate to slam to its limit
-   rather than ramp smoothly.
+Under ``STEERING_ANGLE`` the target angle is realised by
+:func:`~f1tenth_gym.envs.dynamic_models.utils.pid_steer`, a saturated
+proportional controller: ``sv = clip(kp * error, -sv_max, sv_max)``. The gain
+comes from ``ControlConfig.steer_kp`` — ``None`` (the default) derives
+``10 * sv_max / (s_max - s_min)`` from the vehicle limits, and any value
+``<= 0`` selects the legacy bang-bang relay, which slams the full ``±sv_max``
+at any error above ``1e-4`` rad and therefore limit-cycles around the target
+by about ``sv_max * timestep`` (0.032 rad at the defaults) instead of
+settling.
 
 Under ``STEERING_SPEED`` the command is the steering angular velocity directly
 (:func:`~f1tenth_gym.envs.action.steering_speed_action` is the identity).
