@@ -386,10 +386,12 @@ class Track:
         map_width = (max_x - min_x) + 2 * margin
         map_height = (max_y - min_y) + 2 * margin
 
+        # rows are world y (height), columns world x (width) -- set_map reads
+        # height = shape[0], width = shape[1]
         occupancy_map = 255.0 * np.ones(
             (
-                int(map_width / resolution),
                 int(map_height / resolution),
+                int(map_width / resolution),
             ),
             dtype=np.float32,
         )
@@ -438,10 +440,11 @@ class Track:
         min_y, max_y = np.min(ys), np.max(ys)
         x_range = max_x - min_x
         y_range = max_y - min_y
+        # rows are world y (height), columns world x (width), as above
         occupancy_map = 255.0 * np.ones(
             (
-                int((1 + 2 * margin_perc) * x_range / resolution),
                 int((1 + 2 * margin_perc) * y_range / resolution),
+                int((1 + 2 * margin_perc) * x_range / resolution),
             ),
             dtype=np.float32,
         )
