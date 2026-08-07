@@ -448,6 +448,24 @@ class DynamicModel(IntEnum):
     def parameter_count(self) -> int:
         return _MB_PARAMETER_COUNT if self is DynamicModel.MB else _BASE_PARAMETER_COUNT
 
+    def velocity_indices(self) -> tuple[int, ...]:
+        """State indices holding velocities/rates — what a collision halt zeroes.
+
+        Pose-like states (positions, angles, ride heights, tire deflections)
+        are deliberately absent: zeroing MB's z-heights breaks the suspension
+        math with a divide-by-zero on the next step.
+        """
+        if self is DynamicModel.KS:
+            return (3,)
+        elif self is DynamicModel.ST:
+            return (3, 5, 6)
+        elif self is DynamicModel.MB:
+            # vx, yaw/roll/pitch rates, vy, vz, front/rear rates and vy/vz,
+            # four wheel speeds
+            return (3, 5, 7, 9, 10, 12, 14, 15, 17, 19, 20, 22, 23, 24, 25, 26)
+        else:
+            raise ValueError(f"no velocity indices for model {self!r}")
+
     @staticmethod
     def from_string(model: str):
         if model == "ks":

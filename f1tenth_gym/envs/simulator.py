@@ -576,16 +576,18 @@ class F110Simulator:
     def _halt_on_collision(self, agent_idx: int) -> None:
         """Stop a car that has collided and flag it.
 
-        Zero the linear and angular velocities but KEEP the pose. Both the
-        ``state`` and ``standard_state`` layouts are ``[x/X, y/Y, delta/steer,
-        v/speed, yaw, yaw_rate, beta]`` (KS omits the last two), so index 3 is
-        the velocity and index 4 is the yaw. The old code did ``state[3:] = 0``,
-        which also wiped the yaw (index 4) — snapping the heading to 0 (east) —
-        and left standard_state stale so the two disagreed after a collision.
+        Zero the velocities and rates but KEEP every pose-like state. The
+        indices come from ``model.velocity_indices()`` — a blanket ``[5:] = 0``
+        would wipe MB's roll/pitch angles and ride heights (indices 5-28) and
+        divide-by-zero the suspension math on the next step. ``standard_state``
+        is always ``[X, Y, steer, speed, yaw, yaw_rate, beta]``, so its speed
+        (3) and rates (5:) zero unconditionally; yaw at [4] is preserved in
+        both buffers (the old ``state[3:] = 0`` snapped the heading to east).
         """
-        for buf in (self.state.state, self.state.standard_state):
-            buf[agent_idx, 3] = 0.0    # velocity
-            buf[agent_idx, 5:] = 0.0   # yaw_rate, slip angle (no-op for KS); yaw at [4] preserved
+        for i in self.model.velocity_indices():
+            self.state.state[agent_idx, i] = 0.0
+        self.state.standard_state[agent_idx, 3] = 0.0
+        self.state.standard_state[agent_idx, 5:] = 0.0
         self.state.collisions[agent_idx] = 1.0
 
     def _push_throttle_delay(self, values: np.ndarray) -> np.ndarray:
