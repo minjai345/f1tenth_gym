@@ -1,9 +1,96 @@
 import pathlib
+import shutil
+import tempfile
 import time
 import unittest
+import warnings
 
 import numpy as np
 from f1tenth_gym.envs.track import Raceline, Track, find_track_dir
+
+
+class TestTrackLoader(unittest.TestCase):
+    """Pins ISSUES_PLAN.md #2: the loaders accept every shipped layout and fail loudly."""
+
+    def test_from_track_path_accepts_dir_stem_and_yaml(self):
+        ref = Track.from_track_name("Spielberg")
+        track_dir = find_track_dir("Spielberg")
+        for arg in (track_dir, track_dir / "Spielberg", track_dir / "Spielberg.yaml"):
+            track = Track.from_track_path(arg)
+            self.assertEqual(track.spec.resolution, ref.spec.resolution, arg)
+            self.assertIsNotNone(track.centerline, arg)
+            self.assertTrue(np.isclose(track.raceline.xs, ref.raceline.xs).all(), arg)
+
+    def test_from_track_path_legacy_map_yaml(self):
+        src = find_track_dir("Spielberg")
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = pathlib.Path(tmp)
+            shutil.copy(src / "Spielberg.png", tmp / "Legacy.png")
+            (tmp / "Legacy_map.yaml").write_text(
+                (src / "Spielberg.yaml").read_text().replace("Spielberg.png", "Legacy.png")
+            )
+            shutil.copy(src / "Spielberg_raceline.csv", tmp / "Legacy_raceline.csv")
+            track = Track.from_track_path(tmp / "Legacy_map.yaml")
+            # the "_map" suffix must not leak into the stem used for the CSVs
+            self.assertIsNotNone(track.raceline)
+            self.assertEqual(track.spec.name, "Legacy")
+
+    def test_from_track_path_missing(self):
+        self.assertRaises(FileNotFoundError, Track.from_track_path, "maps/i_dont_exist")
+
+    def test_load_spec_missing_required_key(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            spec_file = pathlib.Path(tmp) / "bad.yaml"
+            spec_file.write_text("image: x.png\norigin: [0, 0, 0]\n")
+            with self.assertRaisesRegex(ValueError, "resolution"):
+                Track.load_spec(track="bad", filespec=str(spec_file))
+
+    def test_load_spec_rejects_unsupported_semantics(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            spec_file = pathlib.Path(tmp) / "bad.yaml"
+            base = "image: x.png\nresolution: 0.05\norigin: [0, 0, 0]\n"
+            spec_file.write_text(base + "negate: 1\n")
+            with self.assertRaisesRegex(ValueError, "negate"):
+                Track.load_spec(track="bad", filespec=str(spec_file))
+            spec_file.write_text(base + "mode: raw\n")
+            with self.assertRaisesRegex(ValueError, "mode"):
+                Track.load_spec(track="bad", filespec=str(spec_file))
+
+    def test_load_spec_ros_defaults_and_unknown_key_warning(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            spec_file = pathlib.Path(tmp) / "ros.yaml"
+            spec_file.write_text(
+                "image: x.png\nresolution: 0.05\norigin: [0, 0, 0]\nmode: trinary\nfoo: 1\n"
+            )
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                spec = Track.load_spec(track="ros", filespec=str(spec_file))
+            self.assertEqual(len(caught), 1)
+            self.assertIn("foo", str(caught[0].message))
+            self.assertEqual(spec.negate, 0)
+            self.assertEqual(spec.occupied_thresh, 0.65)
+            self.assertEqual(spec.free_thresh, 0.196)
+
+    def test_from_track_name_raceline_only_falls_back(self):
+        src = find_track_dir("Spielberg")
+        tmp = src.parent / "Fallback_tmp"
+        shutil.rmtree(tmp, ignore_errors=True)
+        tmp.mkdir()
+        try:
+            shutil.copy(src / "Spielberg.png", tmp / "Fallback_tmp.png")
+            (tmp / "Fallback_tmp.yaml").write_text(
+                (src / "Spielberg.yaml").read_text().replace("Spielberg.png", "Fallback_tmp.png")
+            )
+            shutil.copy(src / "Spielberg_raceline.csv", tmp / "Fallback_tmp_raceline.csv")
+            track = Track.from_track_name("Fallback_tmp")
+            self.assertIsNotNone(track.centerline)
+            self.assertIs(track.centerline, track.raceline)
+
+            (tmp / "Fallback_tmp_raceline.csv").unlink()
+            with self.assertRaisesRegex(ValueError, "no reference line"):
+                Track.from_track_name("Fallback_tmp")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
 
 
 class TestTrack(unittest.TestCase):
