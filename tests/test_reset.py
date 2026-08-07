@@ -65,3 +65,50 @@ class TestResetConfig(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestReferenceLineAndStartWidth(unittest.TestCase):
+    """Pins ISSUES_PLAN.md #13 (centerline resets) and #27 (start_width clamp)."""
+
+    def test_centerline_spawn_has_zero_ey(self):
+        from f1tenth_gym.envs.reset import ReferenceLine
+
+        env = gym.make(
+            "f1tenth_gym:f1tenth-v0",
+            config=EnvConfig(
+                reset_config=ResetConfig(reference_line=ReferenceLine.CENTERLINE),
+                render_enabled=False,
+            ),
+        )
+        obs, _ = env.reset(seed=42)
+        self.assertAlmostEqual(float(obs["agent_0"]["frenet_pose"][1]), 0.0, places=3)
+        env.close()
+
+    def test_default_spawn_still_on_raceline(self):
+        env = gym.make(
+            "f1tenth_gym:f1tenth-v0", config=EnvConfig(render_enabled=False)
+        )
+        obs, _ = env.reset(seed=42)
+        self.assertGreater(abs(float(obs["agent_0"]["frenet_pose"][1])), 0.5)
+        env.close()
+
+    def test_grid_reset_survives_map_scale_ten(self):
+        # pre-clamp this crashed on the first reset: the 1 m window held zero
+        # waypoints once map_scale stretched the spacing past 1 m
+        env = gym.make(
+            "f1tenth_gym:f1tenth-v0",
+            config=EnvConfig(map_scale=10.0, render_enabled=False),
+        )
+        env.reset(seed=42)
+        env.close()
+
+    def test_start_width_widens_the_grid_window(self):
+        from f1tenth_gym.envs.reset import ResetStrategy, make_reset_fn
+        from f1tenth_gym.envs.track import Track
+
+        track = Track.from_track_name("Spielberg")
+        narrow = make_reset_fn(track=track, num_agents=1, type=ResetStrategy.RL_GRID_STATIC)
+        wide = make_reset_fn(
+            track=track, num_agents=1, type=ResetStrategy.RL_GRID_STATIC, start_width=5.0
+        )
+        self.assertGreater(int(wide.mask.sum()), int(narrow.mask.sum()) * 3)

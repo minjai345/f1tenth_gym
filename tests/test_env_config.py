@@ -219,6 +219,33 @@ class TestResetConfigValidation(unittest.TestCase):
         updated = cfg.with_updates(strategy=ResetStrategy.RL_RANDOM_STATIC)
         self.assertNotEqual(cfg.strategy, updated.strategy)
 
+    def test_reference_line_and_start_width_validation(self):
+        """ISSUES_PLAN.md #13/#27: the new fields validate against the strategy."""
+        from f1tenth_gym.envs.reset import ReferenceLine, ResetStrategy
+
+        ResetConfig(reference_line=ReferenceLine.CENTERLINE)
+        ResetConfig(start_width=5.0)
+        with self.assertRaisesRegex(ValueError, "MAP strategies"):
+            ResetConfig(
+                reference_line=ReferenceLine.CENTERLINE,
+                strategy=ResetStrategy.MAP_RANDOM_STATIC,
+            )
+        with self.assertRaisesRegex(ValueError, "GRID strategies"):
+            ResetConfig(start_width=1.0, strategy=ResetStrategy.RL_RANDOM_STATIC)
+        with self.assertRaisesRegex(ValueError, "start_width"):
+            ResetConfig(start_width=-1.0)
+        with self.assertRaises(TypeError):
+            ResetConfig(reference_line=2)
+
+    def test_reset_kwargs_forwards_new_fields(self):
+        from f1tenth_gym.envs.reset import ReferenceLine
+
+        kwargs = ResetConfig(
+            reference_line=ReferenceLine.CENTERLINE, start_width=3.0
+        ).reset_kwargs()
+        self.assertEqual(kwargs["reference_line"], ReferenceLine.CENTERLINE)
+        self.assertEqual(kwargs["start_width"], 3.0)
+
 
 class TestLiDARConfigValidation(unittest.TestCase):
     """Tests for LiDARConfig validation."""
