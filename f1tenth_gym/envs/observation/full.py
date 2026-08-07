@@ -4,33 +4,14 @@ import gymnasium as gym
 import numpy as np
 
 from .base import Observation, scan_space
+from .fields import ALL_FIELDS, BASE_FIELDS, DERIVED_FIELDS
 
 __all__ = ["FullObservation"]
 
-_BASE_FIELDS: tuple[str, ...] = (
-    "scan",
-    "std_state",
-    "state",
-    "collision",
-    "lap_time",
-    "lap_count",
-    "sim_time",
-    "frenet_pose",
-)
-
-_DERIVED_FIELDS: tuple[str, ...] = (
-    "pose_x",
-    "pose_y",
-    "pose_theta",
-    "linear_vel_x",
-    "linear_vel_y",
-    "linear_vel_magnitude",
-    "ang_vel_z",
-    "delta",
-    "beta",
-)
-
-_ALL_FIELDS = set(_BASE_FIELDS) | set(_DERIVED_FIELDS)
+# the single vocabulary lives in fields.py, shared with the factory
+_BASE_FIELDS = BASE_FIELDS
+_DERIVED_FIELDS = DERIVED_FIELDS
+_ALL_FIELDS = set(ALL_FIELDS)
 
 
 def _scalar_box(low: float, high: float) -> gym.Space:
