@@ -1,306 +1,328 @@
 Configuration
 =============
 
-Every :class:`~f1tenth_gym.envs.f110_env.F110Env` is built from a single
-configuration object: an :class:`~f1tenth_gym.envs.env_config.EnvConfig`. This
-fork has **no dict/YAML config and no keyword soup** — you pass one typed,
-validated object and get one environment. This page is the central reference for
-every field, its default, and its allowed values.
+:class:`~f1tenth_gym.envs.f110_env.F110Env` takes exactly one constructor
+argument — a frozen :class:`~f1tenth_gym.envs.env_config.EnvConfig` — and
+anything else (a dict, ``None``, loose keyword arguments) raises ``TypeError``.
+Every default is readable off the config object before an environment exists,
+and so is the type check on each of the nine nested sections:
 
-.. code-block:: python
+>>> from f1tenth_gym.envs.env_config import EnvConfig
+>>> cfg = EnvConfig()
+>>> cfg.num_agents, cfg.map_name, cfg.seed
+(1, 'Spielberg', None)
+>>> EnvConfig(control_config={"steer_delay_steps": 2})
+Traceback (most recent call last):
+    ...
+TypeError: control must be a ControlConfig instance
 
-    import gymnasium as gym
-    from f1tenth_gym.envs.env_config import EnvConfig
+The error names each section by a short name (``control``), not by the actual
+keyword argument (``control_config``).
 
-    env = gym.make("f1tenth_gym:f1tenth-v0", config=EnvConfig())
-    obs, info = env.reset(seed=42)
+Top-level fields
+----------------
 
-Passing anything other than an ``EnvConfig`` instance (a dict, ``None``, keyword
-args) raises ``TypeError`` — there is no fallback config path.
-
-The frozen-dataclass philosophy
---------------------------------
-
-``EnvConfig`` and all of its nested sections are **frozen dataclasses**. You
-never mutate a config in place; instead you derive a new one with
-``with_updates(**changes)``, which returns a fresh, re-validated copy:
-
-.. code-block:: python
-
-    from f1tenth_gym.envs.env_config import EnvConfig
-
-    base = EnvConfig()
-    two_agents = base.with_updates(num_agents=2)   # base is untouched
-
-Two properties follow from this design:
-
-**Validation runs in ``__post_init__``.** Constructing (or ``with_updates``-ing)
-a config immediately coerces types (e.g. ``seed``/``num_agents`` to ``int``,
-``map_scale`` to ``float``) and raises on invalid combinations — so a bad config
-fails at construction time, not deep inside ``step()``. Examples of enforced
-rules: ``num_agents >= 1``; ``0 <= ego_index < num_agents``; ``map_scale > 0``;
-each nested section must be an instance of its own class (not a dict).
-
-**Nested mutation must nest.** ``with_updates`` only replaces top-level fields.
-To change a field inside a nested section, rebuild that section too:
-
-.. code-block:: python
-
-    from f1tenth_gym.envs.env_config import EnvConfig
-
-    cfg = EnvConfig()
-    cfg = cfg.with_updates(
-        simulation_config=cfg.simulation_config.with_updates(max_laps=None),
-    )
-
-.. note::
-
-   The default ``max_laps=1`` ends the episode after a **single lap**
-   (``terminated=True``). For endless rollouts (RL training, long evaluations)
-   set ``SimulationConfig(max_laps=None)`` as shown above.
-
-Reconfiguring a live environment
---------------------------------
-
-You can swap the entire config on an already-constructed env with
-``env.unwrapped.configure(new_cfg)``. This rebuilds the affected components
-(track, simulator, spaces, reset function, renderer) to match the new config:
-
-.. code-block:: python
-
-    import gymnasium as gym
-    from f1tenth_gym.envs.env_config import EnvConfig
-
-    env = gym.make("f1tenth_gym:f1tenth-v0", config=EnvConfig())
-    env.reset(seed=0)
-
-    new_cfg = env.unwrapped.env_config.with_updates(
-        params=env.unwrapped.env_config.params.with_updates(mu=1.0),
-    )
-    env.unwrapped.configure(new_cfg)
-    env.reset(seed=0)   # reset after reconfiguring
-
-Top-level ``EnvConfig`` fields
-------------------------------
-
-``EnvConfig`` has 17 fields. The eight nested-config fields are documented in
-their own subsections below.
+``EnvConfig`` declares 17 fields; nine of them are config objects with a
+section of their own further down.
 
 .. list-table::
    :header-rows: 1
-   :widths: 26 40 34
+   :widths: 25 28 47
 
    * - Field
      - Default
-     - Meaning
+     - Meaning / validation
    * - ``seed``
-     - ``12345``
-     - Base random seed (coerced to ``int``). See :doc:`reproducibility` — note
-       this seed feeds the sim's noise RNGs; ``reset(seed=...)`` controls the
-       spawn/gymnasium RNG.
+     - ``None``
+     - Coerced to ``int`` when set; the first *unseeded* ``reset()`` then
+       behaves as ``reset(seed=seed)``, making the whole run a function of
+       the config. An explicit ``reset(seed=...)`` always wins, and ``None``
+       seeds from OS entropy. See :doc:`reproducibility`.
    * - ``map_name``
      - ``"Spielberg"``
-     - Track name (auto-downloaded), a path, or a ``Track`` instance. See
-       :doc:`tracks`.
+     - A track name (downloaded on first use), a path — track directory,
+       stem, or YAML file, in either naming convention — or a prebuilt
+       ``Track`` instance, the fast path for vectorized envs. Not validated
+       here; a bad value fails at ``gym.make``. See :doc:`tracks`.
    * - ``map_scale``
      - ``1.0``
-     - Scale factor for the map (must be ``> 0``).
+     - Coerced to ``float``; must be ``> 0``. The shipped maps are 1/10
+       scale; the full-size MB vehicle needs ``map_scale=10.0``
+       (:doc:`dynamics`).
    * - ``params``
      - ``F1TENTH_VEHICLE_PARAMETERS``
-     - A ``VehicleParameters`` instance (must be one, or ``TypeError``). See
-       :doc:`dynamics`.
+     - Must be a ``VehicleParameters`` instance — the first check to run.
+       See :doc:`dynamics`.
    * - ``num_agents``
      - ``1``
-     - Number of agents / rows (must be ``>= 1``).
+     - Coerced to ``int``; must be ``>= 1``.
    * - ``ego_index``
      - ``0``
-     - Index of the ego agent (must satisfy ``0 <= ego_index < num_agents``).
+     - Coerced to ``int``; must satisfy ``0 <= ego_index < num_agents``.
    * - ``control_config``
      - ``ControlConfig()``
-     - Action interpretation, delays, actuator noise. See below.
+     - Action interpretation, actuator lag and noise.
    * - ``simulation_config``
      - ``SimulationConfig()``
-     - Physics timestep, integrator, dynamics model, lap counting. See below.
+     - Physics clock, integrator, dynamics model, lap rule.
    * - ``observation_config``
      - ``ObservationConfig()``
-     - Observation type / field subset. See below and :doc:`observations`.
+     - Observation preset or custom field tuple.
    * - ``reset_config``
      - ``ResetConfig()``
-     - Spawn strategy and spacing. See below.
+     - Spawn strategy, spacing, reference line.
    * - ``lidar_config``
      - ``LiDARConfig()``
-     - LiDAR geometry and noise. See below.
+     - LiDAR geometry and noise.
    * - ``render_config``
      - ``RenderConfig()``
-     - Rendering pacing / frame output. See below and :doc:`rendering`.
+     - Rendering pacing and frame output.
    * - ``termination_config``
      - ``TerminationConfig()``
-     - Termination / truncation rules. See below.
+     - Termination and truncation rules.
    * - ``reward_config``
      - ``RewardConfig()``
-     - Per-step reward. See below and :doc:`rewards_and_rl`.
+     - Per-step reward.
    * - ``domain_randomization_config``
      - ``DomainRandomizationConfig()``
-     - Per-episode vehicle-param randomization. See below and
-       :doc:`rewards_and_rl`.
+     - Per-episode vehicle-parameter randomization.
    * - ``collision_check``
      - ``CollisionCheckMode.LIDAR_SCAN``
-     - Agent-vs-agent collision mode: ``LIDAR_SCAN`` (default), ``BOUNDING_BOX``
-       (O(n²) GJK), or ``NONE`` (disable collision detection). See
-       :doc:`observations`.
+     - ``LIDAR_SCAN`` / ``BOUNDING_BOX`` (O(n²) GJK, symmetric) / ``NONE``.
+       The one field with no isinstance guard, and dispatch compares enum
+       identity: a raw ``1`` selects ``BOUNDING_BOX`` and ``0`` disables
+       nothing — always pass the enum member, imported from
+       ``f1tenth_gym.envs.collision_models``.
    * - ``render_enabled``
      - ``True``
-     - Whether a renderer is constructed (coerced to ``bool``).
+     - Coerced to ``bool``. When ``False`` no renderer is built:
+       ``render()`` returns ``None`` and ``add_render_callback`` does
+       nothing, whatever ``render_mode`` was passed to ``gym.make``.
 
-All the enum defaults come from ``f1tenth_gym.envs``; import them from the
-modules referenced below (e.g. ``from f1tenth_gym.envs.collision_models import
-CollisionCheckMode``).
+Deriving a config
+-----------------
+
+Every config class is a frozen dataclass: nothing is mutated in place, and
+``with_updates(**changes)`` returns a fresh copy whose ``__post_init__``
+re-validates it. ``with_updates`` replaces only top-level fields, so changing
+a field inside a nested section means rebuilding that section too:
+
+>>> base = EnvConfig()
+>>> cfg = base.with_updates(
+...     simulation_config=base.simulation_config.with_updates(max_laps=None)
+... )
+>>> cfg.simulation_config.max_laps, base.simulation_config.max_laps
+(None, 1)
+
+The default ``max_laps=1`` terminates after a single lap; ``None`` is the
+endless-rollout setting for RL training and long evaluations.
+
+Nothing is re-exported from the package roots — ``from f1tenth_gym import
+EnvConfig`` and ``from f1tenth_gym.envs import EnvConfig`` both raise
+``ImportError``. Import from the defining modules: every class on this page
+lives in ``f1tenth_gym.envs.env_config`` except ``LiDARConfig``
+(``f1tenth_gym.envs.lidar``), and the enums come from the modules named in
+each section.
+
+When validation runs
+--------------------
+
+A constructed ``EnvConfig`` proves less than it appears to. Checks are split
+across three tiers, and only the first fires at construction time:
+
+1. Each dataclass's ``__post_init__`` — every rule quoted in the tables on
+   this page.
+2. ``F110Simulator.__init__`` — the substep rule below.
+3. Component construction inside ``gym.make`` — the reset-strategy check, the
+   action-space bounds, the observation factory (a ``FEATURES`` tuple naming
+   a dropped field raises here), and, when a renderer is built, an unknown
+   ``focus_on`` id.
+
+Tiers 2 and 3 raise from ``gym.make``, after the map has been resolved — on a
+fresh machine that includes the download.
+
+``timestep`` must be an exact multiple of ``integrator_timestep``; the ratio
+sets the number of integrator substeps taken per environment step. The check
+is validated against that ratio, so any pair that divides evenly is accepted
+— ``timestep=0.03, integrator_timestep=0.01`` gives 3 substeps. The pairing is
+checked when the simulator is built, not when the config is constructed, so an
+invalid pair raises from ``gym.make`` rather than from ``SimulationConfig``:
+
+>>> import gymnasium as gym
+>>> from f1tenth_gym.envs.env_config import SimulationConfig
+>>> cfg = EnvConfig(
+...     simulation_config=SimulationConfig(timestep=0.025, integrator_timestep=0.01)
+... )                                    # constructs: tier 1 has no ratio rule
+>>> gym.make("f1tenth_gym:f1tenth-v0", config=cfg)
+Traceback (most recent call last):
+    ...
+ValueError: timestep (0.025) must be an integer multiple of ...
 
 ``ControlConfig``
 -----------------
 
-How your action array is interpreted, plus actuation-realism knobs. Import from
-``f1tenth_gym.envs.env_config``; the enums come from
-``f1tenth_gym.envs.action``.
+The two mode fields choose what each action column means and the bounds the
+action space declares — :doc:`actions` is the column-by-column reference —
+while the delay and noise fields corrupt the command before it reaches the
+actuator (:doc:`sim2real`). Enums come from ``f1tenth_gym.envs.action``.
 
 .. list-table::
    :header-rows: 1
-   :widths: 26 26 48
+   :widths: 25 25 50
 
    * - Field
      - Default
      - Allowed values / notes
    * - ``longitudinal_mode``
      - ``LongitudinalActionType.SPEED``
-     - ``SPEED`` (action column 1 is a target speed, tracked by a PID) or
-       ``ACCL`` (column 1 is a raw acceleration).
+     - ``SPEED`` (column 1 commands a target speed, tracked by a
+       proportional controller) or ``ACCL`` (column 1 is a raw
+       acceleration).
    * - ``steering_mode``
      - ``SteerActionType.STEERING_ANGLE``
-     - ``STEERING_ANGLE`` (column 0 is a target steering angle) or
-       ``STEERING_SPEED`` (column 0 is a steering angular velocity).
+     - ``STEERING_ANGLE`` (column 0 commands a target angle, realised by a
+       saturated P controller) or ``STEERING_SPEED`` (column 0 is a steering
+       rate).
    * - ``steer_delay_steps``
      - ``0``
-     - Ring-buffer lag (in steps) on the steering command; must be ``>= 0``.
+     - Ring-buffer lag, in steps, on the steering command; ``>= 0``.
    * - ``throttle_delay_steps``
      - ``0``
-     - Ring-buffer lag on the longitudinal command; must be ``>= 0``.
+     - Ring-buffer lag on the longitudinal command; ``>= 0``.
    * - ``steer_noise_std``
      - ``0.0``
-     - Std of Gaussian noise added to the steering command each step; ``>= 0``.
+     - Std of Gaussian noise added to the steering command each step;
+       ``>= 0``. Noise is applied before the delay buffers.
    * - ``accl_noise_std``
      - ``0.0``
      - Std of Gaussian noise added to the longitudinal command each step;
        ``>= 0``.
+   * - ``steer_kp``
+     - ``None``
+     - Gain of the ``STEERING_ANGLE`` controller,
+       ``sv = clip(kp * error, -sv_max, sv_max)``. ``None`` derives
+       ``10 * sv_max / (s_max - s_min)`` (about 38.2 for F1TENTH); ``<= 0``
+       selects the legacy bang-bang relay, which limit-cycles by roughly
+       ``sv_max * timestep``. Deliberately unvalidated — any float is legal.
 
-The mode fields set the **action-space bounds and columns**. See :doc:`actions`
-for the exact bounds. All four realism knobs default to 0, so the default
-control config is byte-identical to a noiseless, lag-free actuator; the sim2real
-semantics are covered in :doc:`rewards_and_rl`.
+The delay fields are validated but not coerced to ``int``, so a fractional
+value is stored verbatim:
 
-.. warning::
-
-   The action array is always ``shape=(num_agents, 2)`` with columns
-   ``[steering, longitudinal]`` — **steering is column 0**. Both columns are
-   ``float32`` with overlapping valid ranges, so a transposed action is
-   executed rather than rejected. Single agent:
-   ``np.array([[steer, speed]], dtype=np.float32)``.
+>>> from f1tenth_gym.envs.env_config import ControlConfig
+>>> ControlConfig(steer_delay_steps=2.7).steer_delay_steps
+2.7
 
 ``SimulationConfig``
 --------------------
 
-The physics loop. Enums: ``IntegratorType`` from ``f1tenth_gym.envs.integrators``,
-``DynamicModel`` from ``f1tenth_gym.envs.dynamic_models``, ``LoopCounterMode``
-from ``f1tenth_gym.envs.env_config``.
+The physics clock, integrator, dynamics model and lap rule. Enums:
+``IntegratorType`` from ``f1tenth_gym.envs.integrators``, ``DynamicModel``
+from ``f1tenth_gym.envs.dynamic_models``, ``LoopCounterMode`` from
+``f1tenth_gym.envs.env_config``.
 
 .. list-table::
    :header-rows: 1
-   :widths: 26 26 48
+   :widths: 25 25 50
 
    * - Field
      - Default
      - Allowed values / notes
    * - ``timestep``
      - ``0.01``
-     - Sim timestep in seconds; must be ``> 0``.
+     - Sim timestep in seconds; ``> 0``. Paired with
+       ``integrator_timestep`` by the substep rule above.
    * - ``integrator_timestep``
      - ``0.01``
-     - Integration substep (can be smaller than ``timestep``); must be ``> 0``.
+     - Integration substep in seconds (may be smaller than ``timestep``);
+       ``> 0``.
    * - ``integrator``
      - ``IntegratorType.RK4``
      - ``RK4`` or ``EULER``.
    * - ``dynamics_model``
      - ``DynamicModel.ST``
-     - ``KS`` (kinematic single-track, 5-state) or ``ST`` (single-track,
-       7-state). ``MB`` (multi-body, 29-state) requires
-       ``FULLSCALE_VEHICLE_PARAMETERS`` — see :doc:`dynamics`.
+     - ``KS`` (kinematic single-track, 5-state), ``ST`` (single-track,
+       7-state), or ``MB`` (multi-body, 29-state). ``MB`` needs every
+       multi-body parameter finite — ``EnvConfig`` raises otherwise, and
+       ``FULLSCALE_VEHICLE_PARAMETERS`` is the only preset that qualifies —
+       plus ``map_scale=10.0`` on the shipped maps. See :doc:`dynamics`.
    * - ``loop_counter``
      - ``LoopCounterMode.FRENET_BASED``
-     - ``FRENET_BASED`` (default) or ``WINDING_ANGLE``. ``TOGGLE`` is declared
-       but **not implemented** (counts zero laps).
+     - ``FRENET_BASED``, or ``WINDING_ANGLE`` (cumulative angle around the
+       track centroid; reliable on convex tracks only). ``TOGGLE`` is
+       declared but not implemented: it counts zero laps, and because the
+       lap-target exit reads the lap count, a ``TOGGLE`` env with the
+       default ``max_laps=1`` never terminates.
    * - ``compute_frenet_frame``
      - ``True``
-     - Whether to compute Frenet ``(s, ey, ephi)`` coordinates each step.
+     - Whether per-agent Frenet ``(s, ey, ephi)`` coordinates are computed
+       each step.
    * - ``max_laps``
      - ``1``
-     - Laps before the episode terminates; ``None`` = infinite. If set, must be
-       ``>= 1``.
+     - Laps before ``terminated=True``; ``None`` = no lap limit; ``>= 1``
+       when set. Watches the ego's lap count only — there is no per-agent
+       variant.
 
-.. note::
+On its own the class accepts ``FRENET_BASED`` lap counting with the Frenet
+frame off; its ``with_updates`` and ``EnvConfig`` both repair the combination
+by coercing ``compute_frenet_frame=True``:
 
-   ``FRENET_BASED`` lap counting requires the Frenet frame. ``with_updates``
-   and ``EnvConfig.__post_init__`` **auto-enable** ``compute_frenet_frame=True``
-   when ``loop_counter is FRENET_BASED`` — you cannot accidentally disable it
-   while keeping Frenet lap counting.
+>>> sim = SimulationConfig(compute_frenet_frame=False)
+>>> sim.compute_frenet_frame
+False
+>>> EnvConfig(simulation_config=sim).simulation_config.compute_frenet_frame
+True
 
-.. note::
-
-   ``timestep`` must be an exact multiple of ``integrator_timestep``; the ratio
-   sets the number of integrator substeps taken per environment step. The check
-   is validated against that ratio, so any pair that divides evenly is accepted
-   — ``timestep=0.03, integrator_timestep=0.01`` gives 3 substeps. The pairing is
-   checked when the simulator is built, not when the config is constructed, so an
-   invalid pair raises from ``gym.make`` rather than from ``SimulationConfig``.
+One cross-rule runs ahead of that repair: ``RewardMode.PROGRESS`` with
+``compute_frenet_frame=False`` raises rather than coerces (see
+``RewardConfig`` below).
 
 ``ObservationConfig``
 ---------------------
 
-What ``obs`` looks like. ``ObservationType`` from
+What ``obs`` looks like; the field vocabulary, shapes and space bounds of
+each type are in :doc:`observations`. ``ObservationType`` comes from
 ``f1tenth_gym.envs.observation``.
 
 .. list-table::
    :header-rows: 1
-   :widths: 24 26 50
+   :widths: 20 28 52
 
    * - Field
      - Default
      - Allowed values / notes
    * - ``type``
      - ``ObservationType.DEFAULT``
-     - ``DIRECT`` / ``ORIGINAL`` (alias of DIRECT) / ``FEATURES`` /
-       ``KINEMATIC_STATE`` / ``DYNAMIC_STATE`` / ``FRENET_DYNAMIC_STATE``.
+     - ``DEFAULT`` (per-agent dict of named fields; ``ORIGINAL`` is its
+       alias), ``DIRECT`` (raw agent-batched arrays since v1.0.0 —
+       selecting it warns), ``FEATURES`` (custom subset), or the fixed
+       presets ``KINEMATIC_STATE`` / ``DYNAMIC_STATE`` /
+       ``FRENET_DYNAMIC_STATE``. Not itself validated at construction; a
+       non-``ObservationType`` value raises ``TypeError`` at ``gym.make``.
    * - ``features``
      - ``None``
-     - A tuple of field names — **only valid with** ``type=FEATURES``.
+     - Tuple of field names, valid only with ``type=FEATURES``. Not coerced
+       to a tuple: a list is accepted and makes the config unhashable.
 
-.. warning::
+>>> from f1tenth_gym.envs.env_config import ObservationConfig
+>>> ObservationConfig(features=("pose_x",))
+Traceback (most recent call last):
+    ...
+ValueError: observation `features` only applies to ObservationType.FEATURES, ...
 
-   Setting ``features`` with any ``type`` other than ``FEATURES`` raises
-   ``ValueError`` (it used to be silently ignored). If you want a custom field
-   subset, use ``ObservationConfig(type=ObservationType.FEATURES,
-   features=(...))``.
-
-See :doc:`observations` for the exact field vocabulary of each type (and the
-trap that ``DIRECT`` does **not** contain ``pose_x`` — use ``KINEMATIC_STATE``).
+Two keys are conditional whatever the type: ``scan`` is dropped when
+``lidar_config.enabled=False``, and ``frenet_pose`` is dropped when
+``compute_frenet_frame=False``. Naming a dropped field in a ``FEATURES``
+tuple raises ``ValueError`` at ``gym.make``.
 
 ``ResetConfig``
 ---------------
 
-Where agents spawn at ``reset()``. ``ResetStrategy`` from
-``f1tenth_gym.envs.reset``.
+Where agents spawn at ``reset()``. ``ResetStrategy`` and ``ReferenceLine``
+come from ``f1tenth_gym.envs.reset``.
 
 .. list-table::
    :header-rows: 1
-   :widths: 24 24 52
+   :widths: 22 24 54
 
    * - Field
      - Default
@@ -311,91 +333,101 @@ Where agents spawn at ``reset()``. ``ResetStrategy`` from
        ``RL_RANDOM_RANDOM`` / ``MAP_RANDOM_STATIC``.
    * - ``min_dist``
      - ``None``
-     - Minimum spawn spacing (m). ``None`` = strategy default (1.5 for RL, 0.5
-       for map). Must be ``>= 0``.
+     - Minimum spawn spacing in metres; ``None`` = strategy default (1.5
+       for ``RL_*``, 0.5 for MAP); ``>= 0``.
    * - ``max_dist``
      - ``None``
-     - Maximum spawn spacing (m). ``None`` = strategy default (2.5 for RL, 1.0
-       for map). Must be ``> 0``.
+     - Maximum spawn spacing in metres; ``None`` = strategy default (2.5
+       for ``RL_*``, 1.0 for MAP); ``> 0``, and ``> min_dist`` when both
+       are set.
    * - ``shuffle``
      - ``None``
-     - Override whether spawn order is shuffled. ``None`` = strategy default
-       (STATIC strategies don't shuffle).
+     - ``None`` = strategy default (STATIC strategies keep order).
+       Permutes only which agent gets which slot — the pose set itself is
+       identical.
    * - ``move_laterally``
      - ``None``
-     - Override whether spawns are offset laterally off the reference line.
-       ``None`` = strategy default.
+     - ``None`` = strategy default: ``False`` for ``RL_*``; ``True`` for
+       MAP, where the flag is never read. No effect with a single agent.
+   * - ``reference_line``
+     - ``None``
+     - ``None`` = ``ReferenceLine.RACELINE``. ``CENTERLINE`` spawns on the
+       line the Frenet frame measures against, giving ``ey == 0`` at spawn
+       (:doc:`tracks`). Rejected for the MAP strategy.
+   * - ``start_width``
+     - ``None``
+     - ``None`` = 1.0 m: length of the spawn window along the reference
+       line, in absolute metres, clamped to at least one waypoint so scaled
+       maps stay legal. GRID strategies only; ``ValueError`` otherwise.
+       Must be ``> 0``.
 
-Validation: if both ``min_dist`` and ``max_dist`` are set, ``min_dist`` must be
-``< max_dist``. Non-``None`` fields are forwarded to the reset-function
-builder via ``reset_kwargs()``.
+``reset_kwargs()`` forwards the non-``None`` optional fields to the
+reset-function builder:
 
-.. note::
-
-   All ``RL_*`` strategies bind to the **raceline** (never the centerline) and
-   default to ``move_laterally=False``, so a multi-agent "grid" reset places
-   every car *on* the raceline, separated only longitudinally. Because the
-   Frenet frame is measured against the centerline, ``obs[...]["frenet_pose"]``
-   ``ey`` is generally non-zero at spawn.
+>>> from f1tenth_gym.envs.env_config import ResetConfig
+>>> ResetConfig(min_dist=2.0).reset_kwargs()
+{'min_dist': 2.0}
 
 ``LiDARConfig``
 ---------------
 
-The simulated LiDAR. Import from ``f1tenth_gym.envs.lidar`` (or
-``f1tenth_gym.envs.lidar.config``). All angular fields are in **radians**.
+The simulated LiDAR. Import from ``f1tenth_gym.envs.lidar``; every angular
+field is in radians, and an angle beyond ±π raises with a
+did-you-pass-degrees hint.
 
 .. list-table::
    :header-rows: 1
-   :widths: 26 24 50
+   :widths: 25 22 53
 
    * - Field
      - Default
      - Allowed values / notes
    * - ``enabled``
      - ``True``
-     - When ``False``, ``scan`` has shape ``(0,)`` and collision detection
-       adapts (see :doc:`observations`).
+     - When ``False`` the ``scan`` key disappears from observations — and,
+       under the default ``LIDAR_SCAN`` collision mode, so does all
+       collision detection, walls included (``BOUNDING_BOX`` keeps
+       agent-vs-agent).
    * - ``num_beams``
      - ``1080``
-     - Number of beams; must be ``>= 1``. (Angular resolution is internally
-       capped by a 2000-entry LUT — raising beams past ~2000 buys no
-       resolution.)
+     - ``>= 1``. Angular resolution is capped by a 2000-entry internal
+       lookup table — about 1500 distinct rays at the default FOV, so
+       raising beams past that buys nothing.
    * - ``field_of_view``
      - ``4.712389`` (270°)
-     - Total FOV in radians; must be ``> 0``. Only used to derive
-       ``angle_min``/``angle_max`` **when those are ``None``** — see warning.
+     - Total FOV in radians; ``> 0``. Derived from the angles — see below.
    * - ``angle_min``
-     - ``None`` → ``-field_of_view/2``
-     - Scan start angle. If given, must be ``>= -π``.
+     - ``None``
+     - ``None`` materialises to ``-field_of_view/2``; must be ``>= -π``.
    * - ``angle_max``
-     - ``None`` → ``+field_of_view/2``
-     - Scan end angle. If given, must be ``<= π`` and ``> angle_min``.
+     - ``None``
+     - ``None`` materialises to ``+field_of_view/2``; must be ``<= π`` and
+       ``> angle_min``.
    * - ``range_min``
      - ``0.0``
-     - Minimum range (m); readings below are clipped. Must be ``>= 0`` and
-       ``< range_max``.
+     - Readings below are clipped; ``>= 0`` and ``< range_max``.
    * - ``range_max``
      - ``30.0``
-     - Maximum range (m); readings above are clipped. Must be ``> 0``.
+     - Readings above are clipped; ``> 0``.
    * - ``noise_std``
      - ``0.01``
-     - Std of per-reading Gaussian range noise; ``>= 0``.
+     - Std of per-beam Gaussian range noise, drawn each step; ``>= 0``.
    * - ``dropout_prob``
      - ``0.0``
-     - Per-beam, per-step no-return probability (clamped to ``range_max``);
-       must be in ``[0, 1]``.
+     - Per-beam, per-step no-return probability (dropped beams read
+       ``range_max``); in ``[0, 1]``.
    * - ``range_bias_std``
      - ``0.0``
-     - Std of a per-beam systematic bias drawn **once per episode**
-       (reproducible with ``reset(seed=...)``); ``>= 0``.
+     - Std of a per-beam systematic bias drawn once per episode; ``>= 0``.
    * - ``base_link_to_lidar_tf``
      - ``(0.275, 0.0, 0.0)``
-     - ``(x, y, yaw)`` offset of the LiDAR from ``base_link``, in
-       metres/radians.
+     - ``(x, y, yaw)`` sensor offset from ``base_link`` in metres/radians.
+       Unvalidated.
 
-``noise_std``, ``dropout_prob`` and ``range_bias_std`` affect only the
-**observed** scan — collision detection always uses the clean scan. The noise
-semantics are covered in :doc:`rewards_and_rl`. Convenience read-only
+The three noise fields shape only the *observed* scan — collision detection
+always uses the clean scan (:doc:`sim2real`). ``reset()`` ends with one
+sweep, so the first observation's ``scan`` is already real and noise-bearing,
+and that spawn sweep never flags a collision. Convenience read-only
 properties: ``angle_increment`` and ``maximum_range``.
 
 ``angle_min`` and ``angle_max`` are the sensor's true extent — the scanner
@@ -405,59 +437,66 @@ materialised to ``∓field_of_view/2``; give the angles explicitly and
 ``field_of_view`` is recomputed to match. The three can never disagree, whether
 you build a fresh config or derive one:
 
-.. code-block:: python
-
-    import numpy as np
-    from f1tenth_gym.envs.lidar import LiDARConfig
-
-    LiDARConfig(field_of_view=np.deg2rad(180)).angle_min   # -pi/2
-    LiDARConfig(angle_min=-0.5, angle_max=1.5).field_of_view   # 2.0
-    LiDARConfig().with_updates(field_of_view=2.0).angle_max    # 1.0
+>>> import numpy as np
+>>> from f1tenth_gym.envs.lidar import LiDARConfig
+>>> print(LiDARConfig(field_of_view=np.deg2rad(180)).angle_min)
+-1.5707963267948966
+>>> LiDARConfig(angle_min=-0.5, angle_max=1.5).field_of_view
+2.0
+>>> LiDARConfig().with_updates(field_of_view=2.0).angle_max
+1.0
 
 An explicit angle always wins: passing ``field_of_view`` together with
-``angle_min``/``angle_max`` keeps the angles you gave and derives the FOV from
-them.
+``angle_min``/``angle_max`` keeps the angles you gave and derives the FOV
+from them.
 
 ``RenderConfig``
 ----------------
 
-Rendering pacing and frame output. See :doc:`rendering` for the full model.
+Pacing and frame output; :doc:`rendering` explains the clocks these fields
+drive. Rendering also needs ``render_enabled=True`` *and* a ``render_mode``
+at ``gym.make`` — with either missing no renderer is built and these fields
+are inert.
 
 .. list-table::
    :header-rows: 1
-   :widths: 30 26 44
+   :widths: 28 24 48
 
    * - Field
      - Default
      - Notes
    * - ``render_fps``
      - ``60``
-     - Target fixed frame rate; caps human-mode redraws and sets the rgb_array
-       distinct-frame cadence in sim time. Coerced to ``int``, must be ``> 0``.
+     - Coerced to ``int``; ``> 0``. Caps human-mode redraws per wall-clock
+       second and sets the rgb_array distinct-frame cadence in sim time.
    * - ``real_time_factor``
      - ``1.0``
-     - Sim-seconds per wall-second in human modes; ``float("inf")`` = free-run.
-       Coerced to ``float``, must be ``> 0``. Togglable at runtime via
-       ``env.unwrapped.set_real_time_factor(x)``.
+     - Coerced to ``float``; ``> 0``; ``float("inf")`` = free-run, ``nan``
+       rejected. Sim-seconds per wall-second in human modes; togglable at
+       runtime via ``env.unwrapped.set_real_time_factor(x)``.
    * - ``window_size``
      - ``800``
-     - Square render / rgb_array / video size in pixels. Coerced to ``int``,
-       ``> 0``.
+     - Coerced to ``int``; ``> 0``. Square window / frame / video size in
+       pixels.
    * - ``focus_on``
      - ``"agent_0"``
-     - Agent id the camera follows; ``None`` = whole-map view.
+     - Agent id the camera follows. Unvalidated; an unknown id raises
+       ``ValueError`` when the renderer is built. ``None`` is not a map
+       view — it parks the camera at the world origin (the map view is the
+       renderer's middle-click toggle).
    * - ``vehicle_palette``
      - 10 hex colours
      - Per-agent car colours, cycled by index.
    * - ``show_wheels``
      - ``True``
-     - Draw wheels on each car.
+     - Stored but never read by the GL backend — frames are byte-identical
+       either way.
    * - ``render_map_img``
      - ``True``
      - Draw the occupancy-map image under the scene.
    * - ``car_thickness``
      - ``1``
-     - Car outline thickness in pixels (coerced to ``int``).
+     - Coerced to ``int``. Stored but never read, like ``show_wheels``.
    * - ``bigger_car_when_map_centered``
      - ``True``
      - Scale cars up in the zoomed-out map view.
@@ -468,86 +507,100 @@ Rendering pacing and frame output. See :doc:`rendering` for the full model.
 ``TerminationConfig``
 ---------------------
 
-When the episode ends. Both ``terminated`` and ``truncated`` are driven here.
+When an episode ends, and on whose account.
 
 .. list-table::
    :header-rows: 1
-   :widths: 30 22 48
+   :widths: 28 20 52
 
    * - Field
      - Default
      - Allowed values / notes
    * - ``max_episode_steps``
      - ``None``
-     - If set, ``truncated=True`` once this many steps elapse since reset
-       (a config-level TimeLimit). ``None`` = no limit; must be ``>= 1`` if set.
+     - ``truncated=True`` once this many steps elapse since reset — a
+       truncation limit without a gymnasium ``TimeLimit`` wrapper (the
+       registered spec sets none). ``None`` = no limit; ``>= 1`` when set.
    * - ``terminate_on_collision``
      - ``True``
      - Whether a collision sets ``terminated=True``.
    * - ``collision_agents``
      - ``"ego"``
-     - Whose collision counts: ``"ego"`` (only the ego agent) or ``"any"``
-       (any agent). Any other value raises ``ValueError``.
+     - Whose collision counts: ``"ego"`` or ``"any"``.
 
-.. note::
+>>> from f1tenth_gym.envs.env_config import TerminationConfig
+>>> TerminationConfig(collision_agents="all")
+Traceback (most recent call last):
+    ...
+ValueError: collision_agents must be 'ego' or 'any', got 'all'
 
-   ``truncated`` is no longer hardcoded ``False``: with
-   ``max_episode_steps=None`` and ``max_laps=None`` an episode can still run
-   forever, but setting ``max_episode_steps`` gives you a truncation limit
-   without a gymnasium ``TimeLimit`` wrapper. Per-agent collision flags are
-   exposed in ``info["collisions"]``.
+Per-agent collision flags arrive in ``info["collisions"]`` on every ``step``
+(the ``reset`` info dict has no such key). The lap-target exit —
+``SimulationConfig.max_laps`` — is a separate rule and always watches the
+ego, whatever ``collision_agents`` says.
 
 ``RewardConfig``
 ----------------
 
-The per-step scalar reward. ``RewardMode`` from ``f1tenth_gym.envs.env_config``.
-Full semantics in :doc:`rewards_and_rl`; the fields:
+The per-step scalar; the arithmetic of each mode, with measured magnitudes,
+lives in :doc:`rl`. ``RewardMode`` comes from ``f1tenth_gym.envs.env_config``.
 
 .. list-table::
    :header-rows: 1
-   :widths: 26 24 50
+   :widths: 24 22 54
 
    * - Field
      - Default
      - Allowed values / notes
    * - ``mode``
      - ``RewardMode.SURVIVAL``
-     - ``SURVIVAL`` (``reward = timestep``, the historical default), ``PROGRESS``
-       (weighted Frenet progress + speed + survival − collision), or
-       ``CUSTOM``.
+     - ``SURVIVAL`` (``reward = timestep``, the historical default),
+       ``PROGRESS`` (weighted Frenet progress + speed + survival −
+       collision penalty), or ``CUSTOM``.
    * - ``progress_weight``
      - ``1.0``
-     - Reward per metre of forward arclength (PROGRESS).
+     - Reward per metre of forward arclength (PROGRESS). Unvalidated — any
+       float, either sign.
    * - ``velocity_weight``
      - ``0.0``
-     - Reward per m/s of ego speed (PROGRESS).
+     - Reward per m/s of *signed* ego speed (PROGRESS); reversing pays
+       negative. Unvalidated.
    * - ``timestep_weight``
      - ``0.0``
-     - Survival bonus per step, scaled by timestep (PROGRESS).
+     - Survival bonus per step, scaled by the timestep (PROGRESS).
+       Unvalidated.
    * - ``collision_penalty``
      - ``0.0``
-     - Subtracted when the ego is colliding (PROGRESS); must be ``>= 0``.
+     - Subtracted on every step the ego is in contact, not once per crash
+       (PROGRESS); ``>= 0``.
    * - ``reward_fn``
      - ``None``
      - For ``CUSTOM``: a callable
        ``(obs, action, info, terminated, truncated) -> float``.
 
-Validation: ``RewardMode.CUSTOM`` **requires** ``reward_fn`` (else
-``ValueError``); a non-callable ``reward_fn`` raises ``TypeError``.
-``RewardMode.PROGRESS`` requires the Frenet frame — ``EnvConfig.__post_init__``
-raises if ``compute_frenet_frame`` is ``False``. Regardless of mode, ``info``
-always carries the raw ``progress`` and ``collisions`` signals.
+``CUSTOM`` requires ``reward_fn``, a non-callable ``reward_fn`` raises
+``TypeError``, and a ``reward_fn`` set alongside ``SURVIVAL`` or ``PROGRESS``
+is stored and never called. ``PROGRESS`` needs the Frenet frame —
+``EnvConfig`` raises when ``compute_frenet_frame`` is ``False``. Whatever the
+mode, ``info`` carries the raw ``progress`` and ``collisions`` signals every
+step:
+
+>>> from f1tenth_gym.envs.env_config import RewardConfig, RewardMode
+>>> RewardConfig(mode=RewardMode.CUSTOM)
+Traceback (most recent call last):
+    ...
+ValueError: RewardMode.CUSTOM requires reward_fn to be set
 
 ``DomainRandomizationConfig``
 -----------------------------
 
-Per-episode randomization of vehicle parameters, sampled at each ``reset()`` from
-the env RNG (reproducible with ``reset(seed=...)``). Full semantics in
-:doc:`rewards_and_rl`.
+Per-episode vehicle-parameter randomization, redrawn from the env RNG at
+every ``reset()`` — reproducible with ``reset(seed=...)``; :doc:`sim2real`
+covers where the draw lands in the control loop.
 
 .. list-table::
    :header-rows: 1
-   :widths: 26 24 50
+   :widths: 22 20 58
 
    * - Field
      - Default
@@ -557,64 +610,59 @@ the env RNG (reproducible with ``reset(seed=...)``). Full semantics in
      - Whether to randomize at each reset.
    * - ``param_ranges``
      - ``{}``
-     - ``{param_name: (low, high)}`` in **absolute physical units**. Each name
-       must be an actual ``VehicleParameters`` field, and ``low <= high``, or
-       ``ValueError``.
+     - A ``VehicleParamRanges`` of absolute ``(low, high)`` ranges in
+       physical units — one optional slot per ``VehicleParameters`` field,
+       so a mistyped name raises ``TypeError`` at construction. Each range
+       needs ``low <= high``. A plain ``{name: (low, high)}`` dict is
+       accepted for one more release with a ``DeprecationWarning``.
 
-.. code-block:: python
+>>> from f1tenth_gym.envs.dynamic_models import VehicleParamRanges
+>>> from f1tenth_gym.envs.env_config import DomainRandomizationConfig
+>>> dr = DomainRandomizationConfig(
+...     enabled=True,
+...     param_ranges=VehicleParamRanges(m=(3.0, 4.0), mu=(0.9, 1.1)),
+... )
+>>> dr.ranges()
+{'mu': (0.9, 1.1), 'm': (3.0, 4.0)}
 
-    from f1tenth_gym.envs.env_config import EnvConfig, DomainRandomizationConfig
-
-    cfg = EnvConfig().with_updates(
-        domain_randomization_config=DomainRandomizationConfig(
-            enabled=True,
-            param_ranges={"m": (3.0, 4.0), "mu": (0.9, 1.1)},
-        ),
-    )
+Randomizing an actuation limit (``v_max``, ``s_max``, …) is supported: the
+action and observation spaces are built from ``widest_params(base)``, a fixed
+superset of every randomized episode, so gymnasium's fixed-space contract
+holds. The physics ground truth for the current episode is
+``env.unwrapped.sim.params_array`` — ``env.vehicle_params`` keeps the nominal
+values.
 
 .. note::
 
-   Field names are the raw ``VehicleParameters`` fields — e.g. ``m`` (mass) and
-   ``h`` (CoG height), **not** ``mass``/``h_cg``. Prefer randomizing dynamics
-   params (``m``, ``mu``, ``lf``, ``lr``, ``I``, ``h``); randomizing actuation
-   limits (``v_max``, ``s_max``, …) desyncs the fixed action/observation spaces.
+   Names are the raw ``VehicleParameters`` fields — ``m`` (mass) and ``h``
+   (CoG height), not ``mass``/``h_cg``. Under KS and ST only the 18 base
+   parameters reach the physics kernels, so a range over a multi-body field
+   (``K_zt``, …) validates but changes nothing, while ``width``, ``length``,
+   ``lr`` and the collision-body offsets do take effect through the scan and
+   collision caches.
 
-A worked example
-----------------
+Reconfiguring a live environment
+--------------------------------
 
-Putting the nested pattern together — a headless, endless, two-agent training
-config with a progress reward and mild actuator noise:
+``env.unwrapped.configure(new_cfg)`` swaps the whole config on a running env
+and rebuilds the affected components — track, simulator, spaces, reset
+function, renderer:
 
-.. code-block:: python
+>>> env = gym.make("f1tenth_gym:f1tenth-v0", config=EnvConfig(render_enabled=False))
+>>> print(f"{env.unwrapped.sim.params_array[0]:.4f}")   # mu, physics ground truth
+1.0489
+>>> cfg = env.unwrapped.env_config
+>>> env.unwrapped.configure(
+...     cfg.with_updates(params=cfg.params.with_updates(mu=1.0))
+... )
+>>> print(f"{env.unwrapped.sim.params_array[0]:.4f}")
+1.0000
+>>> obs, info = env.reset(seed=0)   # reset after reconfiguring
+>>> env.close()
 
-    import gymnasium as gym
-    from f1tenth_gym.envs.env_config import (
-        EnvConfig, SimulationConfig, ObservationConfig,
-        ControlConfig, RewardConfig, RewardMode,
-    )
-    from f1tenth_gym.envs.observation import ObservationType
-
-    cfg = EnvConfig(
-        num_agents=2,
-        render_enabled=False,
-        simulation_config=SimulationConfig(max_laps=None),
-        observation_config=ObservationConfig(type=ObservationType.KINEMATIC_STATE),
-        control_config=ControlConfig(steer_noise_std=0.01, accl_noise_std=0.05),
-        reward_config=RewardConfig(mode=RewardMode.PROGRESS, velocity_weight=0.1),
-    )
-
-    env = gym.make("f1tenth_gym:f1tenth-v0", config=cfg)
-    obs, info = env.reset(seed=0)
-    env.close()
-
-See also
---------
-
-- :doc:`quickstart` — the minimal loop.
-- :doc:`actions` and :doc:`observations` — how ``ControlConfig`` /
-  ``ObservationConfig`` shape the spaces.
-- :doc:`dynamics` — ``params`` and the dynamics models.
-- :doc:`tracks` — ``map_name`` loading and racelines.
-- :doc:`rendering` — the ``RenderConfig`` pacing model.
-- :doc:`rewards_and_rl` — reward, domain randomization, and sim2real noise.
-- :doc:`reproducibility` — how ``seed`` and ``reset(seed=...)`` interact.
+Two costs are invisible in the return value: a rebuilt renderer starts with
+an empty callback list, so re-register anything added through
+``add_render_callback``; and switching ``render_enabled`` from ``True`` to
+``False`` leaks the old GL context, because the guard that would close it
+reads the new flag. ``configure`` also re-arms ``EnvConfig.seed`` to cover
+the next unseeded reset.

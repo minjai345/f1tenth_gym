@@ -14,8 +14,10 @@ force_closed_loop:
     \ m..."
   page: tracks.rst
 install_real_output:
-  hash: 710147c427d4aab0
-  note: A healthy install prints a speed near the commanded ``2.0`` m/s and a ``sim_time`` around ...
+  hash: fef0d9cd41b5c780
+  note: 'A healthy install prints a speed near the commanded ``2.0`` m/s and a ``sim_time`` around ...
+    Re-hashed for the v1.0.0 rewrite: the old paragraph mislabelled x=-1.567/y=-1.257 as the
+    start pose; it is the pose after the 100-step loop (seed-42 spawn is x=-0.044/y=-0.849).'
   page: installation.rst
 metadata_render_fps:
   hash: 17e8ea2fba9bec74

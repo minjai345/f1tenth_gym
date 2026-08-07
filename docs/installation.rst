@@ -1,67 +1,27 @@
-Installation
-============
+How to install f1tenth_gym
+==========================
 
-This page covers installing ``f1tenth_gym`` (branch ``dev-humble``) and verifying
-that the environment works end to end. Once installed, head to
-:doc:`quickstart` for your first driving loop.
+``f1tenth_gym`` resolves its ``maps/`` directory four ``.parent`` hops up from its
+own source file and downloads tracks into it on first use, so an editable clone is
+the layout that behaves — installed from a wheel, the package would fetch maps into
+``site-packages/maps/`` instead. Any Python from 3.9 up works.
 
-.. note::
+Install from a clone
+--------------------
 
-   This fork has diverged sharply from the upstream ``f110_gym`` package. The
-   installable package is ``f1tenth_gym`` and the gym id is
-   ``f1tenth_gym:f1tenth-v0``. The legacy ``f110_gym`` / ``f110-v0`` API does
-   not exist here.
-
-Requirements
-------------
-
-* **Python 3.9 or newer.** The project declares ``requires-python = ">=3.9"``
-  and is classified for CPython 3.9 through 3.14.
-* A working C toolchain is not required for normal use — ``numba`` ships wheels
-  and JIT-compiles the physics kernels at runtime.
-* **Network access on first use**: the requested track map is downloaded from
-  ``api.f1tenth.org`` the first time you use it (see
-  `First run downloads the map`_).
-* Rendering requires an X display (real or virtual). See `Rendering needs a
-  display`_.
-
-Core dependencies
-~~~~~~~~~~~~~~~~~~
-
-Installing the package pulls in its runtime dependencies automatically. The
-core stack is:
-
-* ``numpy`` — struct-of-arrays state buffers and math
-* ``scipy`` — spline / interpolation for tracks
-* ``numba`` — JIT-compiled dynamics, LiDAR, and collision kernels
-* ``gymnasium`` (``>=0.29.1,<0.30``) — the ``Env`` API
-* ``pillow`` — occupancy-map image loading
-* ``pyyaml`` — map metadata parsing
-* ``pyqtgraph`` and ``pyqt6`` — the OpenGL renderer
-* ``pyopengl`` / ``pyopengl-accelerate`` — GL backend
-* ``requests`` — map download
-* ``opencv-python`` — occupancy-map dilation and lap-info text overlay
-
-The development group (``pytest``, ``black``, ``isort``, ``autoflake``,
-``flake8``, ``matplotlib``, ``ipykernel``) is installed automatically by
-``uv sync`` and is optional for pip users.
-
-Install with uv (recommended)
-------------------------------
-
-`uv <https://docs.astral.sh/uv/>`_ manages the virtual environment and locks
-dependencies from ``uv.lock``. Clone the repository and sync:
+Clone the repository and sync the environment with `uv <https://docs.astral.sh/uv/>`_:
 
 .. code-block:: bash
 
    git clone https://github.com/f1tenth/f1tenth_gym.git
    cd f1tenth_gym
-   git checkout dev-humble
    uv sync
 
-``uv sync`` creates ``.venv/`` and installs the package (editable) together with
-its runtime and dev dependencies. Run subsequent commands through ``uv run``,
-for example ``uv run python your_script.py``.
+``uv sync`` creates ``.venv/`` and installs the package (editable) with its runtime
+dependencies plus two default groups: ``dev`` (pytest, flake8, black, ...) and
+``examples`` (``moviepy``, ``shapely``, ``matplotlib`` — what the bundled scripts
+need beyond the library; skip them with ``uv sync --no-group examples``). Run
+subsequent commands through ``uv run``, e.g. ``uv run python your_script.py``.
 
 .. warning::
 
@@ -69,61 +29,14 @@ for example ``uv run python your_script.py``.
    ``pyproject.toml`` and ``uv.lock``. Install extra packages by adding them to
    the project rather than with ``uv pip install``, which the next sync undoes.
 
-The dependencies the ``examples/`` scripts need beyond the library itself —
-``moviepy`` for video recording, ``shapely`` and ``matplotlib`` for track
-generation — are declared as the ``examples`` dependency group and installed by
-default. For a lean library environment without them::
+pip works on the same clone: ``pip install -e .``, or
+``pip install -e ".[video,trackgen]"`` to include the example extras.
 
-    uv sync --no-group examples
+Verify the install
+------------------
 
-pip users can opt into the same extras with ``pip install "f1tenth_gym[video,trackgen]"``.
-
-Install with pip
-----------------
-
-From a clone (editable install), which is the recommended layout because the
-map downloader writes into the repo-root ``maps/`` directory:
-
-.. code-block:: bash
-
-   git clone https://github.com/f1tenth/f1tenth_gym.git
-   cd f1tenth_gym
-   git checkout dev-humble
-   pip install -e .
-
-Or install directly from GitHub, pinned to this branch:
-
-.. code-block:: bash
-
-   pip install "git+https://github.com/f1tenth/f1tenth_gym.git@dev-humble"
-
-.. note::
-
-   Branch off ``dev-humble``, never ``main``. ``origin/main`` is a legacy line
-   that still ships the different, incompatible ``gym/f110_gym/`` package.
-
-First run downloads the map
----------------------------
-
-The ``maps/`` directory is gitignored, so it starts empty. The first time you
-create an environment for a given track, the simulator downloads it from a
-hardcoded URL, ``https://api.f1tenth.org/<map_name>.tar.xz``, and extracts it
-into the repo-root ``maps/`` directory. The default map is ``Spielberg``.
-
-.. warning::
-
-   The map directory is resolved relative to the installed source tree
-   (four ``.parent`` hops from ``track/utils.py``), so the download path works
-   for an **editable / cloned install**. Network access is required on that
-   first run; afterwards the cached map under ``maps/`` is reused offline.
-
-Verify your install
---------------------
-
-This snippet creates the default single-agent Spielberg environment, resets it
-with a fixed seed for a reproducible start pose, steps it a few times, prints a
-value, and closes. It requires network access on the very first run to fetch the
-map.
+One seeded run exercises the map download, the physics and the observation
+pipeline end to end:
 
 .. code-block:: python
 
@@ -139,7 +52,7 @@ map.
    cfg = EnvConfig(
        map_name="Spielberg",
        num_agents=1,
-       simulation_config=SimulationConfig(max_laps=None),   # default is 1 -> ends after one lap!
+       simulation_config=SimulationConfig(max_laps=None),  # default 1: one lap
        observation_config=ObservationConfig(type=ObservationType.KINEMATIC_STATE),
        render_enabled=False,
    )
@@ -147,63 +60,72 @@ map.
    obs, info = env.reset(seed=42)
 
    for _ in range(100):
-       action = np.array([[0.0, 2.0]], dtype=np.float32)   # [[steer_rad, speed_mps]] — steer FIRST
+       action = np.array([[0.0, 2.0]], dtype=np.float32)  # [[steer_rad, speed_mps]]
        obs, reward, terminated, truncated, info = env.step(action)
        if terminated or truncated:
            break
 
-   print(obs["agent_0"]["pose_x"], obs["agent_0"]["linear_vel_x"], info["sim_time"])
+   print(obs["agent_0"]["pose_x"], obs["agent_0"]["pose_y"],
+         obs["agent_0"]["linear_vel_x"], info["sim_time"])
    env.close()
 
-A healthy install prints a speed near the commanded ``2.0`` m/s and a
-``sim_time`` around ``1.0`` after 100 steps of ``timestep=0.01``. With
-``seed=42`` the start pose is reproducible (``x=-1.567``, ``y=-1.257``).
+On a fresh machine this starts with ``Downloading Files for: Spielberg``: the track
+comes from ``https://api.f1tenth.org/Spielberg.tar.xz`` and lands in the repo-root
+``maps/`` directory — the path the editable layout keeps inside the clone. Network
+access is needed once per track; the cached map is then reused offline. The loop
+prints::
 
-.. note::
+   -1.5670079 -1.257271 1.9840685 1.0000000000000007
 
-   ``step()`` returns the gymnasium 5-tuple
-   ``(obs, reward, terminated, truncated, info)`` — never a 4-tuple and never a
-   bare ``done``. The action is an array of shape ``(num_agents, 2)`` with
-   columns ``[steering, longitudinal]`` — **steering is column 0**. The default
-   ``DIRECT`` observation does not expose ``pose_x``; the snippet above requests
-   ``KINEMATIC_STATE`` so ``obs["agent_0"]["pose_x"]`` exists. See
-   :doc:`observations` and :doc:`actions` for details.
+A healthy install prints a speed near the commanded ``2.0`` m/s and a ``sim_time``
+around ``1.0`` after 100 steps of ``timestep=0.01``. With ``seed=42`` the whole run
+is reproducible: ``x=-1.567``, ``y=-1.257`` is where the loop ends (the spawn is
+``x=-0.044``, ``y=-0.849``).
 
-Rendering needs a display
--------------------------
+The snippet asks for ``KINEMATIC_STATE`` because the default observation preset
+carries the pose inside ``std_state`` rather than as separate scalars — see
+:doc:`observations`, and :doc:`actions` for what the two action columns mean.
 
-The renderer is an OpenGL backend (``pyqtgraph.opengl`` / PyQt6) and needs an X
-display — a real one, or a virtual one via ``xvfb``. It cannot render under the
-headless ``offscreen`` Qt platform. If you request a display render mode with no
-``$DISPLAY``, the environment raises a ``RuntimeError`` with setup guidance
-rather than failing deep inside Qt.
-
-For headless servers, CI, and Google Colab (``xvfb`` + ``rgb_array`` video),
-see :doc:`rendering`.
-
-Running the tests
+Turn on rendering
 -----------------
 
-The test suite (all plain ``unittest`` cases run through pytest) needs network
-access for map downloads and mutates the working tree during track-download
-tests:
+The renderer is an OpenGL backend (``pyqtgraph.opengl`` / PyQt6) and needs an X
+display — a real one, or a virtual one via ``xvfb``; there is no offscreen
+fallback. Grab a frame to prove the display path works:
+
+.. code-block:: python
+
+   import gymnasium as gym
+   from f1tenth_gym.envs.env_config import EnvConfig
+
+   env = gym.make(
+       "f1tenth_gym:f1tenth-v0", config=EnvConfig(), render_mode="rgb_array"
+   )
+   env.reset(seed=42)
+   frame = env.render()
+   print(frame.shape, frame.dtype)
+   env.close()
+
+This prints ``(800, 800, 3) uint8`` — an RGB frame with the cars drawn, sized by
+``RenderConfig.window_size``. With no ``$DISPLAY`` the same script raises a
+``RuntimeError`` whose message walks through the fix — ``xvfb-run -a python
+render_check.py`` on a headless server, ``pyvirtualdisplay`` on Colab. Render
+modes, pacing and video recording are covered in :doc:`rendering`.
+
+Run the test suite
+------------------
+
+Expect network traffic and a rewritten ``maps/`` directory: the download test
+renames and restores ``maps/Spielberg``, and the renderer cases skip themselves
+when ``$DISPLAY`` is unset. From the repository root:
 
 .. code-block:: bash
 
    env -u PYTHONPATH uv run pytest
 
-.. note::
+The ``env -u PYTHONPATH`` prefix matters only when ROS 2 Humble is on your
+``PYTHONPATH``: ``/opt/ros/humble`` registers a pytest plugin whose import chain is
+not available in the venv, which breaks collection before any test runs. Without
+ROS on the path, plain ``uv run pytest`` works.
 
-   The ``env -u PYTHONPATH`` prefix is required only when ROS 2 Humble is on
-   your ``PYTHONPATH`` — ``/opt/ros/humble`` registers a pytest plugin whose
-   import chain is not available in the venv, which otherwise breaks collection.
-   Without ROS on the path, plain ``uv run pytest`` works.
-
-Next steps
-----------
-
-* :doc:`quickstart` — your first driving loop, explained.
-* :doc:`configuration` — the frozen :class:`~f1tenth_gym.envs.env_config.EnvConfig`
-  tree and how to mutate it.
-* :doc:`observations` and :doc:`actions` — the observation dict and action layout.
-* :doc:`rendering` — display setup, headless, and Colab.
+Next: :doc:`quickstart` drives one episode to its end and explains why it stopped.

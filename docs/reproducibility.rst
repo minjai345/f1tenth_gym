@@ -1,49 +1,79 @@
-Reproducibility & determinism
-=============================
+Reproducibility
+===============
 
-The simulator is fully deterministic: given the same seed and the same
-sequence of actions, an episode replays bit-for-bit. This page explains
-what "the seed" actually controls, how :func:`reset` seeding follows the
-gymnasium contract, and how to write experiments whose runs you can
-reproduce exactly.
+.. seealso::
 
-If you have not yet built an environment, start with :doc:`quickstart`.
-For the configuration surface referenced below, see
-:doc:`configuration`.
+   :class:`~f1tenth_gym.envs.f110_env.F110Env` — ``reset``, ``step``;
+   :class:`~f1tenth_gym.envs.env_config.EnvConfig` — ``seed``.
 
-The determinism model
+One call fixes an entire episode: ``reset(seed=...)`` seeds the env's
+``np_random`` generator, and the spawn pose, the LiDAR noise, the actuator
+noise and the domain-randomization draw all descend from it. Replaying a
+run is a matter of holding four inputs fixed.
+
+Pin these four things
+---------------------
+
+* the seed — an explicit ``seed`` on every ``reset`` you want to replay,
+  or ``EnvConfig.seed`` set once for the whole run (next section);
+* the actions — a fixed sequence, or a seeded policy;
+* the configuration — ``env.unwrapped.configure(new_cfg)`` changes the
+  physics and the observation surface, and even a switch that changes no
+  physics moves the noise streams (last section);
+* the software — trajectories are stored at float32 and replay bit-for-bit
+  only on the same simulator version and NumPy build.
+
+Nothing needs seeding separately — domain randomization and every sim2real
+noise knob fold into the reset seed (:doc:`sim2real`). The same seed and
+the same actions replay exactly; changing the seed alone moves the car:
+
+.. code-block:: python
+
+   import gymnasium as gym
+   import numpy as np
+   from f1tenth_gym.envs.env_config import EnvConfig
+
+   env = gym.make(
+       "f1tenth_gym:f1tenth-v0",
+       config=EnvConfig(map_name="Spielberg", render_enabled=False),
+   )
+
+   def rollout(seed):
+       obs, _ = env.reset(seed=seed)
+       xs = []
+       for t in range(40):
+           steer = 0.1 * np.sin(t * 0.05)
+           obs, *_ = env.step(np.array([[steer, 3.0]], dtype=np.float32))
+           xs.append(float(obs["agent_0"]["std_state"][0]))
+       return np.array(xs)
+
+   a = rollout(seed=42)
+   b = rollout(seed=42)
+   c = rollout(seed=7)
+   assert np.array_equal(a, b), "seeded rollouts diverged"
+   print(f"seed 7 diverges by {abs(a[-1] - c[-1]):.4f} m")
+   env.close()
+
+The assert passes and the print reads ``seed 7 diverges by 0.7726 m``. The
+actions and the configuration are identical across all three rollouts, so
+the 0.77 m is the seed's doing alone — it selected a different spawn
+waypoint.
+
+Why one seed is enough
 ----------------------
 
-Every physics step advances **all agents together** through the
-struct-of-arrays simulator. There is no per-agent thread, no
-asynchronous work, and no wall-clock coupling in the physics: stepping
-faster or slower than real time changes nothing about the trajectory
-(only the renderer watches the wall clock). Concretely, the state
-transition is a pure function of
+Every step advances all agents together through one struct-of-arrays
+simulator: no per-agent threads, no asynchronous work, and nothing in the
+physics reads the wall clock — only the renderer paces against it
+(:doc:`rendering`). The state transition is a pure function of
 
 * the current simulation state,
 * the action you pass to :func:`step`, and
 * the random draws seeded at ``reset`` time (LiDAR noise, actuator
   noise, domain randomization, and the spawn pose).
 
-Fix those inputs and the observations are identical across runs, across
-processes, and across machines with the same NumPy build.
-
-.. note::
-
-   The physics kernels compute in float64 and the result is re-cast to
-   float32 in the state buffers every step. This is deterministic — the
-   same inputs always produce the same float32 result — but it does mean
-   trajectories are stored at float32 precision. See :doc:`dynamics`.
-
-What ``reset(seed=...)`` seeds
-------------------------------
-
-``reset(seed=...)`` is the gymnasium way to seed, and it is the seed that
-matters for reproducibility. Passing a seed calls
-``gymnasium.Env.reset(seed=seed)``, which seeds the env's ``np_random``
-generator. From that single generator the environment then derives
-**every** stochastic input for the episode:
+Every one of those draws descends from the single generator that
+``reset(seed=...)`` seeds:
 
 * **Spawn pose** — the reset strategy samples from ``np_random``. Under
   the default ``RL_GRID_STATIC`` reset this draws the spawn waypoint via
@@ -63,133 +93,108 @@ generator. From that single generator the environment then derives
   :class:`~f1tenth_gym.envs.env_config.DomainRandomizationConfig` is
   enabled, the per-episode vehicle-parameter sample is drawn from
   ``np_random`` before the sim resets, so randomized dynamics are
-  reproducible with the reset seed too (see :doc:`rewards_and_rl`).
+  reproducible with the reset seed too (see :doc:`sim2real`).
 
-Because all of these flow from the one generator seeded by
-``reset(seed=...)``, a fixed seed pins the entire episode's randomness.
-
-``EnvConfig.seed`` vs ``reset(seed=...)``
------------------------------------------
-
-:class:`~f1tenth_gym.envs.env_config.EnvConfig` has a ``seed`` field
-(default ``12345``). It is the **base/default** seed the simulator falls
-back to for its noise generators when ``reset`` is called **without** a
-seed. It does **not**, by itself, fix the spawn pose across no-seed
-episodes.
-
-.. warning::
-
-   ``EnvConfig.seed`` alone does **not** make the start pose
-   reproducible. When you call ``env.reset()`` with no ``seed`` argument,
-   gymnasium seeds ``np_random`` from OS entropy, so the spawn-waypoint
-   draw — and therefore the reported ``x``/``y`` — varies run to run,
-   regardless of ``EnvConfig.seed``. To fix the start pose, pass
-   ``env.reset(seed=...)`` explicitly.
-
-For a fully controlled experiment, pass the same integer to
-``reset(seed=...)`` every episode you want to reproduce. If you want a
-different-but-reproducible pose per episode, seed with a deterministic
-sequence (e.g. ``reset(seed=episode_index)``).
-
-Reproducing two identical rollouts
-----------------------------------
-
-The following script runs the same seeded reset and the same action
-sequence twice, and asserts the observation streams are identical.
-
-.. code-block:: python
-
-   import gymnasium as gym
-   import numpy as np
-   from f1tenth_gym.envs.env_config import EnvConfig, SimulationConfig
-
-   cfg = EnvConfig(
-       map_name="Spielberg",
-       num_agents=1,
-       simulation_config=SimulationConfig(max_laps=None),  # don't end after one lap
-       render_enabled=False,
-   )
-   env = gym.make("f1tenth_gym:f1tenth-v0", config=cfg)
-
-   def rollout(seed):
-       obs, info = env.reset(seed=seed)
-       # a fixed, deterministic action sequence
-       xs = []
-       for t in range(200):
-           steer = 0.1 * np.sin(t * 0.05)
-           action = np.array([[steer, 3.0]], dtype=np.float32)  # [[steer, speed]]
-           obs, reward, terminated, truncated, info = env.step(action)
-           xs.append(float(obs["agent_0"]["std_state"][0]))  # X of the standard state
-           if terminated or truncated:
-               break
-       return np.array(xs)
-
-   a = rollout(seed=42)
-   b = rollout(seed=42)
-
-   assert np.array_equal(a, b), "seeded rollouts diverged!"
-   print("identical:", np.array_equal(a, b), "steps:", len(a))
-
-   env.close()
-
-Both rollouts start from the same spawn pose (seed ``42``) and receive
-the same actions, so every recorded value matches exactly. Change the
-seed passed to either ``rollout`` call and the trajectories differ.
+Inside ``reset`` the generator is consumed in a fixed order: the
+spawn-pose draw, then the domain-randomization draw (only when enabled),
+then the noise seed. The last section hangs off that order.
 
 .. note::
 
-   The default ``DIRECT`` observation does not expose ``pose_x`` — it is a
-   derived field. The example reads ``std_state[0]`` (the X coordinate)
-   instead. Use the ``KINEMATIC_STATE`` observation type if you want
-   named ``pose_x``/``pose_y`` fields. See :doc:`observations`.
+   The physics kernels compute in float64 and the result is re-cast to
+   float32 in the state buffers every step (:doc:`dynamics`).
+   Deterministic — the same inputs always produce the same float32
+   result — but trajectories are stored at float32 precision, and
+   bit-for-bit portability assumes the same NumPy build.
+
+``EnvConfig.seed`` seeds the whole run
+--------------------------------------
+
+``EnvConfig.seed`` (default ``None``) covers the first unseeded
+``reset()``: that reset behaves as ``reset(seed=cfg.seed)``, and every
+later unseeded reset continues the stream it started. The whole run —
+however many episodes — becomes a deterministic function of the config:
+episodes still differ from one another, but a rerun replays them exactly.
+Two environments built from the same seeded config produce identical
+streams, reset for reset:
+
+>>> import gymnasium as gym
+>>> import numpy as np
+>>> from f1tenth_gym.envs.env_config import EnvConfig
+>>> cfg = EnvConfig(seed=2024, render_enabled=False)
+>>> e1 = gym.make("f1tenth_gym:f1tenth-v0", config=cfg)
+>>> e2 = gym.make("f1tenth_gym:f1tenth-v0", config=cfg)
+>>> o1, _ = e1.reset()      # first unseeded reset: the config seed applies
+>>> o2, _ = e2.reset()
+>>> o1b, _ = e1.reset()     # later unseeded resets continue the stream...
+>>> o2b, _ = e2.reset()     # ...identically in both envs
+>>> (np.array_equal(o1["agent_0"]["scan"], o2["agent_0"]["scan"]),
+...  np.array_equal(o1b["agent_0"]["scan"], o2b["agent_0"]["scan"]))
+(True, True)
+>>> o, _ = e1.reset(seed=42)          # an explicit seed always wins
+>>> print(f"{float(o['agent_0']['std_state'][0]):.4f}")
+-0.0441
+>>> e1.close(); e2.close()
+
+An explicit ``reset(seed=...)`` takes precedence whatever the config
+says: ``-0.0441`` is the seed-42 spawn ``x`` under any ``EnvConfig.seed``.
+``configure()`` re-arms the config seed, so the next unseeded reset after
+a reconfiguration starts the stream over. The identical-streams property
+cuts the other way in a vector env — sub-envs sharing one seeded config
+all replay the *same* rollout, so give each sub-env its own seed there.
+
+What an unseeded reset varies
+-----------------------------
+
+Leave both seeds unset and gymnasium seeds ``np_random`` from OS entropy
+on every ``reset()``: episodes are unrepeatable by design — and the
+variation is narrower than it looks. Measured over seeds 0–49 on
+Spielberg, the spawn spans ``x`` in ``[-0.8167, -0.0441]`` and ``y`` in
+``[-1.0562, -0.8492]`` — exactly five distinct spawn points inside a
+window about one metre long. The default ``RL_GRID_STATIC`` strategy
+masks the first ``int(start_width / (raceline.length / raceline.n))``
+waypoints — 5 of Spielberg's 1692 at the default ``start_width=1.0`` —
+and draws one via ``rng.choice``. The lateral offset is structural for
+the same reason: ``ey`` stays inside ``[0.8080, 0.8086]`` across all 50
+draws, a property of the reference lines rather than of the seed
+(:doc:`tracks`). ``ResetConfig.start_width`` widens the window (metres,
+clamped to at least one waypoint), and
+``ResetConfig(reference_line=ReferenceLine.CENTERLINE)`` spawns on the
+line the Frenet frame measures against.
+
+First scans vary too: ``reset`` ends with a real LiDAR sweep (it informs
+the first observation only — a spawn is never adjudicated as a
+collision), so each agent's scan generator has already drawn
+``num_beams`` noise values by the time you read ``scan``. Two unseeded
+resets differ scan-for-scan; seed any equivalence test. For per-episode
+variation a rerun can still replay, seed with a sequence —
+``reset(seed=episode_index)`` — or set ``EnvConfig.seed`` and let the
+stream run.
+
+What silently shifts the stream
+-------------------------------
+
+Three ``np_random`` draws happen in a fixed order inside ``reset``, and
+two of them are conditional, so a configuration switch moves every draw
+after it — at the same seed:
+
+* Enabling domain randomization inserts the parameter draw between the
+  spawn draw and the noise seed. Even a degenerate range that changes no
+  physics — ``VehicleParamRanges(mu=(1.0489, 1.0489))`` pins ``mu`` at
+  its default — leaves ``reset(seed=42)`` with the same spawn but a
+  first scan that differs by up to 0.047 m.
+* ``options={"poses": ...}`` skips the spawn draw entirely. Handing
+  ``reset(seed=42)`` the exact pose it would have sampled anyway still
+  shifts the noise seed one draw earlier: same physical state, scans
+  differing by up to 0.046 m.
+* ``LiDARConfig.range_bias_std`` draws its per-episode bias from the
+  same per-agent generator that then feeds the per-step scan noise, so
+  two configs differing only in that field produce entirely different
+  noise — not the same noise plus a bias.
 
 .. warning::
 
-   The action layout is ``[steering, longitudinal]`` — **steering is
-   column 0**. Both columns are float32 with overlapping valid ranges, so a
-   transposed action is still a valid one and is executed faithfully. For a
-   single agent, pass ``np.array([[steer, speed]], dtype=np.float32)``.
-
-.. note::
-
-   ``reset`` writes the spawn state but never runs a LiDAR scan, so the
-   ``scan`` field in the observation returned by ``reset`` is all zeros;
-   the first real scan appears after the first ``step``. This is
-   deterministic and identical across seeded runs.
-
-Unseeded episodes vary
-----------------------
-
-If you omit the seed, runs are **not** reproducible by design:
-
-.. code-block:: python
-
-   import gymnasium as gym
-   from f1tenth_gym.envs.env_config import EnvConfig
-
-   env = gym.make("f1tenth_gym:f1tenth-v0", config=EnvConfig(render_enabled=False))
-   obs1, _ = env.reset()   # np_random seeded from OS entropy
-   obs2, _ = env.reset()   # different entropy -> different spawn
-   # obs1 and obs2 generally differ in x/y and in LiDAR noise
-   env.close()
-
-This is standard gymnasium behaviour: without a seed, ``np_random`` is
-drawn from OS entropy, so the spawn pose (and every downstream noise
-stream) changes each episode. On Spielberg the start ``x`` roughly spans
-``-1.6 … -2.4`` and ``y`` roughly ``-1.26 … -1.46`` across unseeded
-resets. Seed the reset to eliminate this variation.
-
-Checklist for a reproducible experiment
-----------------------------------------
-
-* Pass an explicit ``seed`` to **every** ``reset`` you want to reproduce
-  (do not rely on ``EnvConfig.seed`` for the spawn pose).
-* Use a **fixed, deterministic** action sequence (or a seeded policy).
-* Keep the configuration identical between runs — reconfiguring a live
-  env with ``env.unwrapped.configure(new_cfg)`` changes the physics and
-  the observation surface. See :doc:`configuration`.
-* Domain randomization and all sim2real noise knobs are already folded
-  into the reset seed, so you do not need to seed them separately — just
-  seed the reset. See :doc:`rewards_and_rl`.
-
-See also :doc:`quickstart`, :doc:`observations`, and :doc:`actions`.
+   Two configs are not noise-paired even at the same seed. A
+   single-rollout A/B difference mixes the setting's effect with a fresh
+   noise realisation — compare distributions over seeds, and difference
+   individual rollouts only when their configs are identical.
