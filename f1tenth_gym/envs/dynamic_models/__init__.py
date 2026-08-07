@@ -8,6 +8,7 @@ import math
 import warnings
 from dataclasses import dataclass, fields, replace
 from enum import IntEnum
+from typing import Optional, Tuple
 
 import numpy as np
 
@@ -329,6 +330,115 @@ FULLSCALE_VEHICLE_PARAMETERS = VehicleParameters(
     tire_r_vy6=-10.704,
 )
 
+
+@dataclass(frozen=True)
+class VehicleParamRanges:
+    """Typed (low, high) randomization ranges, one optional slot per
+    ``VehicleParameters`` field — the autocomplete-friendly face of
+    ``DomainRandomizationConfig.param_ranges``. A field left ``None`` is not
+    randomized. ``tests/test_vehicle_params_abi.py`` pins field parity with
+    ``VehicleParameters``, so the two cannot drift apart silently."""
+
+    mu: Optional[Tuple[float, float]] = None
+    C_Sf: Optional[Tuple[float, float]] = None
+    C_Sr: Optional[Tuple[float, float]] = None
+    lf: Optional[Tuple[float, float]] = None
+    lr: Optional[Tuple[float, float]] = None
+    h: Optional[Tuple[float, float]] = None
+    m: Optional[Tuple[float, float]] = None
+    I: Optional[Tuple[float, float]] = None
+    s_min: Optional[Tuple[float, float]] = None
+    s_max: Optional[Tuple[float, float]] = None
+    sv_min: Optional[Tuple[float, float]] = None
+    sv_max: Optional[Tuple[float, float]] = None
+    v_switch: Optional[Tuple[float, float]] = None
+    a_max: Optional[Tuple[float, float]] = None
+    v_min: Optional[Tuple[float, float]] = None
+    v_max: Optional[Tuple[float, float]] = None
+    width: Optional[Tuple[float, float]] = None
+    length: Optional[Tuple[float, float]] = None
+    collision_body_center_x: Optional[Tuple[float, float]] = None
+    collision_body_center_y: Optional[Tuple[float, float]] = None
+    kappa_dot_max: Optional[Tuple[float, float]] = None
+    kappa_dot_dot_max: Optional[Tuple[float, float]] = None
+    j_max: Optional[Tuple[float, float]] = None
+    j_dot_max: Optional[Tuple[float, float]] = None
+    m_s: Optional[Tuple[float, float]] = None
+    m_uf: Optional[Tuple[float, float]] = None
+    m_ur: Optional[Tuple[float, float]] = None
+    I_Phi_s: Optional[Tuple[float, float]] = None
+    I_y_s: Optional[Tuple[float, float]] = None
+    I_z_body: Optional[Tuple[float, float]] = None
+    I_xz_s: Optional[Tuple[float, float]] = None
+    K_sf: Optional[Tuple[float, float]] = None
+    K_sdf: Optional[Tuple[float, float]] = None
+    K_sr: Optional[Tuple[float, float]] = None
+    K_sdr: Optional[Tuple[float, float]] = None
+    T_f: Optional[Tuple[float, float]] = None
+    T_r: Optional[Tuple[float, float]] = None
+    K_ras: Optional[Tuple[float, float]] = None
+    K_tsf: Optional[Tuple[float, float]] = None
+    K_tsr: Optional[Tuple[float, float]] = None
+    K_rad: Optional[Tuple[float, float]] = None
+    K_zt: Optional[Tuple[float, float]] = None
+    h_cg_mb: Optional[Tuple[float, float]] = None
+    h_raf: Optional[Tuple[float, float]] = None
+    h_rar: Optional[Tuple[float, float]] = None
+    h_s: Optional[Tuple[float, float]] = None
+    I_uf: Optional[Tuple[float, float]] = None
+    I_ur: Optional[Tuple[float, float]] = None
+    I_y_w: Optional[Tuple[float, float]] = None
+    K_lt: Optional[Tuple[float, float]] = None
+    R_w: Optional[Tuple[float, float]] = None
+    T_sb: Optional[Tuple[float, float]] = None
+    T_se: Optional[Tuple[float, float]] = None
+    D_f: Optional[Tuple[float, float]] = None
+    D_r: Optional[Tuple[float, float]] = None
+    E_f: Optional[Tuple[float, float]] = None
+    E_r: Optional[Tuple[float, float]] = None
+    tire_p_cx1: Optional[Tuple[float, float]] = None
+    tire_p_dx1: Optional[Tuple[float, float]] = None
+    tire_p_dx3: Optional[Tuple[float, float]] = None
+    tire_p_ex1: Optional[Tuple[float, float]] = None
+    tire_p_kx1: Optional[Tuple[float, float]] = None
+    tire_p_hx1: Optional[Tuple[float, float]] = None
+    tire_p_vx1: Optional[Tuple[float, float]] = None
+    tire_r_bx1: Optional[Tuple[float, float]] = None
+    tire_r_bx2: Optional[Tuple[float, float]] = None
+    tire_r_cx1: Optional[Tuple[float, float]] = None
+    tire_r_ex1: Optional[Tuple[float, float]] = None
+    tire_r_hx1: Optional[Tuple[float, float]] = None
+    tire_p_cy1: Optional[Tuple[float, float]] = None
+    tire_p_dy1: Optional[Tuple[float, float]] = None
+    tire_p_dy3: Optional[Tuple[float, float]] = None
+    tire_p_ey1: Optional[Tuple[float, float]] = None
+    tire_p_ky1: Optional[Tuple[float, float]] = None
+    tire_p_hy1: Optional[Tuple[float, float]] = None
+    tire_p_hy3: Optional[Tuple[float, float]] = None
+    tire_p_vy1: Optional[Tuple[float, float]] = None
+    tire_p_vy3: Optional[Tuple[float, float]] = None
+    tire_r_by1: Optional[Tuple[float, float]] = None
+    tire_r_by2: Optional[Tuple[float, float]] = None
+    tire_r_by3: Optional[Tuple[float, float]] = None
+    tire_r_cy1: Optional[Tuple[float, float]] = None
+    tire_r_ey1: Optional[Tuple[float, float]] = None
+    tire_r_hy1: Optional[Tuple[float, float]] = None
+    tire_r_vy1: Optional[Tuple[float, float]] = None
+    tire_r_vy3: Optional[Tuple[float, float]] = None
+    tire_r_vy4: Optional[Tuple[float, float]] = None
+    tire_r_vy5: Optional[Tuple[float, float]] = None
+    tire_r_vy6: Optional[Tuple[float, float]] = None
+
+    def as_dict(self) -> dict:
+        """The non-None ranges as {field_name: (low, high)}."""
+        return {
+            f.name: getattr(self, f.name)
+            for f in fields(self)
+            if getattr(self, f.name) is not None
+        }
+
+    def with_updates(self, **updates) -> "VehicleParamRanges":
+        return replace(self, **updates)
 
 class DynamicModel(IntEnum):
     KS = 1  # Kinematic Single Track
