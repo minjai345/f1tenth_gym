@@ -256,3 +256,33 @@ class TestFiniteObsBounds(unittest.TestCase):
                 ot,
                 lambda t: _np.array([[0.4189 if t % 2 else -0.4189, 20.0]], _np.float32),
             )
+
+
+class TestScanFieldGating(unittest.TestCase):
+    """Pins ISSUES_PLAN.md #14: no scan key when the LiDAR is disabled."""
+
+    def test_scan_dropped_when_lidar_disabled(self):
+        from f1tenth_gym.envs.lidar import LiDARConfig
+
+        env = gym.make(
+            "f1tenth_gym:f1tenth-v0",
+            config=EnvConfig(lidar_config=LiDARConfig(enabled=False), render_enabled=False),
+        )
+        obs, _ = env.reset(seed=1)
+        self.assertNotIn("scan", obs["agent_0"])
+        self.assertNotIn("scan", env.observation_space["agent_0"].spaces)
+        self.assertTrue(env.observation_space.contains(obs))
+        env.close()
+
+    def test_features_scan_with_lidar_disabled_raises(self):
+        from f1tenth_gym.envs.lidar import LiDARConfig
+
+        cfg = EnvConfig(
+            lidar_config=LiDARConfig(enabled=False),
+            observation_config=ObservationConfig(
+                type=ObservationType.FEATURES, features=("scan", "pose_x")
+            ),
+            render_enabled=False,
+        )
+        with self.assertRaisesRegex(ValueError, "LiDAR is disabled"):
+            gym.make("f1tenth_gym:f1tenth-v0", config=cfg)
