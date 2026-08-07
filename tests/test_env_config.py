@@ -355,3 +355,57 @@ class TestSubstepValidation(unittest.TestCase):
         SimulationConfig(timestep=0.025, integrator_timestep=0.01)
         with self.assertRaises(ValueError):
             self._substeps(0.025, 0.01)
+
+
+class TestMultiBodyParameterGate(unittest.TestCase):
+    """`DynamicModel.MB` is only usable with a preset that populates its ABI.
+
+    The two small-scale presets leave every multi-body field at ``nan``, which
+    used to yield an all-NaN state with no exception. The gate fires at config
+    construction — before the map download and the numba JIT — so the failure is
+    cheap and names the cause.
+    """
+
+    def _cfg(self, params):
+        from f1tenth_gym.envs.dynamic_models import DynamicModel
+
+        return EnvConfig(
+            params=params,
+            simulation_config=SimulationConfig(dynamics_model=DynamicModel.MB),
+            render_enabled=False,
+        )
+
+    def test_f1tenth_params_are_rejected(self):
+        with self.assertRaises(ValueError) as ctx:
+            self._cfg(F1TENTH_VEHICLE_PARAMETERS)
+        self.assertIn("multi-body", str(ctx.exception))
+
+    def test_f1fifth_params_are_rejected(self):
+        from f1tenth_gym.envs.dynamic_models import F1FIFTH_VEHICLE_PARAMETERS
+
+        with self.assertRaises(ValueError):
+            self._cfg(F1FIFTH_VEHICLE_PARAMETERS)
+
+    def test_fullscale_params_are_accepted(self):
+        from f1tenth_gym.envs.dynamic_models import FULLSCALE_VEHICLE_PARAMETERS
+
+        cfg = self._cfg(FULLSCALE_VEHICLE_PARAMETERS)
+        self.assertIs(cfg.simulation_config.dynamics_model.name, "MB")
+
+    def test_the_gate_does_not_fire_for_ks_or_st(self):
+        """Only MB reads the multi-body block; KS/ST must stay unaffected."""
+        from f1tenth_gym.envs.dynamic_models import DynamicModel
+
+        for model in (DynamicModel.KS, DynamicModel.ST):
+            with self.subTest(model=model.name):
+                EnvConfig(
+                    params=F1TENTH_VEHICLE_PARAMETERS,
+                    simulation_config=SimulationConfig(dynamics_model=model),
+                    render_enabled=False,
+                )
+
+    def test_missing_mb_parameters_reports_the_whole_block(self):
+        self.assertEqual(len(F1TENTH_VEHICLE_PARAMETERS.missing_mb_parameters()), 69)
+        from f1tenth_gym.envs.dynamic_models import FULLSCALE_VEHICLE_PARAMETERS
+
+        self.assertEqual(FULLSCALE_VEHICLE_PARAMETERS.missing_mb_parameters(), ())
