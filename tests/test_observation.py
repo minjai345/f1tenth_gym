@@ -11,16 +11,16 @@ from f1tenth_gym.envs.observation import (
 
 
 class TestObservationInterface(unittest.TestCase):
-    def test_direct_default_fields(self):
+    def test_default_type_fields(self):
         env = gym.make(
             "f1tenth_gym:f1tenth-v0",
             config=EnvConfig(
-                observation_config=ObservationConfig(type=ObservationType.DIRECT)
+                observation_config=ObservationConfig(type=ObservationType.DEFAULT)
             ),
         )
 
         obs, _ = env.reset()
-        direct_obs = observation_factory(env, type=ObservationType.DIRECT)
+        direct_obs = observation_factory(env, type=ObservationType.DEFAULT)
         space = direct_obs.space()
         sample = direct_obs.observe()
 
@@ -136,7 +136,7 @@ class TestObservationInterface(unittest.TestCase):
 
     def test_space_contains_observation(self):
         obs_types = [
-            ObservationType.DIRECT,
+            ObservationType.DEFAULT,
             ObservationType.KINEMATIC_STATE,
             ObservationType.DYNAMIC_STATE,
         ]
@@ -159,7 +159,7 @@ class TestScanObservationCopy(unittest.TestCase):
         (e.g. an RL replay buffer)."""
         env = gym.make(
             "f1tenth_gym:f1tenth-v0",
-            config=EnvConfig(observation_config=ObservationConfig(type=ObservationType.DIRECT)),
+            config=EnvConfig(observation_config=ObservationConfig(type=ObservationType.DEFAULT)),
         )
         obs, _ = env.reset(seed=1)
         env.step(np.array([[0.1, 4.0]], dtype=np.float32))
@@ -181,7 +181,7 @@ class TestFiniteObsBounds(unittest.TestCase):
         actual observations under aggressive driving, so gymnasium
         normalization / check_env work."""
         import numpy as _np
-        for ot in (ObservationType.DIRECT, ObservationType.KINEMATIC_STATE,
+        for ot in (ObservationType.DEFAULT, ObservationType.KINEMATIC_STATE,
                    ObservationType.DYNAMIC_STATE, ObservationType.FRENET_DYNAMIC_STATE):
             from f1tenth_gym.envs.env_config import SimulationConfig
             env = gym.make(
@@ -250,7 +250,7 @@ class TestFiniteObsBounds(unittest.TestCase):
         # only AFTER crossing the limit, so delta/speed overshoot by one step.
         # The bounds must include that margin.
         import numpy as _np
-        for ot in (ObservationType.DIRECT, ObservationType.DYNAMIC_STATE,
+        for ot in (ObservationType.DEFAULT, ObservationType.DYNAMIC_STATE,
                    ObservationType.KINEMATIC_STATE):
             self._rollout_in_space(
                 ot,
@@ -286,3 +286,55 @@ class TestScanFieldGating(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "LiDAR is disabled"):
             gym.make("f1tenth_gym:f1tenth-v0", config=cfg)
+
+
+class TestRawObservation(unittest.TestCase):
+    """Pins ISSUES_PLAN.md #12: DIRECT is raw batched arrays; DEFAULT is the dict."""
+
+    def _raw_env(self, num_agents=2):
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            return gym.make(
+                "f1tenth_gym:f1tenth-v0",
+                config=EnvConfig(
+                    num_agents=num_agents,
+                    observation_config=ObservationConfig(type=ObservationType.DIRECT),
+                    render_enabled=False,
+                ),
+            )
+
+    def test_direct_warns_about_the_meaning_change(self):
+        import warnings
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            env = gym.make(
+                "f1tenth_gym:f1tenth-v0",
+                config=EnvConfig(
+                    observation_config=ObservationConfig(type=ObservationType.DIRECT),
+                    render_enabled=False,
+                ),
+            )
+            env.close()
+        self.assertTrue(any("changed meaning" in str(w.message) for w in caught))
+
+    def test_original_is_an_alias_of_default(self):
+        self.assertIs(ObservationType.ORIGINAL, ObservationType.DEFAULT)
+
+    def test_raw_shapes_space_and_copies(self):
+        env = self._raw_env(num_agents=2)
+        obs, _ = env.reset(seed=1)
+        sim = env.unwrapped.sim
+        self.assertEqual(obs["state"].shape, (2, sim.state_dim))
+        self.assertEqual(obs["standard_state"].shape, (2, 7))
+        self.assertEqual(obs["scans"].shape, (2, sim.scan_num_beams))
+        self.assertEqual(obs["frenet"].shape, (2, 3))
+        self.assertEqual(obs["collisions"].shape, (2,))
+        self.assertTrue(env.observation_space.contains(obs))
+        # copies, never live SoA views
+        self.assertFalse(np.shares_memory(obs["scans"], sim.state.scans))
+        self.assertFalse(np.shares_memory(obs["state"], sim.state.state))
+        self.assertFalse(np.shares_memory(obs["standard_state"], sim.state.standard_state))
+        env.close()

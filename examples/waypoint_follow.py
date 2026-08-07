@@ -383,11 +383,11 @@ def build_config() -> EnvConfig:
         ),
 
         # ---- observations --------------------------------------------------
-        # DEFAULT is ObservationType.DIRECT (scan + std_state + state + lap info).
+        # ObservationType.DEFAULT: packaged per-agent dict (scan + std_state + state + lap info).
         # We use KINEMATIC_STATE so the follower can read pose_x/pose_y/pose_theta
         # directly (DIRECT does not expose those derived fields -- see CLAUDE.md).
         observation_config=ObservationConfig(
-            type=ObservationType.KINEMATIC_STATE,  # default: DIRECT
+            type=ObservationType.KINEMATIC_STATE,  # default: DEFAULT
             features=None,          # only used with type=FEATURES (a custom field tuple)
         ),
 
