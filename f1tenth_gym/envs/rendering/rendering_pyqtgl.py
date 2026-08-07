@@ -242,9 +242,8 @@ class PyQtEnvRendererGL(EnvRenderer):
         """
         Update the simulation obs to be rendered.
 
-        Parameters
-        ----------
-            obs: simulation obs as dictionary
+        Args:
+            obs: simulation obs as dictionary.
         """
         if self.cars is None:
             self.cars = [CarRenderer(
@@ -367,10 +366,9 @@ class PyQtEnvRendererGL(EnvRenderer):
         """
         Add a custom callback for visualization.
 
-        Parameters
-        ----------
-        callback_fn : Callable[[EnvRenderer], None]
-            callback function to be called at every rendering step
+        Args:
+            callback_fn: callback function (a Callable[[EnvRenderer], None]) to be
+                called at every rendering step.
         """
         self.callbacks.append(callback_fn)
     

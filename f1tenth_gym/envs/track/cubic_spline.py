@@ -12,17 +12,16 @@ from f1tenth_gym.envs.track.utils import nearest_point_on_trajectory
 _CUBIC_POW = np.arange(4)[::-1]
 
 class CubicSplineND:
-    """
-    Cubic CubicSplineND class.
+    """Periodic cubic spline over a 7-channel reference line.
 
-    Attributes
-    ----------
-    s : list
-        cumulative distance along the data points.
-    sx : CubicSpline1D
-        cubic spline for x coordinates.
-    sy : CubicSpline1D
-        cubic spline for y coordinates.
+    Interpolates ``[x, y, cos(psi), sin(psi), k, vx, ax]`` over chordal
+    arclength with ``bc_type="periodic"`` — every input is force-closed into a
+    loop. Yaw goes through the cos/sin channels so it wraps correctly.
+
+    Attributes:
+        s: chordal arclength knots of the data points (np.ndarray).
+        spline: the underlying ``scipy.interpolate.CubicSpline`` over all
+            seven channels.
     """
 
     def __init__(self, x, y,
@@ -84,17 +83,12 @@ class CubicSplineND:
         """
         Calc cumulative distance.
 
-        Parameters
-        ----------
-        x : list
-            x coordinates for data points.
-        y : list
-            y coordinates for data points.
+        Args:
+            x: x coordinates for data points (list).
+            y: y coordinates for data points (list).
 
-        Returns
-        -------
-        s : np.ndarray
-            cumulative distance along the data points.
+        Returns:
+            s (np.ndarray): cumulative distance along the data points.
         """
         dx = np.diff(x)
         dy = np.diff(y)
@@ -136,18 +130,13 @@ class CubicSplineND:
         """
         Calc position at the given s.
 
-        Parameters
-        ----------
-        s : float
-            distance from the start point. if `s` is outside the data point's
-            range, return None.
+        Args:
+            s: distance (float) from the start point. If `s` is outside the data
+                point's range, return None.
 
-        Returns
-        -------
-        x : float | None
-            x position for given s.
-        y : float | None
-            y position for given s.
+        Returns:
+            x (float | None): x position for given s.
+            y (float | None): y position for given s.
         """
         segment = segment or self.find_segment_for_s(s)
         x = self.predict_with_spline(s, segment, 0)[0]
@@ -158,16 +147,12 @@ class CubicSplineND:
         """
         Calc curvature at the given s.
 
-        Parameters
-        ----------
-        s : float
-            distance from the start point. if `s` is outside the data point's
-            range, return None.
+        Args:
+            s: distance (float) from the start point. If `s` is outside the data
+                point's range, return None.
 
-        Returns
-        -------
-        k : float
-            curvature for given s.
+        Returns:
+            k (float): curvature for given s.
         """
         segment = self.find_segment_for_s(s)
         k = self.predict_with_spline(s, segment, 4)[0]
@@ -177,16 +162,12 @@ class CubicSplineND:
         """
         Find curvature at the given s by the segment.
 
-        Parameters
-        ----------
-        s : float
-            distance from the start point. if `s` is outside the data point's
-            range, return None.
+        Args:
+            s: distance (float) from the start point. If `s` is outside the data
+                point's range, return None.
 
-        Returns
-        -------
-        k : float
-            curvature for given s.
+        Returns:
+            k (float): curvature for given s.
         """
         segment = self.find_segment_for_s(s)
         k = self.points[segment, 4]
@@ -196,15 +177,12 @@ class CubicSplineND:
         """
         Calc yaw angle at the given s.
 
-        Parameters
-        ----------
-        s : float
-            distance from the start point. If `s` is outside the data point's range, return None.
+        Args:
+            s: distance (float) from the start point. If `s` is outside the data
+                point's range, return None.
 
-        Returns
-        -------
-        yaw : float
-            yaw angle (tangent vector) for given s.
+        Returns:
+            yaw (float): yaw angle (tangent vector) for given s.
         """
         segment = segment or self.find_segment_for_s(s)
         cos = self.predict_with_spline(s, segment, 2)[0]
@@ -218,20 +196,14 @@ class CubicSplineND:
         """
         Calculate arclength for a given point (x, y) on the trajectory.
 
-        Parameters
-        ----------
-        x : float
-            x position.
-        y : float
-            y position.
-        s_guess : float
-            initial guess for s.
-        Returns
-        -------
-        s : float
-            distance from the start point for given x, y.
-        ey : float
-            lateral deviation for given x, y.
+        Args:
+            x: x position (float).
+            y: y position (float).
+            s_guess: initial guess for s (float).
+
+        Returns:
+            s (float): distance from the start point for given x, y.
+            ey (float): lateral deviation for given x, y.
         """
         def distance_to_spline(s):
             x_eval, y_eval = self.spline(s)[0, :2]
@@ -247,21 +219,15 @@ class CubicSplineND:
         Less accuarate and less smooth than calc_arclength but much faster.
         Suitable for lap counting.
 
-        Parameters
-        ----------
-        x : float
-            x position.
-        y : float
-            y position.
-        s_inds : np.ndarray, optional
-            Indices of the points to consider for the calculation.
+        Args:
+            x: x position (float).
+            y: y position (float).
+            s_inds: optional np.ndarray of indices of the points to consider for
+                the calculation.
 
-        Returns
-        -------
-        s : float
-            distance from the start point for given x, y.
-        ey : float
-            lateral deviation for given x, y.
+        Returns:
+            s (float): distance from the start point for given x, y.
+            ey (float): lateral deviation for given x, y.
         """
         if s_inds is None:
             ey, t, min_dist_segment = nearest_point_on_trajectory(
@@ -282,16 +248,12 @@ class CubicSplineND:
         """
         Calculates the tangent to the curve at a given point.
 
-        Parameters
-        ----------
-        s : float
-            distance from the start point.
-            If `s` is outside the data point's range, return None.
+        Args:
+            s: distance (float) from the start point. If `s` is outside the data
+                point's range, return None.
 
-        Returns
-        -------
-        tangent : float
-            tangent vector for given s.
+        Returns:
+            tangent (float): tangent vector for given s.
         """
         dx, dy = self.spline(s, 1)[:2]
         tangent = np.array([dx, dy])
@@ -301,16 +263,12 @@ class CubicSplineND:
         """
         Calculate the normal to the curve at a given point.
 
-        Parameters
-        ----------
-        s : float
-            distance from the start point.
-            If `s` is outside the data point's range, return None.
+        Args:
+            s: distance (float) from the start point. If `s` is outside the data
+                point's range, return None.
 
-        Returns
-        -------
-        normal : float
-            normal vector for given s.
+        Returns:
+            normal (float): normal vector for given s.
         """
         dx, dy = self.spline(s, 1)[:2]
         normal = np.array([-dy, dx])

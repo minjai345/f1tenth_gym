@@ -676,5 +676,5 @@ def vehicle_dynamics_mb(x: np.ndarray, u_init: np.ndarray, params: np.ndarray) -
 
 @njit(cache=True)
 def get_standardized_state_mb(x: np.ndarray) -> np.ndarray:
-    """[X,Y,Steering_Angle,Speed,YAW,YAW_RATE,V_Y]"""
+    """[X, Y, steering_angle, speed, yaw, yaw_rate, beta] — index 6 is the SLIP ANGLE, not v_y."""
     return np.array([x[0], x[1], x[2], np.sqrt(x[3] ** 2 + x[10] ** 2), x[4], x[5], np.arctan2(x[10], x[3])])

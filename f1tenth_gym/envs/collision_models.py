@@ -260,16 +260,19 @@ def get_trmtx(pose):
 
 @njit(cache=True)
 def get_vertices(pose, length, width):
-    """
-    Utility function to return vertices of the car body given pose and size
+    """Corner vertices of the car body for a given pose and size.
 
     Args:
-        pose (np.ndarray, (3, )): current world coordinate pose of the vehicle
-        length (float): car length
-        width (float): car width
+        pose: Current world-coordinate pose ``(3,)`` of the vehicle.
+        length: Car length in metres.
+        width: Car width in metres.
 
     Returns:
-        vertices (np.ndarray, (4, 2)): corner vertices of the vehicle body
+        Corner vertices ``(4, 2)`` in the FIXED cyclic order
+        ``[rear-left, rear-right, front-right, front-left]``. This winding is
+        a contract: ``ray_cast`` closes the polygon as ``vertices[0..3, 0]``,
+        so reordering turns the body into a self-intersecting bow-tie and
+        silently corrupts opponent occlusion.
     """
     H = get_trmtx(pose)
     rl = H.dot(np.asarray([[-length / 2], [width / 2], [0.0], [1.0]])).flatten()

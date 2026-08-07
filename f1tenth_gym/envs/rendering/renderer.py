@@ -15,10 +15,9 @@ class EnvRenderer(ABC):
         """
         Add a custom callback for visualization.
 
-        Parameters
-        ----------
-        callback_fn : Callable[[EnvRenderer], None]
-            callback function to be called at every rendering step
+        Args:
+            callback_fn: Callback function (Callable[[EnvRenderer], None]) to be called at
+                every rendering step.
         """
         raise NotImplementedError()
     
@@ -28,10 +27,8 @@ class EnvRenderer(ABC):
         Update the state to be rendered.
         This is called at every rendering call.
 
-        Parameters
-        ----------
-        obs : dict
-            observations from the env to be rendered
+        Args:
+            obs: Observations dict from the env to be rendered.
         """
         raise NotImplementedError()    
 
@@ -60,19 +57,14 @@ class EnvRenderer(ABC):
         """
         Get a point renderer for visualizing points on the map.
 
-        Parameters
-        ----------
-        points : Union[list, np.ndarray]
-            Array of shape (N, 2) or (N, 3) with point coordinates.
-        color : tuple[int, int, int], optional
-            RGB color tuple, by default (0, 0, 255) (blue).
-        size : int, optional
-            Size of points in pixels, by default 1.
+        Args:
+            points: Array (list or np.ndarray) of shape (N, 2) or (N, 3) with point
+                coordinates.
+            color: Optional RGB color tuple, by default (0, 0, 255) (blue).
+            size: Optional size of points in pixels, by default 1.
 
-        Returns
-        -------
-        ObjectRenderer
-            A renderer object that can be updated with new points.
+        Returns:
+            An ObjectRenderer that can be updated with new points.
         """
         raise NotImplementedError()
 
@@ -87,19 +79,14 @@ class EnvRenderer(ABC):
         """
         Get a line renderer for visualizing connected line segments.
 
-        Parameters
-        ----------
-        points : Union[list, np.ndarray]
-            Array of shape (N, 2) or (N, 3) with point coordinates forming line segments.
-        color : tuple[int, int, int], optional
-            RGB color tuple, by default (0, 0, 255) (blue).
-        size : int, optional
-            Line width in pixels, by default 1.
+        Args:
+            points: Array (list or np.ndarray) of shape (N, 2) or (N, 3) with point
+                coordinates forming line segments.
+            color: Optional RGB color tuple, by default (0, 0, 255) (blue).
+            size: Optional line width in pixels, by default 1.
 
-        Returns
-        -------
-        ObjectRenderer
-            A renderer object that can be updated with new points.
+        Returns:
+            An ObjectRenderer that can be updated with new points.
         """
         raise NotImplementedError()
 
@@ -114,19 +101,14 @@ class EnvRenderer(ABC):
         """
         Get a closed line renderer for visualizing polygons or closed paths.
 
-        Parameters
-        ----------
-        points : Union[list, np.ndarray]
-            Array of shape (N, 2) or (N, 3) with point coordinates forming a closed shape.
-        color : tuple[int, int, int], optional
-            RGB color tuple, by default (0, 0, 255) (blue).
-        size : int, optional
-            Line width in pixels, by default 1.
+        Args:
+            points: Array (list or np.ndarray) of shape (N, 2) or (N, 3) with point
+                coordinates forming a closed shape.
+            color: Optional RGB color tuple, by default (0, 0, 255) (blue).
+            size: Optional line width in pixels, by default 1.
 
-        Returns
-        -------
-        ObjectRenderer
-            A renderer object that can be updated with new points.
+        Returns:
+            An ObjectRenderer that can be updated with new points.
         """
         raise NotImplementedError()
 
@@ -145,10 +127,8 @@ class ObjectRenderer(ABC):
     def update(self, points: np.ndarray) -> None:
         """
         Update the renderer with new point data.
-        
-        Parameters
-        ----------
-        points : np.ndarray
-            Array of shape (N, 2) or (N, 3) with point coordinates.
+
+        Args:
+            points: np.ndarray of shape (N, 2) or (N, 3) with point coordinates.
         """
         raise NotImplementedError()

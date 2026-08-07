@@ -85,10 +85,22 @@ def steering_constraint(
 
 @njit(cache=True)
 def pid_steer(steer, current_steer, max_sv, kp):
-    # Saturated P controller: sv = clip(kp * error, -max_sv, +max_sv).
-    # kp <= 0 selects the legacy relay (+/-max_sv whenever |error| > 1e-4),
-    # kept as an explicit escape hatch -- the relay's minimum increment per
-    # step (max_sv * dt) dwarfs its deadband, so it limit-cycles forever.
+    """Steering-angle tracking: a saturated P controller.
+
+    ``sv = clip(kp * (steer - current_steer), -max_sv, +max_sv)``.
+
+    Args:
+        steer: Target steering angle in radians.
+        current_steer: Current steering angle in radians.
+        max_sv: Steering-velocity saturation in rad/s.
+        kp: Proportional gain. ``kp <= 0`` selects the legacy bang-bang relay
+            (full ``±max_sv`` whenever the error exceeds 1e-4 rad), kept as an
+            explicit escape hatch — the relay's minimum increment per step
+            (``max_sv * dt``) dwarfs its deadband, so it limit-cycles forever.
+
+    Returns:
+        The commanded steering velocity in rad/s.
+    """
     steer_diff = steer - current_steer
     if kp <= 0.0:
         if np.fabs(steer_diff) > 1e-4:
@@ -104,16 +116,22 @@ def pid_steer(steer, current_steer, max_sv, kp):
 
 @njit(cache=True)
 def pid_accl(speed, current_speed, max_a, max_v, min_v):
-    """
-    Basic controller for speed/steer -> accl./steer vel.
+    """Speed tracking: a P controller with four gain quadrants.
 
-        Args:
-            speed (float): desired input speed
-            steer (float): desired input steering angle
+    The gain depends on the sign of the current speed and of the speed error
+    (accelerating forward, braking forward, braking from reverse, accelerating
+    in reverse). Note the quadrant test is ``current_speed > 0.0``, so a car
+    at exactly rest uses the weaker reverse gains.
 
-        Returns:
-            accl (float): desired input acceleration
-            sv (float): desired input steering velocity
+    Args:
+        speed: Target speed in m/s.
+        current_speed: Current speed in m/s.
+        max_a: Acceleration limit in m/s^2.
+        max_v: Forward speed limit in m/s.
+        min_v: Reverse speed limit in m/s (negative).
+
+    Returns:
+        The commanded acceleration in m/s^2 (before ``accl_constraints``).
     """
     # accl
     vel_diff = speed - current_speed

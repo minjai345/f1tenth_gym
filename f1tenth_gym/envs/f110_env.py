@@ -453,17 +453,21 @@ class F110Env(gym.Env):
         return reward
 
     def step(self, action):
-        """
-        Step function for the gym env
+        """Advance the simulation by one timestep.
 
         Args:
-            action (np.ndarray(num_agents, 2))
+            action: Array of shape ``(num_agents, 2)``, columns
+                ``[steering, longitudinal]`` — steering FIRST. Neither column
+                is clipped against the action space; only the shape is checked.
 
         Returns:
-            obs (dict): observation of the current step
-            reward (float, default=self.timestep): step reward, currently is physics timestep
-            done (bool): if the simulation is done
-            info (dict): auxillary information dictionary
+            The gymnasium 5-tuple ``(obs, reward, terminated, truncated, info)``:
+            ``obs`` per the configured observation type; ``reward`` per
+            ``RewardConfig`` (SURVIVAL: the timestep; PROGRESS: weighted Frenet
+            progress; CUSTOM: your ``reward_fn``); ``terminated`` on collision
+            or ``max_laps``; ``truncated`` when ``max_episode_steps`` is
+            reached; ``info`` with ``lap_times``, ``lap_counts``, ``sim_time``,
+            ``collisions`` and ``progress`` (all copies).
         """
 
         # call simulation step
@@ -508,18 +512,24 @@ class F110Env(gym.Env):
         return obs, reward, terminated, truncated, info
 
     def reset(self, seed=None, options=None):
-        """
-        Reset the gym environment by given poses
+        """Start a new episode.
 
         Args:
-            seed: random seed for the reset
-            options: dictionary of options for the reset containing initial poses of the agents
+            seed: Seeds ``np_random`` (spawn draw, domain randomization, LiDAR
+                noise). ``None`` uses ``EnvConfig.seed`` for the first reset if
+                set, else OS entropy.
+            options: Optional spawn override. ``{"poses": array (n, 3)}``
+                places agents at ``[x, y, theta]`` in the model's native frame
+                (zero speed and steering). ``{"states": array (n, state_dim)}``
+                writes full native state rows verbatim — the only way to spawn
+                at speed. Without either, the configured reset strategy samples
+                the poses.
 
         Returns:
-            obs (dict): observation of the current step
-            reward (float, default=self.timestep): step reward, currently is physics timestep
-            done (bool): if the simulation is done
-            info (dict): auxillary information dictionary
+            ``(obs, info)``: the first observation (with a real LiDAR sweep)
+            and an info dict with ``lap_times``, ``lap_counts`` and
+            ``sim_time`` — note ``collisions``/``progress`` appear only in
+            ``step()``'s info.
         """
         # EnvConfig.seed covers the FIRST unseeded reset, so a whole run is a
         # deterministic function of the config; later unseeded resets continue

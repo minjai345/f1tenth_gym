@@ -380,17 +380,22 @@ def get_blocked_view_indices(pose, vertices, scan_angles):
 
 @njit(cache=True)
 def ray_cast(pose, scan, scan_angles, vertices):
-    """
-    Modify a scan by ray casting onto another agent's four vertices
+    """Shorten scan beams that hit another agent's body.
+
+    MUTATES ``scan`` IN PLACE and returns the same array (not a copy) — the
+    caller must run any check that needs the unmodified scan (e.g. the wall
+    collision check) BEFORE calling this.
 
     Args:
-        pose (np.ndarray(3, )): pose of the vehicle performing scan
-        scan (np.ndarray(num_beams, )): original scan to modify
-        scan_angles (np.ndarray(num_beams, )): corresponding beam angles
-        vertices (np.ndarray(4, 2)): four vertices of a vehicle pose
+        pose: Pose ``(3,)`` of the vehicle performing the scan.
+        scan: Scan ``(num_beams,)`` to shorten in place.
+        scan_angles: Corresponding beam angles ``(num_beams,)``.
+        vertices: The opponent body's four corners ``(4, 2)``, in the cyclic
+            winding produced by ``get_vertices`` (closed here by repeating
+            vertex 0).
 
     Returns:
-        new_scan (np.ndarray(num_beams, )): modified scan
+        The SAME ``scan`` array, beams shortened where they hit the body.
     """
     # pad vertices so loops around
     looped_vertices = np.empty((5, 2))

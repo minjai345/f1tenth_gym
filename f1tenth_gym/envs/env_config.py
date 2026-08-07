@@ -34,9 +34,9 @@ IntegratorFn = Callable[[DynamicsFn, np.ndarray, np.ndarray, float, np.ndarray],
 class LoopCounterMode(IntEnum):
     """Mode for counting completed laps.
 
-    TOGGLE: Uses start/finish line crossing detection.
-    FRENET_BASED: Uses Frenet frame progress along centerline.
-    WINDING_ANGLE: Uses cumulative angle around track center.
+    TOGGLE: UNIMPLEMENTED — counts zero laps, so ``max_laps`` never fires.
+    FRENET_BASED: Frenet progress along the centerline (the default).
+    WINDING_ANGLE: Cumulative angle around the centroid; convex tracks only.
     """
 
     TOGGLE = 1

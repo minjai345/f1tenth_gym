@@ -94,20 +94,13 @@ class Track:
         """
         Initialize track object.
 
-        Parameters
-        ----------
-        spec : TrackSpec
-            track specification
-        filepath : str
-            path to the track image
-        ext : str
-            file extension of the track image file
-        occupancy_map : np.ndarray
-            occupancy grid map
-        centerline : Raceline, optional
-            centerline of the track, by default None
-        raceline : Raceline, optional
-            raceline of the track, by default None
+        Args:
+            spec: track specification (TrackSpec).
+            filepath: path to the track image (str).
+            ext: file extension of the track image file (str).
+            occupancy_map: occupancy grid map (np.ndarray).
+            centerline: centerline of the track (Raceline), by default None.
+            raceline: raceline of the track (Raceline), by default None.
         """
         self.spec = spec
         self.filepath = filepath
@@ -123,23 +116,16 @@ class Track:
         """
         Load track specification from yaml file.
 
-        Parameters
-        ----------
-        track : str
-            name of the track
-        filespec : str
-            path to the yaml file
+        Args:
+            track: name of the track (str).
+            filespec: path to the yaml file (str).
 
-        Returns
-        -------
-        TrackSpec
-            track specification
+        Returns:
+            TrackSpec: track specification.
 
-        Raises
-        ------
-        ValueError
-            if a required key is missing, a threshold is out of range, or a
-            key has unsupported semantics (``mode: raw``/``scale``)
+        Raises:
+            ValueError: if a required key is missing, a threshold is out of range,
+                or a key has unsupported semantics (``mode: raw``/``scale``).
         """
         with open(filespec, "r") as yaml_stream:
             map_metadata = yaml.safe_load(yaml_stream)
@@ -173,22 +159,15 @@ class Track:
         """
         Load track from track name.
 
-        Parameters
-        ----------
-        track : str
-            name of the track
-        track_scale : float, optional
-            scale of the track, by default 1.0
+        Args:
+            track: name of the track (str).
+            track_scale: scale of the track (float), by default 1.0.
 
-        Returns
-        -------
-        Track
-            track object
+        Returns:
+            Track: track object.
 
-        Raises
-        ------
-        FileNotFoundError
-            if the track cannot be loaded
+        Raises:
+            FileNotFoundError: if the track cannot be loaded.
         """
         try:
             track_dir = find_track_dir(track)
@@ -259,24 +238,18 @@ class Track:
         """
         Load track from a track directory, a path stem, or a map YAML file.
 
-        Parameters
-        ----------
-        path : pathlib.Path
-            any of: the track directory (``maps/Spielberg``), a stem inside it
-            (``maps/Spielberg/Spielberg``), or the map YAML itself
-            (``maps/Spielberg/Spielberg.yaml``, legacy ``..._map.yaml``)
-        track_scale : float, optional
-            scale of the track, by default 1.0
+        Args:
+            path: a pathlib.Path that is any of: the track directory
+                (``maps/Spielberg``), a stem inside it
+                (``maps/Spielberg/Spielberg``), or the map YAML itself
+                (``maps/Spielberg/Spielberg.yaml``, legacy ``..._map.yaml``).
+            track_scale: scale of the track (float), by default 1.0.
 
-        Returns
-        -------
-        Track
-            track object
+        Returns:
+            Track: track object.
 
-        Raises
-        ------
-        FileNotFoundError
-            if the track cannot be loaded
+        Raises:
+            FileNotFoundError: if the track cannot be loaded.
         """
         try:
             path = pathlib.Path(path)
@@ -347,19 +320,13 @@ class Track:
         """
         Create an empty track reference line.
 
-        Parameters
-        ----------
-        x : np.ndarray
-            x-coordinates of the waypoints
-        y : np.ndarray
-            y-coordinates of the waypoints
-        velx : np.ndarray
-            velocities at the waypoints
+        Args:
+            x: x-coordinates of the waypoints (np.ndarray).
+            y: y-coordinates of the waypoints (np.ndarray).
+            velx: velocities at the waypoints (np.ndarray).
 
-        Returns
-        -------
-        track: Track
-            track object
+        Returns:
+            Track: track object.
         """
         ds = 0.1
         resolution = 0.05
@@ -483,10 +450,8 @@ class Track:
         """
         Save track raceline.
 
-        Parameters
-        ----------
-        outdir : pathlib.Path
-            output directory
+        Args:
+            outdir: output directory (pathlib.Path).
         """
         raceline_filepath = outdir / f"{self.spec.name}_raceline.csv"
         with open(raceline_filepath, "w") as raceline_csv:
@@ -499,15 +464,14 @@ class Track:
                 )
 
     def save_centerline(self, outdir: pathlib.Path, half_width: float):
-        """
-        Save track raceline.
+        """Save the track CENTERLINE as ``{name}_centerline.csv``.
 
-        Parameters
-        ----------
-        outdir : pathlib.Path
-            output directory
-        half_width : float
-            half width of the track
+        Note: the writer emits a uuid comment line before the header, which
+        ``Raceline.from_centerline_file`` (``header_row=0``) cannot read back.
+
+        Args:
+            outdir: output directory (pathlib.Path).
+            half_width: half width of the track in metres (float).
         """
         raceline_filepath = outdir / f"{self.spec.name}_centerline.csv"
         with open(raceline_filepath, "w") as raceline_csv:

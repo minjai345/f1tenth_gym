@@ -21,7 +21,7 @@ def vehicle_dynamics_st(x: np.ndarray, u_init: np.ndarray, params: np.ndarray) -
             u (numpy.ndarray (2, )): control input vector (u1, u2)
                 u1: steering angle velocity of front wheels
                 u2: longitudinal acceleration
-            params (dict): dictionary containing the following parameters:
+            params (np.ndarray (18, )): flat float32 parameter array in _BASE_PARAM_ABI order (a dict raises a numba typing error):
                 mu (float): friction coefficient
                 C_Sf (float): cornering stiffness of front wheels
                 C_Sr (float): cornering stiffness of rear wheels
@@ -171,5 +171,5 @@ def vehicle_dynamics_st(x: np.ndarray, u_init: np.ndarray, params: np.ndarray) -
 
 @njit(cache=True)
 def get_standardized_state_st(x: np.ndarray) -> np.ndarray:
-    """[X,Y,Steering_Angle,Speed,YAW,YAW_RATE,V_Y]"""
+    """[X, Y, steering_angle, speed, yaw, yaw_rate, beta] — index 6 is the SLIP ANGLE, not v_y."""
     return x

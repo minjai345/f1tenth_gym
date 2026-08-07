@@ -51,7 +51,9 @@ autodoc_default_options = {
 autodoc_mock_imports = ["pyqtgraph", "PyQt6", "OpenGL"]
 
 napoleon_google_docstring = True
-napoleon_numpy_docstring = True
+# Google is the single convention (#22): a NumPy-style relapse renders raw
+# section underlines, which the -W build then rejects as malformed RST.
+napoleon_numpy_docstring = False
 napoleon_include_init_with_doc = True
 # Render "Attributes:" docstring sections as inline :ivar: fields rather than
 # separate object descriptions, so dataclass fields aren't documented twice

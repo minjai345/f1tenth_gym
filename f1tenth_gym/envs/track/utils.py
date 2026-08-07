@@ -10,20 +10,14 @@ def find_track_dir(track_name: str) -> pathlib.Path:
     """
     Find the directory of the track map corresponding to the given track name.
 
-    Parameters
-    ----------
-    track_name : str
-        name of the track
+    Args:
+        track_name: name of the track (str).
 
-    Returns
-    -------
-    pathlib.Path
-        path to the track map directory
+    Returns:
+        pathlib.Path: path to the track map directory.
 
-    Raises
-    ------
-    FileNotFoundError
-        if no map directory matching the track name is found
+    Raises:
+        FileNotFoundError: if no map directory matching the track name is found.
     """
     map_dir = pathlib.Path(__file__).parent.parent.parent.parent / "maps"
 
@@ -55,28 +49,22 @@ def nearest_point_on_trajectory(point: np.ndarray, trajectory: np.ndarray) -> tu
     """
     Return the nearest point along the given piecewise linear trajectory.
 
-    Same as nearest_point_on_line_segment, but vectorized. This method is quite fast, time constraints should
-    not be an issue so long as trajectories are not insanely long.
+    Same as nearest_point_on_line_segment, but vectorized. This method is quite fast, time
+    constraints should not be an issue so long as trajectories are not insanely long.
 
         Order of magnitude: trajectory length: 1000 --> 0.0002 second computation (5000fps)
 
-    Parameters
-    ----------
-    point: np.ndarray
-        The 2d point to project onto the trajectory
-    trajectory: np.ndarray
-        The trajectory to project the point onto, shape (N, 2)
-        The points must be unique. If they are not unique, a divide by 0 error will destroy the world
+    Args:
+        point: The 2d point (np.ndarray) to project onto the trajectory.
+        trajectory: The trajectory (np.ndarray of shape (N, 2)) to project the point onto.
+            The points must be unique. If they are not unique, a divide by 0 error will
+            destroy the world.
 
-    Returns
-    -------
-    nearest_point: np.ndarray
-        The nearest point on the trajectory
-    distance: float
-        The distance from the point to the nearest point on the trajectory
-    t: float
-    min_dist_segment: int
-        The index of the nearest point on the trajectory
+    Returns:
+        A 3-tuple ``(distance, t, min_dist_segment)``: the distance from the
+        point to its projection on the trajectory, the fractional position of
+        that projection within its segment (clipped to [0, 1]), and the index
+        of the nearest segment.
     """
     diffs = trajectory[1:, :] - trajectory[:-1, :]
     l2s = diffs[:, 0] ** 2 + diffs[:, 1] ** 2

@@ -29,28 +29,17 @@ class Raceline:
     """
     Raceline object.
 
-    Attributes
-    ----------
-    n : int
-        number of waypoints
-    ss : np.ndarray
-        arclength along the raceline
-    xs : np.ndarray
-        x-coordinates of the waypoints
-    ys : np.ndarray
-        y-coordinates of the waypoints
-    yaws : np.ndarray
-        yaw angles of the waypoints
-    ks : np.ndarray
-        curvature of the waypoints
-    vxs : np.ndarray
-        velocity along the raceline
-    axs : np.ndarray
-        acceleration along the raceline
-    length : float
-        length of the raceline
-    spline : CubicSplineND
-        spline object through the waypoints
+    Attributes:
+        n: number of waypoints (int).
+        ss: arclength along the raceline (np.ndarray).
+        xs: x-coordinates of the waypoints (np.ndarray).
+        ys: y-coordinates of the waypoints (np.ndarray).
+        yaws: yaw angles of the waypoints (np.ndarray).
+        ks: curvature of the waypoints (np.ndarray).
+        vxs: velocity along the raceline (np.ndarray).
+        axs: acceleration along the raceline (np.ndarray).
+        length: length of the raceline (float).
+        spline: CubicSplineND spline object through the waypoints.
     """
 
     def __init__(
@@ -100,21 +89,14 @@ class Raceline:
         """
         Load raceline from a centerline file.
 
-        Parameters
-        ----------
-        filepath : pathlib.Path
-            path to the centerline file
-        delimiter : str, optional
-            delimiter used in the file, by default ","
-        fixed_speed : float, optional
-            fixed speed along the raceline, by default 1.0
-        track_scale : float, optional
-            scaling factor for the track, by default 1.0
+        Args:
+            filepath: path to the centerline file (pathlib.Path).
+            delimiter: optional delimiter used in the file, by default ",".
+            fixed_speed: optional fixed speed along the raceline, by default 1.0.
+            track_scale: optional scaling factor for the track, by default 1.0.
 
-        Returns
-        -------
-        Raceline
-            raceline object
+        Returns:
+            Raceline: raceline object.
         """
         assert filepath.exists(), f"input filepath does not exist ({filepath})"
         cols = _read_labeled_csv(filepath, delimiter=delimiter, header_row=0)
@@ -154,19 +136,13 @@ class Raceline:
         """
         Load raceline from a raceline file of the format [s, x, y, psi, k, vx, ax].
 
-        Parameters
-        ----------
-        filepath : pathlib.Path
-            path to the raceline file
-        delimiter : str, optional
-            delimiter used in the file, by default ";"
-        track_scale : float, optional
-            scaling factor for the track, by default 1.0
+        Args:
+            filepath: path to the raceline file (pathlib.Path).
+            delimiter: optional delimiter used in the file, by default ";".
+            track_scale: optional scaling factor for the track, by default 1.0.
 
-        Returns
-        -------
-        Raceline
-            raceline object
+        Returns:
+            Raceline: raceline object.
         """
         if type(filepath) is str:
             filepath = pathlib.Path(filepath)
@@ -209,10 +185,8 @@ class Raceline:
         """
         Callback to render waypoints.
 
-        Parameters
-        ----------
-        e : EnvRenderer
-            Environment renderer object.
+        Args:
+            e: Environment renderer object (EnvRenderer).
         """
         points = np.stack([self.xs, self.ys], axis=1)
         if self.waypoint_renderer is None:
