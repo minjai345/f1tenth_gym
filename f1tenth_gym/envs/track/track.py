@@ -2,6 +2,7 @@ from __future__ import annotations
 import time
 import uuid
 import pathlib
+import warnings
 from dataclasses import dataclass
 from typing import Tuple, Optional
 
@@ -32,9 +33,15 @@ class TrackSpec:
     image: Optional[str]
     resolution: float
     origin: Tuple[float, float, float]
-    negate: int
-    occupied_thresh: float
-    free_thresh: float
+    negate: int = 0
+    occupied_thresh: float = 0.65
+    free_thresh: float = 0.196
+
+
+# Keys accepted from a map YAML. `image`/`resolution`/`origin` have no sane
+# fallback, so they stay required; the rest take the ROS map_server defaults.
+_SPEC_REQUIRED_KEYS = ("image", "resolution", "origin")
+_SPEC_OPTIONAL_KEYS = ("negate", "occupied_thresh", "free_thresh", "mode")
 
 @dataclass
 class Track:
@@ -111,11 +118,35 @@ class Track:
         -------
         TrackSpec
             track specification
+
+        Raises
+        ------
+        ValueError
+            if a required key is missing, or a key has unsupported semantics
+            (``negate: 1``, ``mode: raw``/``scale``)
         """
         with open(filespec, "r") as yaml_stream:
             map_metadata = yaml.safe_load(yaml_stream)
-            track_spec = TrackSpec(name=track, **map_metadata)
-        return track_spec
+        if not isinstance(map_metadata, dict):
+            raise ValueError(f"{filespec}: expected a YAML mapping of map metadata")
+        missing = [key for key in _SPEC_REQUIRED_KEYS if key not in map_metadata]
+        if missing:
+            raise ValueError(f"{filespec}: missing required map key(s): {', '.join(missing)}")
+        known = (*_SPEC_REQUIRED_KEYS, *_SPEC_OPTIONAL_KEYS)
+        for key in sorted(set(map_metadata) - set(known)):
+            warnings.warn(f"{filespec}: ignoring unsupported map key '{key}'")
+        metadata = {key: map_metadata[key] for key in known if key in map_metadata}
+        mode = metadata.pop("mode", "trinary")
+        if mode != "trinary":
+            raise ValueError(f"{filespec}: mode '{mode}' is not supported (only 'trinary')")
+        if metadata.get("negate", 0):
+            raise ValueError(f"{filespec}: 'negate: 1' is not supported (the occupancy polarity would be inverted)")
+        if not isinstance(metadata["resolution"], (int, float)) or metadata["resolution"] <= 0:
+            raise ValueError(f"{filespec}: resolution must be a positive number")
+        origin = metadata["origin"]
+        if not isinstance(origin, (list, tuple)) or len(origin) != 3:
+            raise ValueError(f"{filespec}: origin must be [x, y, theta]")
+        return TrackSpec(name=track, **metadata)
 
     @staticmethod
     def from_track_name(track: str, track_scale: float = 1.0) -> Track:
