@@ -6,7 +6,11 @@ import unittest
 import warnings
 
 import numpy as np
+from PIL import Image
+from PIL.Image import Transpose
+
 from f1tenth_gym.envs.track import Raceline, Track, find_track_dir
+from f1tenth_gym.envs.track.track import TrackSpec, _occupancy_from_image
 
 
 class TestTrackLoader(unittest.TestCase):
@@ -49,12 +53,23 @@ class TestTrackLoader(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             spec_file = pathlib.Path(tmp) / "bad.yaml"
             base = "image: x.png\nresolution: 0.05\norigin: [0, 0, 0]\n"
-            spec_file.write_text(base + "negate: 1\n")
-            with self.assertRaisesRegex(ValueError, "negate"):
-                Track.load_spec(track="bad", filespec=str(spec_file))
             spec_file.write_text(base + "mode: raw\n")
             with self.assertRaisesRegex(ValueError, "mode"):
                 Track.load_spec(track="bad", filespec=str(spec_file))
+            spec_file.write_text(base + "negate: 5\n")
+            with self.assertRaisesRegex(ValueError, "negate"):
+                Track.load_spec(track="bad", filespec=str(spec_file))
+            # a pixel-valued threshold is a common ROS-yaml mistake
+            spec_file.write_text(base + "occupied_thresh: 128\n")
+            with self.assertRaisesRegex(ValueError, "occupied_thresh"):
+                Track.load_spec(track="bad", filespec=str(spec_file))
+
+    def test_load_spec_accepts_negate(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            spec_file = pathlib.Path(tmp) / "neg.yaml"
+            spec_file.write_text("image: x.png\nresolution: 0.05\norigin: [0, 0, 0]\nnegate: 1\n")
+            spec = Track.load_spec(track="neg", filespec=str(spec_file))
+            self.assertEqual(spec.negate, 1)
 
     def test_load_spec_ros_defaults_and_unknown_key_warning(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -91,6 +106,53 @@ class TestTrackLoader(unittest.TestCase):
                 Track.from_track_name("Fallback_tmp")
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
+
+
+class TestOccupancySemantics(unittest.TestCase):
+    """Pins ISSUES_PLAN.md #1: the YAML thresholds are honoured, ROS map_server style."""
+
+    @staticmethod
+    def _spec(**kwargs):
+        return TrackSpec(name=None, image=None, resolution=0.05, origin=(0.0, 0.0, 0.0), **kwargs)
+
+    def test_threshold_cut(self):
+        # occupied iff (255 - v)/255 > occupied_thresh; at the shipped 0.45 the cut is v <= 140
+        gray = np.array([[0, 128, 140, 141, 200, 255]], dtype=np.uint8)
+        occ = _occupancy_from_image(Image.fromarray(gray), self._spec(occupied_thresh=0.45))
+        np.testing.assert_array_equal(occ, [[0.0, 0.0, 0.0, 255.0, 255.0, 255.0]])
+
+    def test_negate_inverts_the_probability(self):
+        gray = np.arange(256, dtype=np.uint8).reshape(16, 16)
+        normal = _occupancy_from_image(Image.fromarray(gray), self._spec(occupied_thresh=0.45))
+        inverted = _occupancy_from_image(
+            Image.fromarray(255 - gray), self._spec(negate=1, occupied_thresh=0.45)
+        )
+        np.testing.assert_array_equal(normal, inverted)
+
+    def test_non_grayscale_image_is_converted(self):
+        rgb = np.zeros((4, 5, 3), dtype=np.uint8)
+        occ = _occupancy_from_image(Image.fromarray(rgb), self._spec())
+        self.assertEqual(occ.shape, (4, 5))
+        np.testing.assert_array_equal(occ, np.zeros((4, 5)))
+
+    def test_legacy_128_recipe(self):
+        # occupied_thresh: 0.495 reproduces the retired hard-coded 128 cut exactly
+        gray = np.arange(256, dtype=np.uint8).reshape(16, 16)
+        legacy = np.where(gray <= 128, 0.0, 255.0).astype(np.float32)
+        occ = _occupancy_from_image(Image.fromarray(gray), self._spec(occupied_thresh=0.495))
+        np.testing.assert_array_equal(occ, legacy)
+
+    def test_shipped_yaml_thresholds_are_honoured(self):
+        # Spielberg declares occupied_thresh: 0.45, so pixels 129..140 are now walls
+        track = Track.from_track_name("Spielberg")
+        track_dir = find_track_dir("Spielberg")
+        image = Image.open(track_dir / "Spielberg.png").transpose(Transpose.FLIP_TOP_BOTTOM)
+        gray = np.array(image.convert("L"))
+        legacy = np.where(gray <= 128, 0.0, 255.0).astype(np.float32)
+        flipped = track.occupancy_map != legacy
+        self.assertGreater(flipped.sum(), 0)
+        self.assertTrue(((gray[flipped] >= 129) & (gray[flipped] <= 140)).all())
+        self.assertTrue((track.occupancy_map[flipped] == 0.0).all())
 
 
 class TestTrack(unittest.TestCase):
