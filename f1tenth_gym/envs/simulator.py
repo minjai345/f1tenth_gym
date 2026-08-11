@@ -173,6 +173,9 @@ class F110Simulator:
             self.vehicle_params, self.model
         )
         self._cog_offset = self._compute_cog_offset(self.vehicle_params, self.model)
+        # pose at the top of the current step, used to undo a move that ends in
+        # contact (see _halt_on_collision). None => nothing to restore yet.
+        self._pre_pose: np.ndarray | None = None
 
     @staticmethod
     def _compute_cog_offset(vehicle_params: VehicleParameters, model: DynamicModel) -> float:
@@ -292,6 +295,9 @@ class F110Simulator:
                     dtype=np.float32,
                 )
 
+        # A restore must never reach back into the previous episode.
+        self._pre_pose = None
+
         # One LiDAR sweep so the first observation is not all zeros (#15).
         if self.scan_enabled:
             self._update_scans(flag_collisions=False)
@@ -305,6 +311,10 @@ class F110Simulator:
         """
         if control_inputs.shape != (self.num_agents, self.control_dim):
             raise ValueError("Control input has incorrect shape")
+
+        # Snapshot before the dynamics move anything: _halt_on_collision
+        # restores from this to reject a move that ends inside geometry.
+        self._pre_pose = self.state.state.copy()
 
         steer_commands = control_inputs[:, 0].astype(np.float32)
         accel_commands = control_inputs[:, 1].astype(np.float32)
@@ -595,18 +605,51 @@ class F110Simulator:
         return np.where(min_t == np.inf, 0.0, min_t)
 
     def _halt_on_collision(self, agent_idx: int) -> None:
-        """Stop a car that has collided and flag it.
+        """Stop a car that has collided, undo the move that caused it, and flag it.
 
-        Zero the velocities and rates but KEEP every pose-like state. The
-        indices come from ``model.velocity_indices()`` — a blanket ``[5:] = 0``
-        would wipe MB's roll/pitch angles and ride heights (indices 5-28) and
-        divide-by-zero the suspension math on the next step. ``standard_state``
-        is always ``[X, Y, steer, speed, yaw, yaw_rate, beta]``, so its speed
-        (3) and rates (5:) zero unconditionally; yaw at [4] is preserved in
-        both buffers (the old ``state[3:] = 0`` snapped the heading to east).
+        Two things happen, and both are needed:
+
+        1. Zero the velocities and rates, but KEEP every other pose-like state.
+           The indices come from ``model.velocity_indices()`` — a blanket
+           ``[5:] = 0`` would wipe MB's roll/pitch angles and ride heights
+           (indices 5-28) and divide-by-zero the suspension math next step.
+        2. Restore ``(x, y, yaw)`` to the pose captured at the top of ``step``,
+           rejecting the move that produced the contact. Zeroing the velocity
+           alone is not enough: the dynamics integrate BEFORE this check runs,
+           so each step a car held against a wall re-accelerates from ``v=0``,
+           gains a few hundred micrometres inside the wall, and keeps only the
+           position. That penetration is monotonic — it accumulated past
+           Spielberg's 23 cm walls in ~1800 steps and the car drove out the far
+           side. Undoing the move restores the invariant "a halted car is never
+           inside geometry", by induction on the pre-step pose being clear.
+
+        A move *away* from the wall does not trigger a contact, so it is never
+        rejected — a car can always reverse off a wall it is pinned against.
+
+        ``standard_state`` is always ``[X, Y, steer, speed, yaw, yaw_rate,
+        beta]``, so its speed (3) and rates (5:) zero unconditionally; yaw at
+        [4] is preserved in both buffers (the old ``state[3:] = 0`` snapped the
+        heading to east).
         """
         for i in self.model.velocity_indices():
             self.state.state[agent_idx, i] = 0.0
+
+        if self._pre_pose is not None:
+            for i in self.model.pose_indices():
+                self.state.state[agent_idx, i] = self._pre_pose[agent_idx, i]
+            # re-derive the mirrors so state / standard_state / poses agree
+            self.state.standard_state[agent_idx] = self._standardize(
+                self.state.state[agent_idx]
+            )
+            self.state.poses[agent_idx] = np.array(
+                [
+                    self.state.state[agent_idx, 0],
+                    self.state.state[agent_idx, 1],
+                    self.state.state[agent_idx, 4],
+                ],
+                dtype=np.float32,
+            )
+
         self.state.standard_state[agent_idx, 3] = 0.0
         self.state.standard_state[agent_idx, 5:] = 0.0
         self.state.collisions[agent_idx] = 1.0

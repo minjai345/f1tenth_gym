@@ -489,6 +489,19 @@ class DynamicModel(IntEnum):
         else:
             raise ValueError(f"no velocity indices for model {self!r}")
 
+    def pose_indices(self) -> tuple[int, ...]:
+        """State indices ``(x, y, yaw)`` — what a collision halt restores.
+
+        All three shipped models happen to agree on ``(0, 1, 4)``, but the
+        mapping is declared per model rather than assumed: a new model that
+        laid its state out differently would otherwise have its position
+        silently rewritten from the wrong columns.
+        """
+        if self in (DynamicModel.KS, DynamicModel.ST, DynamicModel.MB):
+            return (0, 1, 4)
+        else:
+            raise ValueError(f"no pose indices for model {self!r}")
+
     @staticmethod
     def from_string(model: str):
         if model == "ks":
