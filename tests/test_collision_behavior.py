@@ -169,19 +169,133 @@ class TestHaltIsModelAware(unittest.TestCase):
             self.assertTrue(np.isfinite(sim.state.state[0]).all())
         env.close()
 
-    def test_st_halt_semantics_unchanged(self):
+    def test_st_halt_zeroes_velocities_and_rewinds_the_pose(self):
+        """ST halt semantics: velocities die, the pose rewinds one step.
+
+        Was ``test_st_halt_semantics_unchanged``. #28 added the pose rewind, so
+        ``(x, y, yaw)`` now come back as the pre-step values rather than the
+        post-integration ones. The steering angle is still carried over
+        untouched, and yaw is still never snapped to 0/east (the original bug
+        this test was written for).
+        """
         env = gym.make("f1tenth_gym:f1tenth-v0", config=EnvConfig(render_enabled=False))
         env.reset(seed=1)
         for _ in range(10):
             env.step(np.array([[0.2, 3.0]], dtype=np.float32))
         sim = env.unwrapped.sim
-        yaw = float(sim.state.state[0, 4])
+        pre = sim._pre_pose[0].copy()          # pose at the top of the last step
+        moved_yaw = float(sim.state.state[0, 4])
         steer = float(sim.state.state[0, 2])
+
         sim._halt_on_collision(0)
         s = sim.state.state[0]
-        self.assertEqual(float(s[3]), 0.0)
-        self.assertEqual(float(s[5]), 0.0)
-        self.assertEqual(float(s[6]), 0.0)
-        self.assertEqual(float(s[4]), yaw)
-        self.assertEqual(float(s[2]), steer)
+
+        self.assertEqual(float(s[3]), 0.0)     # speed
+        self.assertEqual(float(s[5]), 0.0)     # yaw rate
+        self.assertEqual(float(s[6]), 0.0)     # slip angle
+        self.assertEqual(float(s[2]), steer)   # steering angle carried over
+        # pose rewound to the start of the step, NOT left at the moved pose
+        self.assertEqual(float(s[0]), float(pre[0]))
+        self.assertEqual(float(s[1]), float(pre[1]))
+        self.assertEqual(float(s[4]), float(pre[4]))
+        # ...and still a real heading, never snapped to east
+        self.assertNotEqual(float(s[4]), 0.0)
+        self.assertAlmostEqual(float(s[4]), moved_yaw, places=2)
         env.close()
+
+
+class TestHaltRejectsTheMove(unittest.TestCase):
+    """Pins ISSUES_PLAN.md #28: a halted car never ends up inside geometry.
+
+    Zeroing the velocity is not enough on its own. The dynamics integrate
+    before the collision check, so a car held against a wall re-accelerates
+    from v=0 every step and keeps the few hundred micrometres of penetration
+    it gained. That accumulates monotonically: before the fix it crossed
+    Spielberg's 23 cm walls in ~1800 steps and drove out the far side.
+    """
+
+    @staticmethod
+    def _occupancy_probe(track):
+        """(x, y) -> occupancy cell value; 0.0 is a wall, 255.0 is free."""
+        from f1tenth_gym.envs.lidar.laser_models import xy_2_rc
+
+        occ = track.occupancy_map
+        h, w = occ.shape
+        ox, oy = track.spec.origin[0], track.spec.origin[1]
+        res = track.spec.resolution
+
+        def probe(x, y):
+            r, c = xy_2_rc(float(x), float(y), ox, oy, 1.0, 0.0, h, w, res)
+            return float(occ[r, c])
+
+        return probe
+
+    def _drive_into_wall(self, steps, terminate=False):
+        from f1tenth_gym.envs.env_config import TerminationConfig
+
+        env = gym.make(
+            "f1tenth_gym:f1tenth-v0",
+            config=EnvConfig(
+                simulation_config=SimulationConfig(max_laps=None),
+                termination_config=TerminationConfig(terminate_on_collision=terminate),
+                render_enabled=False,
+            ),
+        )
+        env.reset(seed=42)
+        sim = env.unwrapped.sim
+        probe = self._occupancy_probe(env.unwrapped.track)
+        action = np.array([[0.41, 6.0]], dtype=np.float32)  # full lock, hard on the throttle
+        worst = 255.0
+        hit = False
+        for _ in range(steps):
+            obs, _r, term, _t, info = env.step(action)
+            if info["collisions"][0]:
+                hit = True
+            s = sim.state.standard_state[0]
+            worst = min(worst, probe(s[0], s[1]))
+            if term:
+                break
+        pose = sim.state.standard_state[0].copy()
+        env.close()
+        return hit, worst, pose
+
+    def test_car_never_enters_the_wall(self):
+        hit, worst_cell, _pose = self._drive_into_wall(steps=2500)
+        self.assertTrue(hit, "the car never reached the wall -- scenario is wrong")
+        # 0.0 would mean the car's centre occupied a wall cell at some point
+        self.assertEqual(
+            worst_cell, 255.0,
+            "the car's centre entered an occupied cell: the halt let it tunnel",
+        )
+
+    def test_car_stays_put_while_pinned(self):
+        _hit, _worst, pose_a = self._drive_into_wall(steps=800)
+        _hit2, _worst2, pose_b = self._drive_into_wall(steps=2500)
+        # 1700 extra steps of pushing must not move it appreciably
+        drift = float(np.hypot(pose_b[0] - pose_a[0], pose_b[1] - pose_a[1]))
+        self.assertLess(drift, 0.05, f"pinned car drifted {drift:.3f} m over 1700 steps")
+
+    def test_car_can_still_reverse_off_the_wall(self):
+        """The rejection must not weld the car to the wall."""
+        from f1tenth_gym.envs.env_config import TerminationConfig
+
+        env = gym.make(
+            "f1tenth_gym:f1tenth-v0",
+            config=EnvConfig(
+                simulation_config=SimulationConfig(max_laps=None),
+                termination_config=TerminationConfig(terminate_on_collision=False),
+                render_enabled=False,
+            ),
+        )
+        env.reset(seed=42)
+        sim = env.unwrapped.sim
+        for _ in range(120):  # drive in and pin
+            env.step(np.array([[0.41, 6.0]], dtype=np.float32))
+        pinned = sim.state.standard_state[0].copy()
+        for _ in range(150):  # now reverse
+            obs, _r, _term, _t, info = env.step(np.array([[0.0, -2.0]], dtype=np.float32))
+        freed = sim.state.standard_state[0].copy()
+        env.close()
+        backed_off = float(np.hypot(freed[0] - pinned[0], freed[1] - pinned[1]))
+        self.assertGreater(backed_off, 0.2, "car could not reverse off the wall")
+        self.assertEqual(float(info["collisions"][0]), 0.0, "still flagged after backing off")
