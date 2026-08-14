@@ -404,11 +404,11 @@ def build_config() -> EnvConfig:
         lidar_config=LiDARConfig(
             enabled=True,
             num_beams=1080,                 # ~2000 is the internal angular-LUT ceiling
-            field_of_view=4.712389,         # 270 deg. NOTE: only honoured on a FRESH
-                                            #   LiDARConfig; with_updates(field_of_view=)
-                                            #   does NOT re-derive the angles.
-            angle_min=None,                 # None -> -field_of_view/2
-            angle_max=None,                 # None -> +field_of_view/2
+            # The angles ARE the geometry; field_of_view is a read-only property
+            # equal to angle_max - angle_min. For a symmetric sweep use
+            # LiDARConfig.from_fov(4.712389) instead of spelling both out.
+            angle_min=-2.3561945,           # -135 deg
+            angle_max=2.3561945,            # +135 deg  (270 deg total)
             range_min=0.0,
             range_max=30.0,
             noise_std=0.01,                 # per-beam Gaussian range noise (obs only)

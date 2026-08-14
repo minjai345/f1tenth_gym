@@ -393,16 +393,12 @@ did-you-pass-degrees hint.
      - ``>= 1``. Angular resolution is capped by a 2000-entry internal
        lookup table — about 1500 distinct rays at the default FOV, so
        raising beams past that buys nothing.
-   * - ``field_of_view``
-     - ``4.712389`` (270°)
-     - Total FOV in radians; ``> 0``. Derived from ``angle_max - angle_min``.
    * - ``angle_min``
-     - ``None``
-     - ``None`` materialises to ``-field_of_view/2``; must be ``>= -π``.
+     - ``-2.3561945`` (-135°)
+     - Must be ``>= -π``.
    * - ``angle_max``
-     - ``None``
-     - ``None`` materialises to ``+field_of_view/2``; must be ``<= π`` and
-       ``> angle_min``.
+     - ``2.3561945`` (+135°)
+     - Must be ``<= π`` and ``> angle_min``.
    * - ``range_min``
      - ``0.0``
      - Readings below are clipped; ``>= 0`` and ``< range_max``.
@@ -430,25 +426,25 @@ sweep, so the first observation's ``scan`` is already real and noise-bearing,
 and that spawn sweep never flags a collision. Convenience read-only
 properties: ``angle_increment`` and ``maximum_range``.
 
-``angle_min`` and ``angle_max`` are the sensor's true extent — the scanner
-derives its own field of view as ``angle_max - angle_min``. ``field_of_view`` is
-a convenience for the symmetric case: leave the angles at ``None`` and they are
-materialised to ``∓field_of_view/2``; give the angles explicitly and
-``field_of_view`` is recomputed to match. The three can never disagree, whether
-you build a fresh config or derive one:
+``angle_min`` and ``angle_max`` are the sensor's true extent and the only stored
+geometry. ``field_of_view`` is a read-only property equal to
+``angle_max - angle_min``, so the two can never disagree. Build from a symmetric
+sweep with :meth:`~f1tenth_gym.envs.lidar.LiDARConfig.from_fov`:
 
 >>> import numpy as np
 >>> from f1tenth_gym.envs.lidar import LiDARConfig
->>> print(LiDARConfig(field_of_view=np.deg2rad(180)).angle_min)
+>>> print(LiDARConfig.from_fov(np.deg2rad(180)).angle_min)
 -1.5707963267948966
 >>> LiDARConfig(angle_min=-0.5, angle_max=1.5).field_of_view
 2.0
->>> LiDARConfig().with_updates(field_of_view=2.0).angle_max
-1.0
+>>> LiDARConfig().with_updates(angle_min=-1.0).field_of_view
+3.3561945
 
-An explicit angle always wins: passing ``field_of_view`` together with
-``angle_min``/``angle_max`` keeps the angles you gave and derives the FOV
-from them.
+Giving both a field of view and an explicit angle is over-determined and raises.
+``field_of_view`` used to be a constructor argument, which made the same number
+an input, validated, and then overwritten from the angles — so
+``LiDARConfig(field_of_view=5.0, angle_min=-0.5, angle_max=0.5)`` silently
+stored ``1.0``.
 
 ``RenderConfig``
 ----------------

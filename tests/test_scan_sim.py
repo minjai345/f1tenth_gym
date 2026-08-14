@@ -144,19 +144,19 @@ class ScanTests(unittest.TestCase):
 class LiDARConfigTests(unittest.TestCase):
     """Tests for LiDARConfig dataclass."""
 
-    def test_default_angles_from_fov(self):
-        """Test that angle_min/angle_max are computed from field_of_view."""
-        cfg = LiDARConfig(field_of_view=2.0)
+    def test_from_fov_sets_a_symmetric_angle_pair(self):
+        cfg = LiDARConfig.from_fov(2.0)
         self.assertAlmostEqual(cfg.angle_min, -1.0)
         self.assertAlmostEqual(cfg.angle_max, 1.0)
+        self.assertAlmostEqual(cfg.field_of_view, 2.0)
+
+    def test_from_fov_forwards_other_fields(self):
+        cfg = LiDARConfig.from_fov(2.0, num_beams=540, noise_std=0.0)
+        self.assertEqual(cfg.num_beams, 540)
+        self.assertEqual(cfg.noise_std, 0.0)
 
     def test_explicit_angles(self):
-        """Test that explicit angle_min/angle_max override field_of_view."""
-        cfg = LiDARConfig(
-            field_of_view=2.0,
-            angle_min=-0.5,
-            angle_max=1.5,
-        )
+        cfg = LiDARConfig(angle_min=-0.5, angle_max=1.5)
         self.assertAlmostEqual(cfg.angle_min, -0.5)
         self.assertAlmostEqual(cfg.angle_max, 1.5)
 
@@ -168,35 +168,44 @@ class LiDARConfigTests(unittest.TestCase):
     def test_field_of_view_always_matches_the_angles(self):
         """field_of_view is derived, so it can never disagree with the angles.
 
-        ScanSimulator2D computes its own fov as ``angle_max - angle_min`` and
-        ignores the field, so a config reporting a different number is lying.
+        ScanSimulator2D computes its own fov as ``angle_max - angle_min``, so a
+        config reporting a different number would be lying. It used to be a
+        stored field that was validated and then overwritten from the angles.
         """
         cfg = LiDARConfig(angle_min=-0.5, angle_max=1.5)
         self.assertAlmostEqual(cfg.field_of_view, 2.0)
 
-    def test_with_updates_field_of_view_rederives_the_angles(self):
-        """Regression: ``with_updates(field_of_view=...)`` used to be a silent no-op.
+    def test_field_of_view_is_read_only(self):
+        with self.assertRaises(AttributeError):
+            LiDARConfig().field_of_view = 1.0
 
-        ``replace()`` carried the already-materialised angles over, so the config
-        reported the new FOV while scanning at the old one.
+    def test_field_of_view_is_not_a_constructor_argument(self):
+        """It was, and that made the same number an input AND a derived value."""
+        with self.assertRaises(TypeError):
+            LiDARConfig(field_of_view=2.0)
+
+    def test_over_determined_geometry_raises(self):
+        """Regression: this silently discarded the fov and stored 1.0."""
+        with self.assertRaises(ValueError):
+            LiDARConfig.from_fov(5.0, angle_min=-0.5, angle_max=0.5)
+        with self.assertRaises(ValueError):
+            LiDARConfig.from_fov(3.0, angle_min=-1.0)
+
+    def test_non_positive_fov_raises(self):
+        for bad in (0.0, -1.0):
+            with self.assertRaises(ValueError):
+                LiDARConfig.from_fov(bad)
+
+    def test_with_updates_of_an_angle_re_derives_the_fov(self):
+        """Regression: `with_updates(field_of_view=X, angle_min=Y)` discarded X.
+
+        With the angles as the only stored geometry there is nothing left to
+        discard -- an angle change simply moves the derived sweep.
         """
-        cfg = LiDARConfig().with_updates(field_of_view=2.0)
-        self.assertAlmostEqual(cfg.field_of_view, 2.0)
+        cfg = LiDARConfig().with_updates(angle_min=-1.0)
         self.assertAlmostEqual(cfg.angle_min, -1.0)
-        self.assertAlmostEqual(cfg.angle_max, 1.0)
-
-    def test_with_updates_field_of_view_matches_a_fresh_config(self):
-        updated = LiDARConfig().with_updates(field_of_view=3.0)
-        fresh = LiDARConfig(field_of_view=3.0)
-        self.assertAlmostEqual(updated.angle_min, fresh.angle_min)
-        self.assertAlmostEqual(updated.angle_max, fresh.angle_max)
-        self.assertAlmostEqual(updated.angle_increment, fresh.angle_increment)
-
-    def test_with_updates_explicit_angle_wins_over_field_of_view(self):
-        cfg = LiDARConfig().with_updates(field_of_view=3.0, angle_min=-0.5, angle_max=0.5)
-        self.assertAlmostEqual(cfg.angle_min, -0.5)
-        self.assertAlmostEqual(cfg.angle_max, 0.5)
-        self.assertAlmostEqual(cfg.field_of_view, 1.0)
+        self.assertAlmostEqual(cfg.angle_max, 2.3561945, places=7)
+        self.assertAlmostEqual(cfg.field_of_view, 3.3561945, places=7)
 
     def test_with_updates_of_another_field_leaves_the_geometry_alone(self):
         base = LiDARConfig()

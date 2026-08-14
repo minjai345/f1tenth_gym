@@ -1,20 +1,32 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, replace
 
 __all__ = ["LiDARConfig"]
+
+# 270 degrees, the default sweep. Stored as the angle pair, since that is what
+# the sensor actually has; field_of_view is derived from it.
+_DEFAULT_HALF_FOV = 2.3561945
 
 
 @dataclass(frozen=True)
 class LiDARConfig:
     """Configuration for the simulated LiDAR sensor.
 
+    ``angle_min``/``angle_max`` are the sensor's real extent and the only stored
+    geometry; :attr:`field_of_view` is a read-only property derived from them, so
+    the two can never disagree. Build from a sweep with :meth:`from_fov` — it was
+    previously a constructor argument, which meant the same number was an input,
+    validated, and then overwritten from the angles, so
+    ``LiDARConfig(field_of_view=5.0, angle_min=-0.5, angle_max=0.5)`` silently
+    stored 1.0.
+
     Attributes:
         enabled: Whether LiDAR scanning is enabled.
         num_beams: Number of laser beams in the scan.
-        field_of_view: Total angular field of view in radians.
-        angle_min: Start angle of scan in radians (default: -field_of_view/2).
-        angle_max: End angle of scan in radians (default: +field_of_view/2).
+        angle_min: Start angle of scan in radians.
+        angle_max: End angle of scan in radians.
         range_min: Minimum range in meters, readings below are clipped.
         range_max: Maximum range in meters, readings above are clipped.
         noise_std: Standard deviation of Gaussian noise on range readings.
@@ -31,9 +43,8 @@ class LiDARConfig:
 
     enabled: bool = True
     num_beams: int = 1080
-    field_of_view: float = 4.712389
-    angle_min: float | None = None
-    angle_max: float | None = None
+    angle_min: float = -_DEFAULT_HALF_FOV
+    angle_max: float = _DEFAULT_HALF_FOV
     range_min: float = 0.0
     range_max: float = 30.0
     noise_std: float = 0.01
@@ -43,17 +54,9 @@ class LiDARConfig:
     base_link_to_lidar_tf: tuple[float, float, float] = (0.275, 0.0, 0.0)
 
     def __post_init__(self) -> None:
-        # Set angle_min/angle_max defaults from field_of_view if not specified
-        if self.angle_min is None:
-            object.__setattr__(self, "angle_min", -self.field_of_view / 2.0)
-        if self.angle_max is None:
-            object.__setattr__(self, "angle_max", self.field_of_view / 2.0)
-
         # Validation
         if self.num_beams < 1:
             raise ValueError(f"num_beams must be >= 1, got {self.num_beams}")
-        if self.field_of_view <= 0:
-            raise ValueError(f"field_of_view must be > 0, got {self.field_of_view}")
         if self.range_max <= 0:
             raise ValueError(f"range_max must be > 0, got {self.range_max}")
         if self.range_min < 0:
@@ -72,7 +75,6 @@ class LiDARConfig:
             raise ValueError(
                 f"angle_min ({self.angle_min}) must be less than angle_max ({self.angle_max})"
             )
-        import math
         if self.angle_min < -math.pi:
             raise ValueError(
                 f"angle_min ({self.angle_min}) must be >= -π (-180°). "
@@ -84,9 +86,40 @@ class LiDARConfig:
                 f"Did you pass degrees instead of radians? Use np.deg2rad() to convert."
             )
 
-        object.__setattr__(
-            self, "field_of_view", float(self.angle_max) - float(self.angle_min)
-        )
+    @classmethod
+    def from_fov(cls, field_of_view: float, **kwargs: object) -> "LiDARConfig":
+        """Build a config with a symmetric sweep of ``field_of_view`` radians.
+
+        The shorthand for the common case, replacing the old
+        ``LiDARConfig(field_of_view=...)`` constructor argument. Angles are the
+        stored geometry, so this simply computes ``∓field_of_view/2``::
+
+            LiDARConfig.from_fov(np.deg2rad(270))     # the default sweep
+            LiDARConfig.from_fov(np.pi, num_beams=540)
+
+        Raises:
+            ValueError: if ``field_of_view`` is not positive, or if an explicit
+                ``angle_min``/``angle_max`` is also given — that combination is
+                over-determined, and the old code silently discarded the fov.
+        """
+        if field_of_view <= 0:
+            raise ValueError(f"field_of_view must be > 0, got {field_of_view}")
+        if "angle_min" in kwargs or "angle_max" in kwargs:
+            raise ValueError(
+                "from_fov sets angle_min/angle_max itself; pass either a field "
+                "of view or an explicit angle pair, not both"
+            )
+        half = field_of_view / 2.0
+        return cls(angle_min=-half, angle_max=half, **kwargs)
+
+    @property
+    def field_of_view(self) -> float:
+        """Total angular sweep in radians — always ``angle_max - angle_min``.
+
+        Read-only and derived: the angles are the sensor's real extent, so the
+        two can never disagree. Use :meth:`from_fov` to build from a sweep.
+        """
+        return float(self.angle_max) - float(self.angle_min)
 
     @property
     def angle_increment(self) -> float:
@@ -103,14 +136,9 @@ class LiDARConfig:
     def with_updates(self, **changes: object) -> "LiDARConfig":
         """Return a re-validated copy with ``changes`` applied.
 
-        Updating ``field_of_view`` alone re-derives the scan angles symmetrically,
-        so it behaves like constructing a fresh ``LiDARConfig``. A plain
-        ``replace()`` would carry the previously materialised ``angle_min``/
-        ``angle_max`` over and silently ignore the new field of view. Passing an
-        angle explicitly still wins.
+        A plain ``replace()``: with the angles as the only stored geometry there
+        is nothing to special-case. This used to carry a bespoke rule for
+        ``field_of_view``, which still silently discarded it when an angle was
+        passed in the same call.
         """
-        sets_fov = "field_of_view" in changes
-        sets_angle = "angle_min" in changes or "angle_max" in changes
-        if sets_fov and not sets_angle:
-            changes = {**changes, "angle_min": None, "angle_max": None}
         return replace(self, **changes)
