@@ -153,10 +153,13 @@ def check_page(path: Path, out: list[Finding]) -> None:
 
     lowered = text.lower()
     for phrase in BANNED_PHRASES:
+        # every occurrence, not just the first: under --strict a page with five
+        # instances would otherwise need five red CI runs to clear, one per push
         idx = lowered.find(phrase)
-        if idx != -1:
+        while idx != -1:
             out.append(Finding(path, text[:idx].count("\n") + 1, "phrase",
                                f"banned phrase {phrase!r}"))
+            idx = lowered.find(phrase, idx + 1)
 
     n_admon = n_warn = 0
     prev_admon_line = None
@@ -186,15 +189,20 @@ def check_page(path: Path, out: list[Finding]) -> None:
     if n_warn > MAX_WARNINGS:
         out.append(Finding(path, 1, "warning-budget", f"{n_warn} warnings (max {MAX_WARNINGS})"))
 
-    bolds = BOLD.findall(text)
+    # finditer, not findall: the match carries its own position, so a bold span
+    # anchors to where it actually is. Searching for the text instead used to
+    # report the FIRST place those characters appeared anywhere on the page, and
+    # `index(...) and lineno` short-circuited to line 0 when that was offset 0.
+    bolds = list(BOLD.finditer(text))
     budget = max(1, len(lines) // BOLD_LINES_PER_SPAN)
     if len(bolds) > budget:
         out.append(Finding(path, 1, "bold-budget",
                            f"{len(bolds)} bold spans over {len(lines)} lines (budget {budget})"))
-    for span in bolds:
+    for match in bolds:
+        span = match.group(1)
         if span.rstrip().endswith(".") and len(span.split()) > 6:
-            out.append(Finding(path, text.index(span[:20]) and
-                               text[:text.index(span[:20])].count("\n") + 1,
+            line = text[:match.start(1)].count("\n") + 1
+            out.append(Finding(path, line,
                                "bold-sentence", f"whole sentence bolded: {span[:50]!r}"))
 
     if re.search(r"^See also\s*$", text, re.M):

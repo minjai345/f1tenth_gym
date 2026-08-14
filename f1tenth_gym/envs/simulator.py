@@ -241,9 +241,15 @@ class F110Simulator:
                    (num_agents, state_dim) for full state.
             option: Reset mode - "pose" for (x, y, theta) or "state" for full state.
             noise_seed: Seed for the per-agent LiDAR-noise RNGs. ``None`` falls
-                back to the config seed (legacy behaviour); the env passes a
-                value derived from ``reset(seed=...)`` so the noise stream is
-                controlled by the reset seed, per the gymnasium contract.
+                back to ``self.seed``, which is the simulator's *construction*
+                seed — and that is drawn from OS entropy when ``EnvConfig.seed``
+                is ``None`` (the default), since the RNGs below need a concrete
+                int. So ``noise_seed=None`` is only reproducible when the config
+                carries a seed. ``F110Env.reset`` always passes a value derived
+                from ``reset(seed=...)``, so the env path is unaffected and the
+                noise stream is controlled by the reset seed per the gymnasium
+                contract; this fallback matters only when driving
+                ``F110Simulator`` directly.
         """
         if poses.shape[0] != self.num_agents:
             raise ValueError("Number of poses does not match number of agents")
