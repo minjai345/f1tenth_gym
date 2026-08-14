@@ -635,18 +635,19 @@ class F110Simulator:
             self.state.state[agent_idx, i] = 0.0
 
         if self._pre_pose is not None:
-            for i in self.model.pose_indices():
+            pose_indices = self.model.pose_indices()
+            for i in pose_indices:
                 self.state.state[agent_idx, i] = self._pre_pose[agent_idx, i]
-            # re-derive the mirrors so state / standard_state / poses agree
+            # re-derive the mirrors so state / standard_state / poses agree.
+            # `poses` is built from pose_indices() too, not from hardcoded
+            # columns: a model that laid its state out differently would
+            # otherwise have the halt restore the right cells and then publish
+            # the wrong ones.
             self.state.standard_state[agent_idx] = self._standardize(
                 self.state.state[agent_idx]
             )
             self.state.poses[agent_idx] = np.array(
-                [
-                    self.state.state[agent_idx, 0],
-                    self.state.state[agent_idx, 1],
-                    self.state.state[agent_idx, 4],
-                ],
+                [self.state.state[agent_idx, i] for i in pose_indices],
                 dtype=np.float32,
             )
 
