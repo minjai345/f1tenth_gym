@@ -75,10 +75,6 @@ class TestCollisionBehaviour(unittest.TestCase):
         env.close()
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestCollisionModes(unittest.TestCase):
     def test_none_mode_disables_collisions(self):
         """CollisionCheckMode.NONE: driving into a wall never flags a collision (#124)."""
@@ -299,3 +295,7 @@ class TestHaltRejectsTheMove(unittest.TestCase):
         backed_off = float(np.hypot(freed[0] - pinned[0], freed[1] - pinned[1]))
         self.assertGreater(backed_off, 0.2, "car could not reverse off the wall")
         self.assertEqual(float(info["collisions"][0]), 0.0, "still flagged after backing off")
+
+
+if __name__ == "__main__":
+    unittest.main()

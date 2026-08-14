@@ -63,10 +63,6 @@ class TestResetConfig(unittest.TestCase):
             ResetConfig(max_dist=0.0)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestReferenceLineAndStartWidth(unittest.TestCase):
     """Pins ISSUES_PLAN.md #13 (centerline resets) and #27 (start_width clamp)."""
 
@@ -112,3 +108,7 @@ class TestReferenceLineAndStartWidth(unittest.TestCase):
             track=track, num_agents=1, type=ResetStrategy.RL_GRID_STATIC, start_width=5.0
         )
         self.assertGreater(int(wide.mask.sum()), int(narrow.mask.sum()) * 3)
+
+
+if __name__ == "__main__":
+    unittest.main()
