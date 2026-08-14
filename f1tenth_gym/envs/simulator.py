@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 from typing import Callable, Optional
+import warnings
 
 import numpy as np
 
@@ -300,7 +301,23 @@ class F110Simulator:
 
         # One LiDAR sweep so the first observation is not all zeros (#15).
         if self.scan_enabled:
+            self._spawned_in_contact = []
             self._update_scans(flag_collisions=False)
+            if self._spawned_in_contact:
+                # The halt rejects the move that causes contact, which keeps a
+                # car out of geometry by induction from a clear pre-step pose.
+                # A spawn that is ALREADY inside the margin breaks that base
+                # case: every later move is rejected too, so the car cannot
+                # drive or reverse out. Only reachable by supplying the pose --
+                # every shipped reset strategy spawns well clear.
+                warnings.warn(
+                    f"agents {self._spawned_in_contact} spawned inside the collision "
+                    f"margin ({self.collision_margin} m). A collision halt rejects "
+                    f"the move that causes contact, so a car that starts in contact "
+                    f"cannot move until it is reset to a clear pose.",
+                    RuntimeWarning,
+                    stacklevel=3,
+                )
 
     def step(self, control_inputs: np.ndarray) -> None:
         """Advance simulation by one timestep.
@@ -737,6 +754,7 @@ class F110Simulator:
         wall_collision_enabled = (
             flag_collisions and self.collision_check_mode is not CollisionCheckMode.NONE
         )
+        spawn_sweep = not flag_collisions and getattr(self, "_spawned_in_contact", None) is not None
 
         for agent_idx, simulator in enumerate(self.scan_sims):
             pose = self.state.poses[agent_idx]
@@ -745,6 +763,14 @@ class F110Simulator:
             # Get noise-free scan for collision detection
             scan_clean = simulator.scan(scan_pose, rng=None)
             cache = self.scan_cache[agent_idx]
+
+            # The spawn sweep records contact instead of adjudicating it, so
+            # reset() can warn about a pose that starts inside the margin. This
+            # branch only runs at reset, never on the stepping path.
+            if spawn_sweep and check_collision(
+                scan_clean, cache.side_distances, self.collision_margin
+            ):
+                self._spawned_in_contact.append(agent_idx)
 
             # Wall collision: contact check on the wall-only scan (skipped when collisions disabled)
             if wall_collision_enabled and check_collision(

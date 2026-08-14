@@ -369,6 +369,40 @@ class TestHaltRefreshesDerivedState(unittest.TestCase):
         self.assertLess(float(np.max(np.abs(sim._all_vertices[0] - expected))), 1e-6)
         env.close()
 
+    def test_spawning_in_contact_warns(self):
+        """The move-rejection invariant assumes a clear pre-step pose.
+
+        A pose supplied through ``options={"poses": ...}`` that already overlaps
+        geometry breaks that base case: every later move is rejected too, so the
+        car cannot drive or reverse out. No shipped reset strategy can produce
+        such a pose, so this is purely a guard on caller-supplied ones.
+        """
+        import warnings
+
+        env, _, _ = self._crash()
+        sim = env.unwrapped.sim
+        base = sim.state.poses[0].copy().astype(float)
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            env.reset(options={"poses": np.array([base])})
+        self.assertFalse(
+            [w for w in caught if issubclass(w.category, RuntimeWarning)],
+            "the halt's own resting pose must be clear of the margin",
+        )
+
+        deep = base.copy()
+        deep[0] += 0.08 * np.cos(base[2])
+        deep[1] += 0.08 * np.sin(base[2])
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            env.reset(options={"poses": np.array([deep])})
+        self.assertTrue(
+            [w for w in caught if issubclass(w.category, RuntimeWarning)],
+            "spawning inside the collision margin should warn",
+        )
+        env.close()
+
 
 if __name__ == "__main__":
     unittest.main()
