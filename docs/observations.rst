@@ -38,8 +38,7 @@ what a step hands back, selected through ``ObservationConfig(type=...)``
    * - ``DEFAULT`` *(default)*
      - The eight base fields: ``scan``, ``std_state``, ``state``,
        ``collision``, ``lap_time``, ``lap_count``, ``sim_time``,
-       ``frenet_pose``. ``ORIGINAL`` is an IntEnum alias of the same value,
-       not a separate preset.
+       ``frenet_pose``.
    * - ``DIRECT``
      - Agent-batched arrays read straight off the simulator's
        struct-of-arrays buffers, as one flat dict rather than a dict per

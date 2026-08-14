@@ -22,9 +22,8 @@ __all__ = [
 class ObservationType(IntEnum):
     """Type of observation returned by the environment.
 
-    DEFAULT: Per-agent dict of named fields (the packaged form; the default).
-    ORIGINAL: Alias of DEFAULT (backwards compatibility).
     DIRECT: Raw agent-batched arrays (changed meaning in v1.0.0; warns).
+    DEFAULT: Per-agent dict of named fields (the packaged form; the default).
     FEATURES: Custom subset of fields specified via config.
     KINEMATIC_STATE: Kinematic state fields (x, y, delta, vx, theta).
     DYNAMIC_STATE: Dynamic state fields including angular velocity and slip angle.
@@ -33,7 +32,6 @@ class ObservationType(IntEnum):
 
     DIRECT = 1
     DEFAULT = 2
-    ORIGINAL = 2  # alias of DEFAULT
     FEATURES = 3
     KINEMATIC_STATE = 4
     DYNAMIC_STATE = 5
@@ -116,7 +114,7 @@ def observation_factory(
     else:
         raise TypeError("observation_factory 'type' must be an ObservationType")
 
-    if obs_type is ObservationType.DEFAULT:  # covers the ORIGINAL alias
+    if obs_type is ObservationType.DEFAULT:
         return FullObservation(env)
     if obs_type is ObservationType.DIRECT:
         warnings.warn(

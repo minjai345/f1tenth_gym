@@ -320,8 +320,12 @@ class TestRawObservation(unittest.TestCase):
             env.close()
         self.assertTrue(any("changed meaning" in str(w.message) for w in caught))
 
-    def test_original_is_an_alias_of_default(self):
-        self.assertIs(ObservationType.ORIGINAL, ObservationType.DEFAULT)
+    def test_original_alias_is_gone(self):
+        # Removed deliberately in v1.0.0: ORIGINAL said nothing about what the
+        # observation was. Use DEFAULT. By-value access still resolves, so a
+        # config storing the raw int keeps working.
+        self.assertFalse(hasattr(ObservationType, "ORIGINAL"))
+        self.assertIs(ObservationType(2), ObservationType.DEFAULT)
 
     def test_raw_shapes_space_and_copies(self):
         env = self._raw_env(num_agents=2)
