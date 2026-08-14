@@ -65,9 +65,13 @@ class FullObservation(Observation):
         """Finite, roughly-physical bounds for the observation fields, derived
         from the vehicle limits and track extents."""
         env = self.env.unwrapped
-        # widest params across the DR ranges, so randomized episodes stay
-        # inside the fixed space (falls back for envs without the attribute)
-        p = getattr(env, "space_vehicle_params", None) or env.vehicle_params
+        # Widest params across the DR bounds, so randomized episodes stay inside
+        # the fixed space. Read directly: `space_vehicle_params` is assigned in
+        # _initialize_components before the first space() call and again in
+        # update_params, so there is no env without it -- and a truthiness
+        # fallback here would silently substitute the NOMINAL params, undoing
+        # the widening with no error.
+        p = env.space_vehicle_params
         v_min, v_max = float(p.v_min), float(p.v_max)
         s_min, s_max = float(p.s_min), float(p.s_max)
         # One-integrator-step actuator overshoot: the steering/accel constraints

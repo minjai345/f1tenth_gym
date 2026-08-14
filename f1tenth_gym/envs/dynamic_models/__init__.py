@@ -59,6 +59,12 @@ class VehicleParameters:
     collision_body_center_y: float = 0.0
 
     # Additional parameters for the multi-body model (defaulted to NaN)
+    #
+    # RESERVED, DO NOT DELETE: the four steering-rate and jerk constraints below
+    # are carried for parity with the CommonRoad model this port comes from, and
+    # for planned stronger multi-body support. No kernel reads them today -- that
+    # is deliberate, not dead code. Removing them would shift every later slot of
+    # the positional wire format and have to be undone when the constraints land.
     kappa_dot_max: float = math.nan
     kappa_dot_dot_max: float = math.nan
     j_max: float = math.nan

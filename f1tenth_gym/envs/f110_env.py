@@ -296,7 +296,11 @@ class F110Env(gym.Env):
             obs_kwargs["features"] = self.observation_cfg.features
         self.observation_type = observation_factory(env=self, **obs_kwargs)
         self.observation_space = self.observation_type.space()
-        self.render_obs_type = observation_factory(env=self, type=ObservationType.DEFAULT)
+        # Built on first use, not here: render callbacks always see the DEFAULT
+        # vocabulary, so this second observation object is only ever read when
+        # the configured type is NOT DEFAULT and a renderer exists. Reset to None
+        # so configure() rebuilds it against the new config.
+        self._render_obs_type = None
         self.render_obs = None
 
         single_action_space = get_action_space(
@@ -695,6 +699,19 @@ class F110Env(gym.Env):
             )
         if hasattr(self, "observation_space"):
             self.observation_space = self.observation_type.space()
+
+    @property
+    def render_obs_type(self):
+        """The DEFAULT-vocabulary observation handed to render callbacks.
+
+        Lazy: under the default observation type ``step``/``reset`` deep-copy the
+        real observation instead, so this is never built for the common config.
+        """
+        if self._render_obs_type is None:
+            self._render_obs_type = observation_factory(
+                env=self, type=ObservationType.DEFAULT
+            )
+        return self._render_obs_type
 
     def add_render_callback(self, callback_func):
         """

@@ -55,21 +55,25 @@ def make_renderer(
         from ..env_config import RenderConfig  # local import avoids an import cycle
         render_config = RenderConfig()
 
-    # Qt and PyOpenGL must agree on the windowing API: Qt forced onto xcb (GLX)
-    # with PyOpenGL auto-detecting EGL (its choice on a Wayland session) leaves
-    # PyOpenGL unable to see the current context -- every GLMeshItem.paint
-    # raises "no valid context", pyqtgraph swallows it, and the cars silently
-    # vanish from otherwise-valid rgb_array frames. Both pins must land BEFORE
-    # the backend import below: the FIRST make_renderer call in a process (any
-    # mode, even one that returns None) imports the GL stack, and every later
-    # renderer inherits whatever platform got resolved then. setdefault, so an
-    # explicit user choice always wins.
-    os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
-    os.environ.setdefault("PYOPENGL_PLATFORM", "x11")
-
-    from .rendering_pyqtgl import PyQtEnvRendererGL as EnvRenderer
-
     if render_mode in ["human", "rgb_array", "unlimited", "human_fast"]:
+        # Qt and PyOpenGL must agree on the windowing API: Qt forced onto xcb
+        # (GLX) with PyOpenGL auto-detecting EGL (its choice on a Wayland
+        # session) leaves PyOpenGL unable to see the current context -- every
+        # GLMeshItem.paint raises "no valid context", pyqtgraph swallows it, and
+        # the cars silently vanish from otherwise-valid rgb_array frames. Both
+        # pins must land BEFORE the first GL import in the process, which is the
+        # line below; later renderers inherit whatever platform resolved then.
+        # setdefault, so an explicit user choice always wins.
+        #
+        # Scoped to this branch on purpose: render_mode=None builds no renderer,
+        # and `render_enabled` defaults True, so a headless training script that
+        # never renders used to pay a 114 ms / 416-module GL import and have its
+        # process environment mutated for every other Qt consumer.
+        os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
+        os.environ.setdefault("PYOPENGL_PLATFORM", "x11")
+
+        from .rendering_pyqtgl import PyQtEnvRendererGL as EnvRenderer
+
         renderer = EnvRenderer(
             params=params,
             track=track,
