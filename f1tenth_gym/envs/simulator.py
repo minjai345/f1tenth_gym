@@ -625,11 +625,21 @@ class F110Simulator:
 
         A move *away* from the wall does not trigger a contact, so it is never
         rejected — a car can always reverse off a wall it is pinned against.
+        That guarantee holds by induction from a collision-free pre-step pose;
+        a pose handed in through ``options={"poses"/"states": ...}`` that
+        already overlaps geometry breaks the base case and cannot recover while
+        ``terminate_on_collision=False``.
 
         ``standard_state`` is always ``[X, Y, steer, speed, yaw, yaw_rate,
         beta]``, so its speed (3) and rates (5:) zero unconditionally; yaw at
         [4] is preserved in both buffers (the old ``state[3:] = 0`` snapped the
         heading to east).
+
+        Rewinding the pose invalidates everything derived from it earlier in the
+        step, so all four mirrors are re-derived here: ``standard_state``,
+        ``poses``, the Frenet frame and this agent's collision vertices. The
+        published scan is re-traced by the caller, which owns the scan
+        simulator.
         """
         for i in self.model.velocity_indices():
             self.state.state[agent_idx, i] = 0.0
@@ -650,10 +660,42 @@ class F110Simulator:
                 [self.state.state[agent_idx, i] for i in pose_indices],
                 dtype=np.float32,
             )
+            self._refresh_derived_from_pose(agent_idx)
 
         self.state.standard_state[agent_idx, 3] = 0.0
         self.state.standard_state[agent_idx, 5:] = 0.0
         self.state.collisions[agent_idx] = 1.0
+
+    def _refresh_derived_from_pose(self, agent_idx: int) -> None:
+        """Re-derive the Frenet frame and collision vertices after a pose rewind.
+
+        ``step`` computes the Frenet frame before the collision pass, and
+        ``_update_scans`` snapshots every agent's vertices before the per-agent
+        loop, so both describe the pose the halt has just undone. Without this,
+        ``obs['frenet_pose']`` disagrees with the ``pose_x``/``pose_y`` beside
+        it, and a later agent's ``ray_cast`` (and the ``BOUNDING_BOX`` GJK pass)
+        occludes against a body the simulator has already moved back.
+        """
+        if self.config.simulation_config.compute_frenet_frame and self.track is not None:
+            std = self.state.standard_state[agent_idx]
+            prev_s = float(self.state.frenet[agent_idx, 0])
+            self.state.frenet[agent_idx] = np.array(
+                self.track.cartesian_to_frenet(
+                    float(std[0]), float(std[1]), float(std[4]),
+                    s_guess=prev_s, use_s_guess=True,
+                ),
+                dtype=np.float32,
+            )
+
+        # _update_agent_collisions can reach the halt before any vertex snapshot
+        # exists, so this is guarded rather than assumed.
+        if getattr(self, "_all_vertices", None) is not None:
+            cp = self._collision_pose_from_base(self.state.poses[agent_idx])
+            self._all_vertices[agent_idx] = get_vertices(
+                np.array([cp[0], cp[1], cp[2]], dtype=np.float64),
+                self.vehicle_params.length,
+                self.vehicle_params.width,
+            )
 
     def _push_throttle_delay(self, values: np.ndarray) -> np.ndarray:
         """Ring-buffer delay for the longitudinal command (mirrors the steering
@@ -711,6 +753,12 @@ class F110Simulator:
                 self.collision_margin,
             ):
                 self._halt_on_collision(agent_idx)
+                # The halt rewound the pose, so `scan_clean` describes a place
+                # the car no longer is. Re-trace from the restored pose: this is
+                # both what gets published and what the opponent ray_cast below
+                # shortens, and it costs one extra sweep on contact steps only.
+                scan_pose = self._lidar_pose_from_base(self.state.poses[agent_idx])
+                scan_clean = simulator.scan(scan_pose, rng=None)
             else:
                 self.state.collisions[agent_idx] = 0.0
 

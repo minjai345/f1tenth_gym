@@ -297,5 +297,78 @@ class TestHaltRejectsTheMove(unittest.TestCase):
         self.assertEqual(float(info["collisions"][0]), 0.0, "still flagged after backing off")
 
 
+class TestHaltRefreshesDerivedState(unittest.TestCase):
+    """A rejected move must not survive in anything derived from the pose.
+
+    `step` computes the Frenet frame before the collision pass, and
+    `_update_scans` snapshots collision vertices before the per-agent loop, so
+    all of it described the pose the halt undoes. Before this was fixed the
+    published observation was internally inconsistent on every contact step:
+    `frenet_pose` sat ~2 cm of arclength ahead of the `pose_x`/`pose_y` beside
+    it, and the scan belonged to the rejected pose (23 m out on grazing beams).
+    """
+
+    def _crash(self, noise_std=0.0, num_agents=1):
+        from f1tenth_gym.envs.env_config import TerminationConfig
+        from f1tenth_gym.envs.lidar import LiDARConfig
+
+        env = gym.make(
+            "f1tenth_gym:f1tenth-v0",
+            config=EnvConfig(
+                num_agents=num_agents,
+                simulation_config=SimulationConfig(max_laps=None),
+                termination_config=TerminationConfig(terminate_on_collision=False),
+                lidar_config=LiDARConfig(noise_std=noise_std),
+                render_enabled=False,
+            ),
+        )
+        obs, _ = env.reset(seed=42)
+        action = np.array([[0.41, 6.0]] * num_agents, dtype=np.float32)
+        for _ in range(400):
+            obs, _, _, _, info = env.step(action)
+            if float(info["collisions"][0]):
+                return env, obs, info
+        env.close()
+        self.fail("no collision within 400 steps")
+
+    def test_frenet_matches_the_published_pose(self):
+        env, obs, _ = self._crash()
+        sim = env.unwrapped.sim
+        std = sim.state.standard_state[0]
+        expected = np.array(
+            env.unwrapped.track.cartesian_to_frenet(
+                float(std[0]), float(std[1]), float(std[4])
+            )
+        )
+        published = np.asarray(obs["agent_0"]["frenet_pose"], dtype=float)
+        # float32 storage is the only slack; the stale value was ~2.1e-2 out
+        self.assertLess(abs(published[0] - expected[0]), 1e-4)
+        env.close()
+
+    def test_scan_matches_the_published_pose(self):
+        env, obs, _ = self._crash(noise_std=0.0)
+        sim = env.unwrapped.sim
+        scan_pose = sim._lidar_pose_from_base(sim.state.poses[0])
+        expected = sim.scan_sims[0].scan(scan_pose, rng=None)
+        published = np.asarray(obs["agent_0"]["scan"], dtype=float)
+        self.assertLess(float(np.max(np.abs(published - expected))), 1e-4)
+        env.close()
+
+    def test_collision_vertices_match_the_published_pose(self):
+        from f1tenth_gym.envs.collision_models import get_vertices
+
+        env, _, _ = self._crash(num_agents=2)
+        sim = env.unwrapped.sim
+        cp = sim._collision_pose_from_base(sim.state.poses[0])
+        expected = get_vertices(
+            np.array([cp[0], cp[1], cp[2]], dtype=np.float64),
+            sim.vehicle_params.length,
+            sim.vehicle_params.width,
+        )
+        # stale snapshot was one rejected step of motion out (~2.5 cm at 6 m/s)
+        self.assertLess(float(np.max(np.abs(sim._all_vertices[0] - expected))), 1e-6)
+        env.close()
+
+
 if __name__ == "__main__":
     unittest.main()
