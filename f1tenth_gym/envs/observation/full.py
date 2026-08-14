@@ -6,7 +6,7 @@ import numpy as np
 from .base import Observation, scan_space
 from .fields import ALL_FIELDS, BASE_FIELDS, DERIVED_FIELDS
 
-__all__ = ["FullObservation"]
+__all__ = ["FullObservation", "field_space", "physical_bounds"]
 
 # the single vocabulary lives in fields.py, shared with the factory
 _BASE_FIELDS = BASE_FIELDS
@@ -25,6 +25,104 @@ _PI = float(np.pi)
 _TIME_LIMIT = 1.0e6  # seconds / lap count
 _EY_LIMIT = 20.0     # metres of lateral Frenet deviation
 _BETA_LIMIT = _PI    # slip angle (physically < pi/2; pi is a safe cap)
+
+
+def physical_bounds(env) -> dict:
+    """Finite, roughly-physical bounds for the observation fields, derived from
+    the vehicle limits and track extents.
+
+    Module-level so RawObservation can reuse the derivation instead of building a
+    throwaway FullObservation just to reach a private method.
+    """
+    env = env.unwrapped
+    # Widest params across the DR bounds, so randomized episodes stay inside
+    # the fixed space. Read directly: `space_vehicle_params` is assigned in
+    # _initialize_components before the first space() call and again in
+    # update_params, so there is no env without it -- and a truthiness
+    # fallback here would silently substitute the NOMINAL params, undoing
+    # the widening with no error.
+    p = env.space_vehicle_params
+    v_min, v_max = float(p.v_min), float(p.v_max)
+    s_min, s_max = float(p.s_min), float(p.s_max)
+    # One-integrator-step actuator overshoot: the steering/accel constraints
+    # zero the actuator RATE only AFTER the angle/speed has crossed its limit,
+    # so a single step can exceed it by up to rate * integrator_dt. Pad the
+    # bounds by that worst case (|d delta/dt| <= sv_max, |dv/dt| <= a_max),
+    # else a hard-steer / hard-accel rollout lands just outside the declared
+    # space and breaks check_env / normalized-Box RL pipelines.
+    idt = float(getattr(env.sim, "integrator_dt", env.timestep))
+    s_min -= float(p.sv_max) * idt
+    s_max += float(p.sv_max) * idt
+    v_min -= float(p.a_max) * idt
+    v_max += float(p.a_max) * idt
+    spd_hi = max(abs(v_min), abs(v_max))
+    wheelbase = max(float(p.lf) + float(p.lr), 0.1)
+    # kinematic max yaw rate = v*tan(steer)/wheelbase, with a safety factor
+    steer_hi = max(abs(s_min), abs(s_max))
+    yaw_rate = 1.5 * spd_hi * float(np.tan(steer_hi)) / wheelbase
+
+    track = env.track
+    cl = getattr(track, "centerline", None) if track is not None else None
+    if cl is not None:
+        xs = np.asarray(cl.xs, dtype=float)
+        ys = np.asarray(cl.ys, dtype=float)
+        m = 5.0  # metres of margin beyond the centerline extent
+        x_lo, x_hi = float(xs.min()) - m, float(xs.max()) + m
+        y_lo, y_hi = float(ys.min()) - m, float(ys.max()) + m
+        s_arc = float(cl.spline.s_frame_max)
+    else:
+        x_lo = y_lo = -1.0e4
+        x_hi = y_hi = 1.0e4
+        s_arc = _TIME_LIMIT
+    return dict(
+        v_min=v_min, v_max=v_max, spd_hi=spd_hi, s_min=s_min, s_max=s_max,
+        yaw_rate=yaw_rate, x_lo=x_lo, x_hi=x_hi, y_lo=y_lo, y_hi=y_hi, s_arc=s_arc,
+    )
+
+def field_space(field: str, sim, b: dict) -> gym.Space:
+    f32 = np.float32
+    Box = gym.spaces.Box
+    if field == "scan":
+        return scan_space(sim)
+    if field == "collision":
+        return _scalar_box(0.0, 1.0)
+    if field in ("lap_time", "lap_count", "sim_time"):
+        return _scalar_box(0.0, _TIME_LIMIT)
+    if field == "pose_x":
+        return _scalar_box(b["x_lo"], b["x_hi"])
+    if field == "pose_y":
+        return _scalar_box(b["y_lo"], b["y_hi"])
+    if field in ("pose_theta", "beta"):
+        return _scalar_box(-_PI, _PI)
+    if field == "linear_vel_x":
+        return _scalar_box(b["v_min"], b["v_max"])
+    if field == "linear_vel_y":
+        return _scalar_box(-b["spd_hi"], b["spd_hi"])
+    if field == "linear_vel_magnitude":
+        return _scalar_box(0.0, b["spd_hi"])
+    if field == "ang_vel_z":
+        return _scalar_box(-b["yaw_rate"], b["yaw_rate"])
+    if field == "delta":
+        return _scalar_box(b["s_min"], b["s_max"])
+    if field == "frenet_pose":  # [s, ey, ephi]
+        return Box(
+            low=np.array([0.0, -_EY_LIMIT, -_PI], f32),
+            high=np.array([b["s_arc"], _EY_LIMIT, _PI], f32),
+            dtype=f32,
+        )
+    if field == "std_state":  # [X, Y, steering, speed, yaw, yaw_rate, beta]
+        lo = np.array([b["x_lo"], b["y_lo"], b["s_min"], b["v_min"], -_PI, -b["yaw_rate"], -_BETA_LIMIT], f32)
+        hi = np.array([b["x_hi"], b["y_hi"], b["s_max"], b["v_max"], _PI, b["yaw_rate"], _BETA_LIMIT], f32)
+        return Box(low=lo, high=hi, dtype=f32)
+    if field == "state":  # KS: [x,y,delta,v,yaw]; ST adds [yaw_rate, beta]
+        lo = [b["x_lo"], b["y_lo"], b["s_min"], b["v_min"], -_PI, -b["yaw_rate"], -_BETA_LIMIT]
+        hi = [b["x_hi"], b["y_hi"], b["s_max"], b["v_max"], _PI, b["yaw_rate"], _BETA_LIMIT]
+        n = sim.state_dim
+        while len(lo) < n:  # pad any extra dims (e.g. MB) with a finite fallback
+            lo.append(-_TIME_LIMIT)
+            hi.append(_TIME_LIMIT)
+        return Box(low=np.array(lo[:n], f32), high=np.array(hi[:n], f32), dtype=f32)
+    raise ValueError(f"no space builder for observation field {field!r}")
 
 
 class FullObservation(Observation):
@@ -61,107 +159,14 @@ class FullObservation(Observation):
             raise ValueError("scan requested but the LiDAR is disabled (lidar_config.enabled=False)")
         return self._fields
 
-    def _physical_bounds(self) -> dict:
-        """Finite, roughly-physical bounds for the observation fields, derived
-        from the vehicle limits and track extents."""
-        env = self.env.unwrapped
-        # Widest params across the DR bounds, so randomized episodes stay inside
-        # the fixed space. Read directly: `space_vehicle_params` is assigned in
-        # _initialize_components before the first space() call and again in
-        # update_params, so there is no env without it -- and a truthiness
-        # fallback here would silently substitute the NOMINAL params, undoing
-        # the widening with no error.
-        p = env.space_vehicle_params
-        v_min, v_max = float(p.v_min), float(p.v_max)
-        s_min, s_max = float(p.s_min), float(p.s_max)
-        # One-integrator-step actuator overshoot: the steering/accel constraints
-        # zero the actuator RATE only AFTER the angle/speed has crossed its limit,
-        # so a single step can exceed it by up to rate * integrator_dt. Pad the
-        # bounds by that worst case (|d delta/dt| <= sv_max, |dv/dt| <= a_max),
-        # else a hard-steer / hard-accel rollout lands just outside the declared
-        # space and breaks check_env / normalized-Box RL pipelines.
-        idt = float(getattr(env.sim, "integrator_dt", env.timestep))
-        s_min -= float(p.sv_max) * idt
-        s_max += float(p.sv_max) * idt
-        v_min -= float(p.a_max) * idt
-        v_max += float(p.a_max) * idt
-        spd_hi = max(abs(v_min), abs(v_max))
-        wheelbase = max(float(p.lf) + float(p.lr), 0.1)
-        # kinematic max yaw rate = v*tan(steer)/wheelbase, with a safety factor
-        steer_hi = max(abs(s_min), abs(s_max))
-        yaw_rate = 1.5 * spd_hi * float(np.tan(steer_hi)) / wheelbase
-
-        track = env.track
-        cl = getattr(track, "centerline", None) if track is not None else None
-        if cl is not None:
-            xs = np.asarray(cl.xs, dtype=float)
-            ys = np.asarray(cl.ys, dtype=float)
-            m = 5.0  # metres of margin beyond the centerline extent
-            x_lo, x_hi = float(xs.min()) - m, float(xs.max()) + m
-            y_lo, y_hi = float(ys.min()) - m, float(ys.max()) + m
-            s_arc = float(cl.spline.s_frame_max)
-        else:
-            x_lo = y_lo = -1.0e4
-            x_hi = y_hi = 1.0e4
-            s_arc = _TIME_LIMIT
-        return dict(
-            v_min=v_min, v_max=v_max, spd_hi=spd_hi, s_min=s_min, s_max=s_max,
-            yaw_rate=yaw_rate, x_lo=x_lo, x_hi=x_hi, y_lo=y_lo, y_hi=y_hi, s_arc=s_arc,
-        )
-
-    def _field_space(self, field: str, sim, b: dict) -> gym.Space:
-        f32 = np.float32
-        Box = gym.spaces.Box
-        if field == "scan":
-            return scan_space(sim)
-        if field == "collision":
-            return _scalar_box(0.0, 1.0)
-        if field in ("lap_time", "lap_count", "sim_time"):
-            return _scalar_box(0.0, _TIME_LIMIT)
-        if field == "pose_x":
-            return _scalar_box(b["x_lo"], b["x_hi"])
-        if field == "pose_y":
-            return _scalar_box(b["y_lo"], b["y_hi"])
-        if field in ("pose_theta", "beta"):
-            return _scalar_box(-_PI, _PI)
-        if field == "linear_vel_x":
-            return _scalar_box(b["v_min"], b["v_max"])
-        if field == "linear_vel_y":
-            return _scalar_box(-b["spd_hi"], b["spd_hi"])
-        if field == "linear_vel_magnitude":
-            return _scalar_box(0.0, b["spd_hi"])
-        if field == "ang_vel_z":
-            return _scalar_box(-b["yaw_rate"], b["yaw_rate"])
-        if field == "delta":
-            return _scalar_box(b["s_min"], b["s_max"])
-        if field == "frenet_pose":  # [s, ey, ephi]
-            return Box(
-                low=np.array([0.0, -_EY_LIMIT, -_PI], f32),
-                high=np.array([b["s_arc"], _EY_LIMIT, _PI], f32),
-                dtype=f32,
-            )
-        if field == "std_state":  # [X, Y, steering, speed, yaw, yaw_rate, beta]
-            lo = np.array([b["x_lo"], b["y_lo"], b["s_min"], b["v_min"], -_PI, -b["yaw_rate"], -_BETA_LIMIT], f32)
-            hi = np.array([b["x_hi"], b["y_hi"], b["s_max"], b["v_max"], _PI, b["yaw_rate"], _BETA_LIMIT], f32)
-            return Box(low=lo, high=hi, dtype=f32)
-        if field == "state":  # KS: [x,y,delta,v,yaw]; ST adds [yaw_rate, beta]
-            lo = [b["x_lo"], b["y_lo"], b["s_min"], b["v_min"], -_PI, -b["yaw_rate"], -_BETA_LIMIT]
-            hi = [b["x_hi"], b["y_hi"], b["s_max"], b["v_max"], _PI, b["yaw_rate"], _BETA_LIMIT]
-            n = sim.state_dim
-            while len(lo) < n:  # pad any extra dims (e.g. MB) with a finite fallback
-                lo.append(-_TIME_LIMIT)
-                hi.append(_TIME_LIMIT)
-            return Box(low=np.array(lo[:n], f32), high=np.array(hi[:n], f32), dtype=f32)
-        raise ValueError(f"no space builder for observation field {field!r}")
-
     def space(self) -> gym.Space:
         sim = self._sim
-        bounds = self._physical_bounds()
+        bounds = physical_bounds(self.env)
         fields = self._selected_fields()
         agent_spaces: dict[str, gym.Space] = {}
         for agent_id in self.env.unwrapped.agent_ids:
             agent_spaces[agent_id] = gym.spaces.Dict(
-                {field: self._field_space(field, sim, bounds) for field in fields}
+                {field: field_space(field, sim, bounds) for field in fields}
             )
         return gym.spaces.Dict(agent_spaces)
 

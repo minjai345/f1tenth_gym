@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from typing import Callable, NamedTuple
+
 import gymnasium as gym
 import numpy as np
 
 from .base import Observation, scan_space
-from .full import FullObservation
+from .full import field_space, physical_bounds
 
 __all__ = ["RawObservation"]
 
@@ -15,6 +17,60 @@ def _batched(space: gym.spaces.Box, num_agents: int) -> gym.spaces.Box:
     low = np.broadcast_to(space.low, shape).astype(np.float32)
     high = np.broadcast_to(space.high, shape).astype(np.float32)
     return gym.spaces.Box(low=low, high=high, dtype=np.float32)
+
+
+class _Key(NamedTuple):
+    """One raw output key: how to size it, and how to read it.
+
+    Space builder and value getter live side by side on purpose. They used to be
+    two independent ``if/elif`` chains (plus a third list naming the keys), so
+    adding a key to one and forgetting the other produced an ``observation_space``
+    that silently disagreed with ``observe()`` — surfacing as a ``check_env``
+    failure nowhere near this file.
+    """
+
+    space: Callable[..., gym.Space]
+    value: Callable[..., np.ndarray]
+
+
+# Batched per-agent fields, borrowing FullObservation's physically-derived
+# bounds rather than duplicating the math. `sim_time` is the one scalar.
+_KEYS: dict[str, _Key] = {
+    "scans": _Key(
+        space=lambda sim, n, bounds: _batched(scan_space(sim), n),
+        value=lambda sim, state, env: state.scans[:, : sim.scan_num_beams].astype(np.float32),
+    ),
+    "state": _Key(
+        space=lambda sim, n, bounds: _batched(field_space("state", sim, bounds), n),
+        value=lambda sim, state, env: state.state.astype(np.float32),
+    ),
+    "standard_state": _Key(
+        space=lambda sim, n, bounds: _batched(field_space("std_state", sim, bounds), n),
+        value=lambda sim, state, env: state.standard_state.astype(np.float32),
+    ),
+    "collisions": _Key(
+        space=lambda sim, n, bounds: gym.spaces.Box(
+            low=0.0, high=1.0, shape=(n,), dtype=np.float32
+        ),
+        value=lambda sim, state, env: state.collisions.astype(np.float32),
+    ),
+    "frenet": _Key(
+        space=lambda sim, n, bounds: _batched(field_space("frenet_pose", sim, bounds), n),
+        value=lambda sim, state, env: state.frenet.astype(np.float32),
+    ),
+    "lap_times": _Key(
+        space=lambda sim, n, bounds: _batched(field_space("lap_time", sim, bounds), n),
+        value=lambda sim, state, env: np.asarray(env.lap_times, dtype=np.float32).copy(),
+    ),
+    "lap_counts": _Key(
+        space=lambda sim, n, bounds: _batched(field_space("lap_time", sim, bounds), n),
+        value=lambda sim, state, env: np.asarray(env.lap_counts, dtype=np.float32).copy(),
+    ),
+    "sim_time": _Key(
+        space=lambda sim, n, bounds: field_space("sim_time", sim, bounds),
+        value=lambda sim, state, env: np.asarray(env.sim_time, dtype=np.float32),
+    ),
+}
 
 
 class RawObservation(Observation):
@@ -36,11 +92,6 @@ class RawObservation(Observation):
     corrupt anything stored (RL replay buffers most of all).
     """
 
-    def _bounds_provider(self) -> FullObservation:
-        # reuse FullObservation's physically-derived per-field bounds rather
-        # than duplicating the math here
-        return FullObservation(self.env)
-
     def _selected_keys(self) -> tuple[str, ...]:
         keys = ["state", "standard_state", "collisions", "lap_times", "lap_counts", "sim_time"]
         if self._sim.scan_enabled:
@@ -49,49 +100,27 @@ class RawObservation(Observation):
             keys.append("frenet")
         return tuple(keys)
 
+    def _handler(self, key: str) -> _Key:
+        try:
+            return _KEYS[key]
+        except KeyError:
+            raise ValueError(f"no handler for raw observation key {key!r}") from None
+
     def space(self) -> gym.Space:
         sim = self._sim
-        n = sim.num_agents
-        full = self._bounds_provider()
-        bounds = full._physical_bounds()
-        per_key: dict[str, gym.Space] = {}
-        for key in self._selected_keys():
-            if key == "scans":
-                per_key[key] = _batched(scan_space(sim), n)
-            elif key == "state":
-                per_key[key] = _batched(full._field_space("state", sim, bounds), n)
-            elif key == "standard_state":
-                per_key[key] = _batched(full._field_space("std_state", sim, bounds), n)
-            elif key == "collisions":
-                per_key[key] = gym.spaces.Box(low=0.0, high=1.0, shape=(n,), dtype=np.float32)
-            elif key == "frenet":
-                per_key[key] = _batched(full._field_space("frenet_pose", sim, bounds), n)
-            elif key in ("lap_times", "lap_counts"):
-                per_key[key] = _batched(full._field_space("lap_time", sim, bounds), n)
-            elif key == "sim_time":
-                per_key[key] = full._field_space("sim_time", sim, bounds)
-        return gym.spaces.Dict(per_key)
+        bounds = physical_bounds(self.env)
+        return gym.spaces.Dict(
+            {
+                key: self._handler(key).space(sim, sim.num_agents, bounds)
+                for key in self._selected_keys()
+            }
+        )
 
     def observe(self):
         sim = self._sim
         state = self._state
         env = self.env.unwrapped
-        out: dict[str, np.ndarray] = {}
-        for key in self._selected_keys():
-            if key == "scans":
-                out[key] = state.scans[:, : sim.scan_num_beams].astype(np.float32)
-            elif key == "state":
-                out[key] = state.state.astype(np.float32)
-            elif key == "standard_state":
-                out[key] = state.standard_state.astype(np.float32)
-            elif key == "collisions":
-                out[key] = state.collisions.astype(np.float32)
-            elif key == "frenet":
-                out[key] = state.frenet.astype(np.float32)
-            elif key == "lap_times":
-                out[key] = np.asarray(env.lap_times, dtype=np.float32).copy()
-            elif key == "lap_counts":
-                out[key] = np.asarray(env.lap_counts, dtype=np.float32).copy()
-            elif key == "sim_time":
-                out[key] = np.asarray(env.sim_time, dtype=np.float32)
-        return out
+        return {
+            key: self._handler(key).value(sim, state, env)
+            for key in self._selected_keys()
+        }
