@@ -669,8 +669,16 @@ class F110Env(gym.Env):
         else:
             raise TypeError("params must be a VehicleParameters instance")
 
+        # Validate BEFORE mutating anything. `with_updates` re-runs
+        # EnvConfig.__post_init__, which can reject the params (the MB gate is
+        # the live case). Assigning first left `self.vehicle_params` holding a
+        # rejected set while the sim, the spaces and the renderer kept the old
+        # one -- and with DR enabled the next reset() rebuilt from the poisoned
+        # attribute and pushed NaNs into the physics with no error.
+        new_config = self.env_config.with_updates(params=vehicle_params)
+
         self.vehicle_params = vehicle_params
-        self.env_config = self.env_config.with_updates(params=vehicle_params)
+        self.env_config = new_config
 
         self.sim.update_params(self.vehicle_params)
         if hasattr(self, "renderer") and self.renderer is not None:

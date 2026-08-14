@@ -35,6 +35,34 @@ class TestControlConfigValidation(unittest.TestCase):
         self.assertEqual(cfg.steer_delay_steps, 3)
         self.assertEqual(updated.steer_delay_steps, 5)
 
+    def test_non_finite_steer_kp_is_rejected(self):
+        """NaN defeats both guards inside pid_steer.
+
+        ``kp <= 0.0`` is False for NaN so the legacy relay branch is not taken,
+        and neither clip branch fires either, so the kernel returns NaN and the
+        steering angle is NaN from the first step. Under the default
+        FRENET_BASED counter that surfaces as a baffling ``cannot convert float
+        NaN to integer`` from the lap counter; under WINDING_ANGLE it is silent.
+        """
+        for bad in (float("nan"), float("inf"), float("-inf")):
+            with self.assertRaisesRegex(ValueError, "steer_kp must be finite"):
+                ControlConfig(steer_kp=bad)
+        ControlConfig(steer_kp=None)   # derives the gain
+        ControlConfig(steer_kp=-1.0)   # legacy relay
+        ControlConfig(steer_kp=38.2)
+
+    def test_action_modes_are_type_checked(self):
+        with self.assertRaises(TypeError):
+            ControlConfig(steering_mode=99)
+        with self.assertRaises(TypeError):
+            ControlConfig(longitudinal_mode="nonsense")
+
+    def test_delay_steps_are_coerced_to_int(self):
+        # they index ring buffers, so a float silently misbehaves downstream
+        cfg = ControlConfig(steer_delay_steps=2.7, throttle_delay_steps=1.9)
+        self.assertEqual((cfg.steer_delay_steps, cfg.throttle_delay_steps), (2, 1))
+        self.assertIsInstance(cfg.steer_delay_steps, int)
+
 
 class TestSimulationConfigValidation(unittest.TestCase):
     """Tests for SimulationConfig validation."""
@@ -225,11 +253,21 @@ class TestResetConfigValidation(unittest.TestCase):
 
         ResetConfig(reference_line=ReferenceLine.CENTERLINE)
         ResetConfig(start_width=5.0)
-        with self.assertRaisesRegex(ValueError, "MAP strategies"):
+        with self.assertRaisesRegex(ValueError, r"RL_\* strategies"):
             ResetConfig(
                 reference_line=ReferenceLine.CENTERLINE,
                 strategy=ResetStrategy.MAP_RANDOM_STATIC,
             )
+        # accepted for every RL_* member: the check allow-lists the family that
+        # _rl_reset_factory consumes the key for, rather than denying the one
+        # MAP member that happens to exist today
+        for strategy in (
+            ResetStrategy.RL_GRID_STATIC,
+            ResetStrategy.RL_RANDOM_STATIC,
+            ResetStrategy.RL_GRID_RANDOM,
+            ResetStrategy.RL_RANDOM_RANDOM,
+        ):
+            ResetConfig(reference_line=ReferenceLine.CENTERLINE, strategy=strategy)
         with self.assertRaisesRegex(ValueError, "GRID strategies"):
             ResetConfig(start_width=1.0, strategy=ResetStrategy.RL_RANDOM_STATIC)
         with self.assertRaisesRegex(ValueError, "start_width"):
@@ -436,3 +474,37 @@ class TestMultiBodyParameterGate(unittest.TestCase):
         from f1tenth_gym.envs.dynamic_models import FULLSCALE_VEHICLE_PARAMETERS
 
         self.assertEqual(FULLSCALE_VEHICLE_PARAMETERS.missing_mb_parameters(), ())
+
+
+class TestUpdateParamsIsAllOrNothing(unittest.TestCase):
+    """A rejected params set must leave the env exactly as it was.
+
+    ``update_params`` used to assign ``self.vehicle_params`` and only then call
+    ``with_updates``, which re-runs ``EnvConfig.__post_init__`` and can raise
+    (the MB gate). The exception propagated but the attribute kept the rejected
+    params, disagreeing with the sim, both spaces and the renderer — and with DR
+    enabled the next ``reset()`` rebuilt from it and pushed NaNs into the sim.
+    """
+
+    def test_a_rejected_params_set_changes_nothing(self):
+        import gymnasium as gym
+        from f1tenth_gym.envs.dynamic_models import (
+            DynamicModel, FULLSCALE_VEHICLE_PARAMETERS,
+        )
+
+        cfg = EnvConfig(
+            map_name="Spielberg", map_scale=10.0,
+            params=FULLSCALE_VEHICLE_PARAMETERS, render_enabled=False,
+            simulation_config=SimulationConfig(
+                dynamics_model=DynamicModel.MB, max_laps=None),
+        )
+        env = gym.make("f1tenth_gym:f1tenth-v0", config=cfg)
+        u = env.unwrapped
+        before = u.vehicle_params
+        with self.assertRaises(ValueError):
+            u.update_params(F1TENTH_VEHICLE_PARAMETERS)   # 68 non-finite MB fields
+        self.assertIs(u.vehicle_params, before)
+        self.assertIs(u.env_config.params, before)
+        self.assertIs(u.sim.vehicle_params, before)
+        self.assertIs(u.space_vehicle_params, before)
+        env.close()

@@ -87,6 +87,13 @@ class ControlConfig:
     steer_kp: Optional[float] = None
 
     def __post_init__(self) -> None:
+        if not isinstance(self.longitudinal_mode, LongitudinalActionType):
+            raise TypeError("longitudinal_mode must be a LongitudinalActionType")
+        if not isinstance(self.steering_mode, SteerActionType):
+            raise TypeError("steering_mode must be a SteerActionType")
+        # the delay fields index ring buffers, so coerce rather than accept 2.7
+        object.__setattr__(self, "steer_delay_steps", int(self.steer_delay_steps))
+        object.__setattr__(self, "throttle_delay_steps", int(self.throttle_delay_steps))
         if self.steer_delay_steps < 0:
             raise ValueError(f"steer_delay_steps must be >= 0, got {self.steer_delay_steps}")
         if self.throttle_delay_steps < 0:
@@ -95,6 +102,11 @@ class ControlConfig:
             raise ValueError(f"steer_noise_std must be >= 0, got {self.steer_noise_std}")
         if self.accl_noise_std < 0:
             raise ValueError(f"accl_noise_std must be >= 0, got {self.accl_noise_std}")
+        if self.steer_kp is not None and not math.isfinite(self.steer_kp):
+            # NaN defeats both guards in pid_steer: `kp <= 0` is False for NaN,
+            # and neither clip branch fires, so the kernel returns NaN and the
+            # steering angle is NaN from the first step.
+            raise ValueError(f"steer_kp must be finite, got {self.steer_kp}")
 
     def with_updates(self, **changes: Any) -> "ControlConfig":
         return replace(self, **changes)
@@ -211,8 +223,17 @@ class ResetConfig:
         if self.reference_line is not None:
             if not isinstance(self.reference_line, ReferenceLine):
                 raise TypeError("reference_line must be a ReferenceLine")
-            if self.strategy is ResetStrategy.MAP_RANDOM_STATIC:
-                raise ValueError("reference_line does not apply to MAP strategies")
+            # Allow-list the RL_* family rather than denying the one MAP member
+            # that exists today: only _rl_reset_factory consumes this key, so a
+            # second MAP strategy would otherwise pass config validation and
+            # then die inside gym.make with an unexpected-kwarg TypeError.
+            if self.strategy not in (
+                ResetStrategy.RL_GRID_STATIC,
+                ResetStrategy.RL_RANDOM_STATIC,
+                ResetStrategy.RL_GRID_RANDOM,
+                ResetStrategy.RL_RANDOM_RANDOM,
+            ):
+                raise ValueError("reference_line only applies to the RL_* strategies")
         if self.start_width is not None:
             if self.start_width <= 0:
                 raise ValueError(f"start_width must be > 0, got {self.start_width}")
