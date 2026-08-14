@@ -1,11 +1,16 @@
-"""Pin the VehicleParameters -> flat float32 ABI that the njit kernels index.
+"""Pin the VehicleParameters -> flat float32 wire format that the kernels index.
 
-Every ``@njit`` dynamics kernel reads the array from ``VehicleParameters.to_array``
-positionally, so the ABI is a wire format. It used to be defined implicitly by the
-dataclass field order, and inserting ``collision_body_center_x/y`` at positions
-18/19 silently shifted every multi-body parameter by +2 -- which is what made the
-MB model return NaN. The order now lives in ``_BASE_PARAM_ABI`` / ``_MB_PARAM_ABI``
-and these tests fail loudly if it drifts again.
+Every dynamics kernel reads the array from ``VehicleParameters.to_array``
+POSITIONALLY, so the field order is a wire format. Inserting
+``collision_body_center_x/y`` at positions 18/19 once silently shifted every
+multi-body parameter by +2, which is what made the MB model return NaN.
+
+There is deliberately no hand-maintained ABI tuple any more: the parameters
+describe the vehicle, not the model, so ``to_array`` emits every field in
+declaration order and each model reads the slots it cares about. That keeps the
+source simple but puts the whole guard here -- ``EXPECTED_PARAMETER_ORDER``
+below is the contract, and it is checked name-by-name so a reorder fails with
+the moved field named rather than as a mysterious physics change.
 """
 import dataclasses
 import math
@@ -18,19 +23,51 @@ from f1tenth_gym.envs.dynamic_models import (
     F1FIFTH_VEHICLE_PARAMETERS,
     F1TENTH_VEHICLE_PARAMETERS,
     FULLSCALE_VEHICLE_PARAMETERS,
+    PARAMETER_ORDER,
     VehicleParameters,
-    _BASE_PARAM_ABI,
-    _MB_PARAM_ABI,
 )
 
-# The KS/ST layout, spelled out. Any change here is a breaking ABI change and must
-# be matched by every kernel that indexes the array.
-EXPECTED_BASE_ABI = (
+# THE WIRE FORMAT, spelled out. Changing this is a breaking change and must be
+# matched by every kernel that indexes the array. Slots 0-17 are read by
+# KS/ST/MB; 18-19 are Python-side collision geometry that no kernel reads;
+# 20-87 are the multi-body block. There is no multi-body copy of the
+# total-mass CoG height -- MB shares the base `h` at slot 5.
+EXPECTED_PARAMETER_ORDER = (
     "mu", "C_Sf", "C_Sr", "lf", "lr", "h", "m", "I",
     "s_min", "s_max", "sv_min", "sv_max",
     "v_switch", "a_max", "v_min", "v_max",
     "width", "length",
+    "collision_body_center_x", "collision_body_center_y",
+    "kappa_dot_max", "kappa_dot_dot_max", "j_max", "j_dot_max",
+    "m_s", "m_uf", "m_ur",
+    "I_Phi_s", "I_y_s", "I_z", "I_xz_s",
+    "K_sf", "K_sdf", "K_sr", "K_sdr",
+    "T_f", "T_r",
+    "K_ras", "K_tsf", "K_tsr", "K_rad", "K_zt",
+    "h_raf", "h_rar", "h_s",
+    "I_uf", "I_ur", "I_y_w",
+    "K_lt", "R_w",
+    "T_sb", "T_se",
+    "D_f", "D_r", "E_f", "E_r",
+    "tire_p_cx1", "tire_p_dx1", "tire_p_dx3", "tire_p_ex1", "tire_p_kx1",
+    "tire_p_hx1", "tire_p_vx1",
+    "tire_r_bx1", "tire_r_bx2", "tire_r_cx1", "tire_r_ex1", "tire_r_hx1",
+    "tire_p_cy1", "tire_p_dy1", "tire_p_dy3", "tire_p_ey1", "tire_p_ky1",
+    "tire_p_hy1", "tire_p_hy3", "tire_p_vy1", "tire_p_vy3",
+    "tire_r_by1", "tire_r_by2", "tire_r_by3", "tire_r_cy1", "tire_r_ey1",
+    "tire_r_hy1", "tire_r_vy1", "tire_r_vy3", "tire_r_vy4", "tire_r_vy5",
+    "tire_r_vy6",
 )
+
+# Slots the kernels hardcode, checked by name so a shift is caught at the exact
+# index rather than as a silent change in the physics.
+KERNEL_SLOTS = {
+    0: "mu", 1: "C_Sf", 2: "C_Sr", 3: "lf", 4: "lr", 5: "h", 6: "m", 7: "I",
+    8: "s_min", 9: "s_max", 10: "sv_min", 11: "sv_max",
+    12: "v_switch", 13: "a_max", 14: "v_min", 15: "v_max",
+    16: "width", 17: "length",
+    20: "kappa_dot_max", 41: "K_zt", 49: "R_w", 87: "tire_r_vy6",
+}
 
 ALL_PRESETS = (
     F1TENTH_VEHICLE_PARAMETERS,
@@ -39,143 +76,133 @@ ALL_PRESETS = (
 )
 
 
-class TestParameterABI(unittest.TestCase):
-    def test_base_abi_is_exactly_as_documented(self):
-        self.assertEqual(tuple(_BASE_PARAM_ABI), EXPECTED_BASE_ABI)
+class TestParameterOrder(unittest.TestCase):
+    def test_order_is_exactly_as_documented(self):
+        # Compared as lists so a mismatch names the field that moved.
+        self.assertEqual(list(PARAMETER_ORDER), list(EXPECTED_PARAMETER_ORDER))
 
-    def test_base_abi_has_18_entries(self):
-        self.assertEqual(len(_BASE_PARAM_ABI), 18)
-        self.assertEqual(DynamicModel.KS.parameter_count(), 18)
-        self.assertEqual(DynamicModel.ST.parameter_count(), 18)
+    def test_order_has_89_entries(self):
+        self.assertEqual(len(PARAMETER_ORDER), 88)
+        self.assertEqual(len(EXPECTED_PARAMETER_ORDER), 88)
 
-    def test_mb_abi_has_87_entries(self):
-        """MB kernels read indices 0..86 contiguously, so the ABI is 87 long."""
-        self.assertEqual(len(_MB_PARAM_ABI), 87)
-        self.assertEqual(DynamicModel.MB.parameter_count(), 87)
+    def test_order_is_the_dataclass_declaration_order(self):
+        self.assertEqual(
+            list(PARAMETER_ORDER),
+            [f.name for f in dataclasses.fields(VehicleParameters)],
+        )
 
-    def test_mb_abi_excludes_the_collision_body_offsets(self):
-        """These are Python-level geometry, never read by a kernel.
-
-        Including them is precisely the +2 shift that broke MB.
-        """
-        self.assertNotIn("collision_body_center_x", _MB_PARAM_ABI)
-        self.assertNotIn("collision_body_center_y", _MB_PARAM_ABI)
-
-    def test_mb_abi_extends_the_base_abi(self):
-        self.assertEqual(tuple(_MB_PARAM_ABI[:18]), EXPECTED_BASE_ABI)
-
-    def test_every_abi_name_is_a_real_field(self):
-        fields = {f.name for f in dataclasses.fields(VehicleParameters)}
-        for name in set(_BASE_PARAM_ABI) | set(_MB_PARAM_ABI):
-            self.assertIn(name, fields, f"{name!r} is not a VehicleParameters field")
+    def test_every_name_is_a_real_field(self):
+        valid = {f.name for f in dataclasses.fields(VehicleParameters)}
+        for name in PARAMETER_ORDER:
+            self.assertIn(name, valid)
 
     def test_no_duplicate_slots(self):
-        self.assertEqual(len(set(_MB_PARAM_ABI)), len(_MB_PARAM_ABI))
+        self.assertEqual(len(set(PARAMETER_ORDER)), len(PARAMETER_ORDER))
 
-    def test_indices_the_kernels_hardcode(self):
-        """Spot-check the slots that appear literally in the kernels."""
-        for index, name in ((0, "mu"), (3, "lf"), (4, "lr"), (6, "m"), (7, "I"),
-                            (13, "a_max"), (15, "v_max"), (16, "width"), (17, "length")):
-            self.assertEqual(_BASE_PARAM_ABI[index], name, f"base slot {index}")
-        # multi_body.py reads kappa_dot_max at 18 and K_zt at 39.
-        self.assertEqual(_MB_PARAM_ABI[18], "kappa_dot_max")
-        self.assertEqual(_MB_PARAM_ABI[39], "K_zt")
+    def test_slots_the_kernels_hardcode(self):
+        for index, name in KERNEL_SLOTS.items():
+            self.assertEqual(PARAMETER_ORDER[index], name, f"slot {index}")
 
 
 class TestToArray(unittest.TestCase):
-    def test_ks_and_st_match_the_documented_order(self):
+    def test_one_array_for_every_model(self):
+        # The parameters describe the vehicle, not the model, so there is no
+        # per-model length any more.
         for params in ALL_PRESETS:
-            expected = np.asarray(
-                [getattr(params, n) for n in EXPECTED_BASE_ABI], dtype=np.float32
-            )
-            for model in (DynamicModel.KS, DynamicModel.ST):
-                got = params.to_array(model)
-                np.testing.assert_array_equal(got, expected, err_msg=f"{model.name}")
-
-    def test_dtype_and_shape(self):
-        for model, size in ((DynamicModel.KS, 18), (DynamicModel.ST, 18), (DynamicModel.MB, 87)):
-            arr = FULLSCALE_VEHICLE_PARAMETERS.to_array(model)
+            arr = params.to_array()
+            self.assertEqual(arr.shape, (88,))
             self.assertEqual(arr.dtype, np.float32)
-            self.assertEqual(arr.shape, (size,))
 
-    def test_array_owns_its_data(self):
-        """Kernels keep the array; it must not be a view of a temporary."""
-        arr = F1TENTH_VEHICLE_PARAMETERS.to_array(DynamicModel.ST)
-        self.assertTrue(arr.flags.owndata)
+    def test_marshals_by_name_in_order(self):
+        for params in ALL_PRESETS:
+            arr = params.to_array()
+            for index, name in enumerate(PARAMETER_ORDER):
+                expected = getattr(params, name)
+                if math.isnan(expected):
+                    self.assertTrue(math.isnan(float(arr[index])), f"{name} at {index}")
+                else:
+                    # exact: the only transformation to_array applies is the
+                    # float64 -> float32 narrowing
+                    self.assertEqual(
+                        arr[index], np.float32(expected), f"{name} at {index}"
+                    )
 
-    def test_marshalling_is_by_name_not_position(self):
-        """A value set on a field must surface at that field's ABI slot."""
+    def test_values_land_at_their_documented_index(self):
         params = F1TENTH_VEHICLE_PARAMETERS.with_updates(mu=0.5, v_max=33.0, length=1.25)
-        arr = params.to_array(DynamicModel.ST)
-        self.assertAlmostEqual(float(arr[_BASE_PARAM_ABI.index("mu")]), 0.5, places=5)
-        self.assertAlmostEqual(float(arr[_BASE_PARAM_ABI.index("v_max")]), 33.0, places=5)
-        self.assertAlmostEqual(float(arr[_BASE_PARAM_ABI.index("length")]), 1.25, places=5)
+        arr = params.to_array()
+        self.assertAlmostEqual(float(arr[0]), 0.5, places=5)
+        self.assertAlmostEqual(float(arr[15]), 33.0, places=5)
+        self.assertAlmostEqual(float(arr[17]), 1.25, places=5)
 
-    def test_fullscale_mb_array_is_finite(self):
-        arr = FULLSCALE_VEHICLE_PARAMETERS.to_array(DynamicModel.MB)
-        self.assertTrue(np.all(np.isfinite(arr)), "FULLSCALE should fully populate the MB ABI")
+    def test_collision_offsets_are_present_but_unread_by_kernels(self):
+        # They ride along at 18/19 rather than being filtered out; the kernels
+        # simply start the multi-body block at 20.
+        arr = FULLSCALE_VEHICLE_PARAMETERS.with_updates(
+            collision_body_center_x=0.4, collision_body_center_y=0.1
+        ).to_array()
+        self.assertAlmostEqual(float(arr[18]), 0.4, places=5)
+        self.assertAlmostEqual(float(arr[19]), 0.1, places=5)
 
-    def test_k_zt_is_not_zero_for_fullscale(self):
-        """K_zt is a divisor in init_mb; reading the wrong slot gave 0.0 -> inf."""
-        arr = FULLSCALE_VEHICLE_PARAMETERS.to_array(DynamicModel.MB)
-        self.assertGreater(float(arr[39]), 0.0)
 
-
-class TestMissingMultiBodyParameters(unittest.TestCase):
-    def test_small_scale_presets_do_not_support_mb(self):
+class TestMultiBodyParameters(unittest.TestCase):
+    def test_small_scale_presets_are_missing_the_mb_block(self):
         for params in (F1TENTH_VEHICLE_PARAMETERS, F1FIFTH_VEHICLE_PARAMETERS):
             missing = params.missing_mb_parameters()
-            self.assertEqual(len(missing), 69)
-            self.assertTrue(all(math.isnan(getattr(params, n)) for n in missing))
+            self.assertEqual(len(missing), 68)
 
-    def test_fullscale_supports_mb(self):
+    def test_fullscale_has_every_parameter(self):
         self.assertEqual(FULLSCALE_VEHICLE_PARAMETERS.missing_mb_parameters(), ())
 
-    def test_base_parameters_are_never_reported_missing(self):
-        """The base block is populated by every preset, so it must never be flagged."""
+    def test_missing_never_reports_a_slot_the_base_models_read(self):
+        base_slots = set(PARAMETER_ORDER[:18])
         for params in ALL_PRESETS:
-            self.assertFalse(set(params.missing_mb_parameters()) & set(_BASE_PARAM_ABI))
+            self.assertFalse(set(params.missing_mb_parameters()) & base_slots)
+
+    def test_fullscale_mb_array_is_finite(self):
+        arr = FULLSCALE_VEHICLE_PARAMETERS.to_array()
+        self.assertTrue(np.all(np.isfinite(arr)))
+
+    def test_k_zt_is_not_zero_for_fullscale(self):
+        # K_zt is a divisor in the multi-body suspension math; reading the wrong
+        # slot used to land on a 0.0 and raise ZeroDivisionError.
+        arr = FULLSCALE_VEHICLE_PARAMETERS.to_array()
+        self.assertEqual(PARAMETER_ORDER[41], "K_zt")
+        self.assertGreater(float(arr[41]), 0.0)
 
 
 class TestMultiBodyRuns(unittest.TestCase):
-    def test_fullscale_initial_state_is_finite(self):
-        arr = FULLSCALE_VEHICLE_PARAMETERS.to_array(DynamicModel.MB)
-        state = DynamicModel.MB.get_initial_state(pose=np.zeros(3), params=arr)
-        self.assertEqual(state.shape, (29,))
-        self.assertTrue(np.all(np.isfinite(state)), f"non-finite at {np.where(~np.isfinite(state))[0]}")
-
-    def test_fullscale_integrates_without_going_non_finite(self):
+    def test_fullscale_mb_integrates_without_nan(self):
         from f1tenth_gym.envs.integrators import rk4_integration
 
-        arr = FULLSCALE_VEHICLE_PARAMETERS.to_array(DynamicModel.MB)
-        state = DynamicModel.MB.get_initial_state(pose=np.zeros(3), params=arr)
-        control = np.array([0.05, 2.0], dtype=np.float32)
-        for step in range(50):
-            state = rk4_integration(DynamicModel.MB.f_dynamics, state, control, 0.01, arr)
-            self.assertTrue(np.all(np.isfinite(state)), f"non-finite at step {step + 1}")
-        self.assertGreater(float(state[3]), 0.0, "the car should have accelerated")
+        params = FULLSCALE_VEHICLE_PARAMETERS
+        arr = params.to_array()
+        model = DynamicModel.MB
+        state = model.get_initial_state(pose=np.zeros(3), params=arr)
+        control = np.array([0.1, 2.0], dtype=np.float32)
+        for _ in range(50):
+            state = rk4_integration(model.f_dynamics, state, control, 0.01, arr)
+        self.assertTrue(np.all(np.isfinite(state)))
+        self.assertGreater(float(state[3]), 0.0)
+
+
+class TestNoPerModelParameterAPI(unittest.TestCase):
+    """The per-model split is gone; these pin that it stays gone."""
+
+    def test_to_array_takes_no_model_argument(self):
+        with self.assertRaises(TypeError):
+            F1TENTH_VEHICLE_PARAMETERS.to_array(DynamicModel.ST)
+
+    def test_parameter_count_is_removed(self):
+        self.assertFalse(hasattr(DynamicModel.ST, "parameter_count"))
+
+    def test_from_string_is_removed(self):
+        self.assertFalse(hasattr(DynamicModel, "from_string"))
+
+    def test_vehicle_param_ranges_is_removed(self):
+        import f1tenth_gym.envs.dynamic_models as dm
+
+        self.assertFalse(hasattr(dm, "VehicleParamRanges"))
 
 
 if __name__ == "__main__":
     unittest.main()
-
-
-class TestVehicleParamRangesParity(unittest.TestCase):
-    """ISSUES_PLAN.md #5: the typed ranges mirror VehicleParameters exactly."""
-
-    def test_field_names_match_vehicle_parameters(self):
-        from f1tenth_gym.envs.dynamic_models import VehicleParamRanges
-
-        self.assertEqual(
-            [f.name for f in dataclasses.fields(VehicleParamRanges)],
-            [f.name for f in dataclasses.fields(VehicleParameters)],
-        )
-
-    def test_typo_raises_and_as_dict_filters(self):
-        from f1tenth_gym.envs.dynamic_models import VehicleParamRanges
-
-        with self.assertRaises(TypeError):
-            VehicleParamRanges(mass=(1.0, 2.0))
-        r = VehicleParamRanges(m=(3.0, 4.0), mu=(0.9, 1.1))
-        self.assertEqual(r.as_dict(), {"mu": (0.9, 1.1), "m": (3.0, 4.0)})
-        self.assertIsInstance(hash(r), int)

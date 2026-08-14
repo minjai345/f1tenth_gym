@@ -31,7 +31,7 @@ often is it redrawn**.
      - the observed scan, after ray casting
      - once per episode
      - ``LiDARConfig``
-   * - ``param_ranges``
+   * - ``low`` / ``high``
      - the vehicle itself, before the physics
      - once per episode
      - ``DomainRandomizationConfig``
@@ -105,25 +105,26 @@ Randomizing the vehicle
 -----------------------
 
 :class:`~f1tenth_gym.envs.env_config.DomainRandomizationConfig` redraws vehicle
-parameters once per episode, at ``reset()``. Ranges are **absolute physical
-units**, not multipliers, and arrive as a typed
-:class:`~f1tenth_gym.envs.dynamic_models.VehicleParamRanges` — one optional
-slot per ``VehicleParameters`` field, so a typo is a ``TypeError`` at
-construction rather than a silently-ignored key:
+parameters once per episode, at ``reset()``. Bounds are **absolute physical
+units**, not multipliers, and are given as two ordinary
+:class:`~f1tenth_gym.envs.dynamic_models.VehicleParameters` — the per-field
+lower and upper end of the range. There is no separate range type: the bounds
+of a vehicle parameter are themselves vehicle parameters, so a typo is a
+``TypeError`` at construction and the two can never drift apart. Build them
+from your base parameters and change only what should vary; a field with
+``low == high`` is not randomized:
 
 .. code-block:: python
 
    from f1tenth_gym.envs.env_config import EnvConfig, DomainRandomizationConfig
-   from f1tenth_gym.envs.dynamic_models import VehicleParamRanges
+   from f1tenth_gym.envs.dynamic_models import F1TENTH_VEHICLE_PARAMETERS
 
+   base = F1TENTH_VEHICLE_PARAMETERS
    cfg = EnvConfig(
        domain_randomization_config=DomainRandomizationConfig(
            enabled=True,
-           param_ranges=VehicleParamRanges(
-               m=(3.0, 4.0),      # mass, kg
-               mu=(0.9, 1.1),     # tyre friction coefficient
-               lf=(0.14, 0.18),   # CoG-to-front-axle distance, m
-           ),
+           low=base.with_updates(m=3.0, mu=0.9, lf=0.14),
+           high=base.with_updates(m=4.0, mu=1.1, lf=0.18),
        ),
    )
 

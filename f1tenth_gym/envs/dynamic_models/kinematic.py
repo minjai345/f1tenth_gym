@@ -19,7 +19,7 @@ def vehicle_dynamics_ks(x: np.ndarray, u_init: np.ndarray, params: np.ndarray) -
             u (numpy.ndarray (2, )): control input vector (u1, u2)
                 u1: steering angle velocity of front wheels
                 u2: longitudinal acceleration
-            params (np.ndarray (18, )): flat float32 parameter array in _BASE_PARAM_ABI order (a dict raises a numba typing error):
+            params (np.ndarray (89, )): flat float32 parameter array in VehicleParameters declaration order; this model reads indices 0-17 (a dict raises a numba typing error):
                 mu (float): friction coefficient
                 C_Sf (float): cornering stiffness of front wheels
                 C_Sr (float): cornering stiffness of rear wheels
@@ -122,7 +122,7 @@ def vehicle_dynamics_ks_cog(x: np.ndarray, u_init: np.ndarray, params: np.ndarra
             u (numpy.ndarray (2, )): control input vector (u1, u2)
                 u1: steering angle velocity of front wheels
                 u2: longitudinal acceleration
-            params (np.ndarray (18, )): flat float32 parameter array in _BASE_PARAM_ABI order (a dict raises a numba typing error):
+            params (np.ndarray (89, )): flat float32 parameter array in VehicleParameters declaration order; this model reads indices 0-17 (a dict raises a numba typing error):
                 mu (float): friction coefficient
                 C_Sf (float): cornering stiffness of front wheels
                 C_Sr (float): cornering stiffness of rear wheels

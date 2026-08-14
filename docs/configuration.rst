@@ -292,8 +292,8 @@ each type are in :doc:`observations`. ``ObservationType`` comes from
      - Allowed values / notes
    * - ``type``
      - ``ObservationType.DEFAULT``
-     - ``DEFAULT`` (per-agent dict of named fields; ``ORIGINAL`` is its
-       alias), ``DIRECT`` (raw agent-batched arrays since v1.0.0 —
+     - ``DEFAULT`` (per-agent dict of named fields),
+       ``DIRECT`` (raw agent-batched arrays since v1.0.0 —
        selecting it warns), ``FEATURES`` (custom subset), or the fixed
        presets ``KINEMATIC_STATE`` / ``DYNAMIC_STATE`` /
        ``FRENET_DYNAMIC_STATE``. Not itself validated at construction; a
@@ -608,22 +608,23 @@ covers where the draw lands in the control loop.
    * - ``enabled``
      - ``False``
      - Whether to randomize at each reset.
-   * - ``param_ranges``
-     - ``{}``
-     - A ``VehicleParamRanges`` of absolute ``(low, high)`` ranges in
-       physical units — one optional slot per ``VehicleParameters`` field,
-       so a mistyped name raises ``TypeError`` at construction. Each range
-       needs ``low <= high``. A plain ``{name: (low, high)}`` dict is
-       accepted for one more release with a ``DeprecationWarning``.
+   * - ``low`` / ``high``
+     - ``None``
+     - The per-field lower and upper end of the range, each an ordinary
+       ``VehicleParameters`` in absolute physical units. Both are required
+       when ``enabled``. Every field needs ``low <= high``, and a field
+       where they are equal is not randomized — so building both from your
+       base parameters and changing only what should vary is the idiom.
 
->>> from f1tenth_gym.envs.dynamic_models import VehicleParamRanges
+>>> from f1tenth_gym.envs.dynamic_models import F1TENTH_VEHICLE_PARAMETERS as base
 >>> from f1tenth_gym.envs.env_config import DomainRandomizationConfig
 >>> dr = DomainRandomizationConfig(
 ...     enabled=True,
-...     param_ranges=VehicleParamRanges(m=(3.0, 4.0), mu=(0.9, 1.1)),
+...     low=base.with_updates(m=3.0, mu=0.9),
+...     high=base.with_updates(m=4.0, mu=1.1),
 ... )
->>> dr.ranges()
-{'mu': (0.9, 1.1), 'm': (3.0, 4.0)}
+>>> dr.randomized_fields()
+('mu', 'm')
 
 Randomizing an actuation limit (``v_max``, ``s_max``, …) is supported: the
 action and observation spaces are built from ``widest_params(base)``, a fixed

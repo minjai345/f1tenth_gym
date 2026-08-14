@@ -5,10 +5,8 @@ Dynamic model definitions and strongly typed vehicle parameters for the F1TENTH 
 from __future__ import annotations
 
 import math
-import warnings
 from dataclasses import dataclass, fields, replace
 from enum import IntEnum
-from typing import Optional, Tuple
 
 import numpy as np
 
@@ -70,7 +68,7 @@ class VehicleParameters:
     m_ur: float = math.nan
     I_Phi_s: float = math.nan
     I_y_s: float = math.nan
-    I_z_body: float = math.nan
+    I_z: float = math.nan
     I_xz_s: float = math.nan
     K_sf: float = math.nan
     K_sdf: float = math.nan
@@ -83,7 +81,6 @@ class VehicleParameters:
     K_tsr: float = math.nan
     K_rad: float = math.nan
     K_zt: float = math.nan
-    h_cg_mb: float = math.nan
     h_raf: float = math.nan
     h_rar: float = math.nan
     h_s: float = math.nan
@@ -135,65 +132,50 @@ class VehicleParameters:
         return replace(self, **updates)
 
     def missing_mb_parameters(self) -> tuple[str, ...]:
-        """Names of multi-body ABI fields that are not finite.
+        """Names of parameters that are not finite, and so cannot reach a kernel.
 
         ``F1TENTH_VEHICLE_PARAMETERS`` and ``F1FIFTH_VEHICLE_PARAMETERS`` leave the
         entire multi-body block at ``nan``, so selecting ``DynamicModel.MB`` with
         either of them yields a NaN state rather than a trajectory. Only
-        ``FULLSCALE_VEHICLE_PARAMETERS`` populates it.
+        ``FULLSCALE_VEHICLE_PARAMETERS`` populates it. ``KS``/``ST`` never read
+        those slots, which is why the gate is specific to ``MB``.
 
         Returns:
             The unusable field names, empty if the parameters support MB.
         """
         return tuple(
-            name for name in _MB_PARAM_ABI if not math.isfinite(getattr(self, name))
+            name for name in PARAMETER_ORDER if not math.isfinite(getattr(self, name))
         )
 
-    def to_array(self, model: "DynamicModel") -> np.ndarray:
+    def to_array(self) -> np.ndarray:
         """Marshal the parameters into the flat float32 array the njit kernels index.
 
-        The layout is defined by ``_BASE_PARAM_ABI`` / ``_MB_PARAM_ABI``, not by the
-        dataclass field order, so fields may be added or reordered above without
-        disturbing the kernels.
-
-        Args:
-            model: The dynamics model whose ABI to marshal for.
+        One array for every model: the parameters describe the *vehicle*, not the
+        model chosen to simulate it, so there is no per-model slicing. ``KS``/``ST``
+        read indices 0-17 and simply ignore the rest, which on the small-scale
+        presets are ``nan``.
 
         Returns:
-            A contiguous ``float32`` array of ``model.parameter_count()`` values.
+            A contiguous ``float32`` array of ``len(PARAMETER_ORDER)`` values, in
+            ``VehicleParameters`` declaration order.
         """
-        abi = _MB_PARAM_ABI if model is DynamicModel.MB else _BASE_PARAM_ABI
-        return np.asarray([getattr(self, name) for name in abi], dtype=np.float32)
+        return np.asarray(
+            [getattr(self, name) for name in PARAMETER_ORDER], dtype=np.float32
+        )
 
 
-# THE ABI. Every @njit kernel indexes the flat array from `to_array` POSITIONALLY
-# (`mu = params[0]` ... `v_max = params[15]`), so these tuples -- not the dataclass
-# field order -- are the wire format. Reordering or inserting a dataclass field is
-# now safe; reordering THESE is not.
+# THE WIRE FORMAT. Every kernel indexes the flat array from `to_array` POSITIONALLY
+# (`mu = params[0]` ... `v_max = params[15]`, `width = params[16]`, `length =
+# params[17]`, then the multi-body block from 20), so this order IS the ABI.
 #
-# Verified against the kernels: kinematic.py and single_track.py read indices 0-17
-# contiguously; multi_body/ and tire_model.py read 0-86 contiguously.
-_BASE_PARAM_ABI: tuple[str, ...] = (
-    "mu", "C_Sf", "C_Sr", "lf", "lr", "h", "m", "I",
-    "s_min", "s_max", "sv_min", "sv_max",
-    "v_switch", "a_max", "v_min", "v_max",
-    "width", "length",
-)
-
-_ALL_PARAMETER_FIELDS = tuple(field.name for field in fields(VehicleParameters))
-
-# collision_body_center_x/y are deliberately absent: they are consumed by the
-# simulator's Python-level geometry helpers, never by a kernel. Including them --
-# which is what happened when they were inserted at dataclass positions 18/19 --
-# shifts every multi-body parameter by +2 and is what broke the MB model.
-_MB_PARAM_ABI: tuple[str, ...] = _BASE_PARAM_ABI + tuple(
-    name for name in _ALL_PARAMETER_FIELDS
-    if name not in _BASE_PARAM_ABI
-    and name not in ("collision_body_center_x", "collision_body_center_y")
-)
-
-_BASE_PARAMETER_COUNT = len(_BASE_PARAM_ABI)
-_MB_PARAMETER_COUNT = len(_MB_PARAM_ABI)
+# It is simply the dataclass declaration order -- there is no separate hand-kept
+# tuple to drift out of sync -- but that means REORDERING OR INSERTING A FIELD
+# ABOVE SILENTLY REWIRES EVERY KERNEL. Exactly that broke the MB model once, when
+# collision_body_center_x/y were inserted at positions 18/19 and shifted the whole
+# multi-body block by +2. Append new fields at the END, and if you must reorder,
+# `tests/test_vehicle_params_abi.py` pins the full order against a literal list and
+# will fail naming the field that moved.
+PARAMETER_ORDER: tuple[str, ...] = tuple(f.name for f in fields(VehicleParameters))
 
 F1TENTH_VEHICLE_PARAMETERS = VehicleParameters(
     mu=1.0489,
@@ -245,7 +227,7 @@ FULLSCALE_VEHICLE_PARAMETERS = VehicleParameters(
     C_Sr=20.89,
     lf=0.88392,
     lr=1.50876,
-    h=0.557,
+    h=0.557784,
     m=1225.8878467253344,
     I=1538.8533713561394,
     s_min=-0.91,
@@ -268,7 +250,7 @@ FULLSCALE_VEHICLE_PARAMETERS = VehicleParameters(
     m_ur=65.67256321742863,
     I_Phi_s=244.04723069965206,
     I_y_s=1342.2597688480864,
-    I_z_body=1538.8533713561394,
+    I_z=1538.8533713561394,
     I_xz_s=0.0,
     K_sf=21898.332429625985,
     K_sdf=1459.3902937206362,
@@ -281,7 +263,6 @@ FULLSCALE_VEHICLE_PARAMETERS = VehicleParameters(
     K_tsr=0.0,
     K_rad=10215.732056044453,
     K_zt=189785.5477234252,
-    h_cg_mb=0.5577840000000001,
     h_raf=0.0,
     h_rar=0.0,
     h_s=0.59436,
@@ -331,114 +312,6 @@ FULLSCALE_VEHICLE_PARAMETERS = VehicleParameters(
 )
 
 
-@dataclass(frozen=True)
-class VehicleParamRanges:
-    """Typed (low, high) randomization ranges, one optional slot per
-    ``VehicleParameters`` field — the autocomplete-friendly face of
-    ``DomainRandomizationConfig.param_ranges``. A field left ``None`` is not
-    randomized. ``tests/test_vehicle_params_abi.py`` pins field parity with
-    ``VehicleParameters``, so the two cannot drift apart silently."""
-
-    mu: Optional[Tuple[float, float]] = None
-    C_Sf: Optional[Tuple[float, float]] = None
-    C_Sr: Optional[Tuple[float, float]] = None
-    lf: Optional[Tuple[float, float]] = None
-    lr: Optional[Tuple[float, float]] = None
-    h: Optional[Tuple[float, float]] = None
-    m: Optional[Tuple[float, float]] = None
-    I: Optional[Tuple[float, float]] = None
-    s_min: Optional[Tuple[float, float]] = None
-    s_max: Optional[Tuple[float, float]] = None
-    sv_min: Optional[Tuple[float, float]] = None
-    sv_max: Optional[Tuple[float, float]] = None
-    v_switch: Optional[Tuple[float, float]] = None
-    a_max: Optional[Tuple[float, float]] = None
-    v_min: Optional[Tuple[float, float]] = None
-    v_max: Optional[Tuple[float, float]] = None
-    width: Optional[Tuple[float, float]] = None
-    length: Optional[Tuple[float, float]] = None
-    collision_body_center_x: Optional[Tuple[float, float]] = None
-    collision_body_center_y: Optional[Tuple[float, float]] = None
-    kappa_dot_max: Optional[Tuple[float, float]] = None
-    kappa_dot_dot_max: Optional[Tuple[float, float]] = None
-    j_max: Optional[Tuple[float, float]] = None
-    j_dot_max: Optional[Tuple[float, float]] = None
-    m_s: Optional[Tuple[float, float]] = None
-    m_uf: Optional[Tuple[float, float]] = None
-    m_ur: Optional[Tuple[float, float]] = None
-    I_Phi_s: Optional[Tuple[float, float]] = None
-    I_y_s: Optional[Tuple[float, float]] = None
-    I_z_body: Optional[Tuple[float, float]] = None
-    I_xz_s: Optional[Tuple[float, float]] = None
-    K_sf: Optional[Tuple[float, float]] = None
-    K_sdf: Optional[Tuple[float, float]] = None
-    K_sr: Optional[Tuple[float, float]] = None
-    K_sdr: Optional[Tuple[float, float]] = None
-    T_f: Optional[Tuple[float, float]] = None
-    T_r: Optional[Tuple[float, float]] = None
-    K_ras: Optional[Tuple[float, float]] = None
-    K_tsf: Optional[Tuple[float, float]] = None
-    K_tsr: Optional[Tuple[float, float]] = None
-    K_rad: Optional[Tuple[float, float]] = None
-    K_zt: Optional[Tuple[float, float]] = None
-    h_cg_mb: Optional[Tuple[float, float]] = None
-    h_raf: Optional[Tuple[float, float]] = None
-    h_rar: Optional[Tuple[float, float]] = None
-    h_s: Optional[Tuple[float, float]] = None
-    I_uf: Optional[Tuple[float, float]] = None
-    I_ur: Optional[Tuple[float, float]] = None
-    I_y_w: Optional[Tuple[float, float]] = None
-    K_lt: Optional[Tuple[float, float]] = None
-    R_w: Optional[Tuple[float, float]] = None
-    T_sb: Optional[Tuple[float, float]] = None
-    T_se: Optional[Tuple[float, float]] = None
-    D_f: Optional[Tuple[float, float]] = None
-    D_r: Optional[Tuple[float, float]] = None
-    E_f: Optional[Tuple[float, float]] = None
-    E_r: Optional[Tuple[float, float]] = None
-    tire_p_cx1: Optional[Tuple[float, float]] = None
-    tire_p_dx1: Optional[Tuple[float, float]] = None
-    tire_p_dx3: Optional[Tuple[float, float]] = None
-    tire_p_ex1: Optional[Tuple[float, float]] = None
-    tire_p_kx1: Optional[Tuple[float, float]] = None
-    tire_p_hx1: Optional[Tuple[float, float]] = None
-    tire_p_vx1: Optional[Tuple[float, float]] = None
-    tire_r_bx1: Optional[Tuple[float, float]] = None
-    tire_r_bx2: Optional[Tuple[float, float]] = None
-    tire_r_cx1: Optional[Tuple[float, float]] = None
-    tire_r_ex1: Optional[Tuple[float, float]] = None
-    tire_r_hx1: Optional[Tuple[float, float]] = None
-    tire_p_cy1: Optional[Tuple[float, float]] = None
-    tire_p_dy1: Optional[Tuple[float, float]] = None
-    tire_p_dy3: Optional[Tuple[float, float]] = None
-    tire_p_ey1: Optional[Tuple[float, float]] = None
-    tire_p_ky1: Optional[Tuple[float, float]] = None
-    tire_p_hy1: Optional[Tuple[float, float]] = None
-    tire_p_hy3: Optional[Tuple[float, float]] = None
-    tire_p_vy1: Optional[Tuple[float, float]] = None
-    tire_p_vy3: Optional[Tuple[float, float]] = None
-    tire_r_by1: Optional[Tuple[float, float]] = None
-    tire_r_by2: Optional[Tuple[float, float]] = None
-    tire_r_by3: Optional[Tuple[float, float]] = None
-    tire_r_cy1: Optional[Tuple[float, float]] = None
-    tire_r_ey1: Optional[Tuple[float, float]] = None
-    tire_r_hy1: Optional[Tuple[float, float]] = None
-    tire_r_vy1: Optional[Tuple[float, float]] = None
-    tire_r_vy3: Optional[Tuple[float, float]] = None
-    tire_r_vy4: Optional[Tuple[float, float]] = None
-    tire_r_vy5: Optional[Tuple[float, float]] = None
-    tire_r_vy6: Optional[Tuple[float, float]] = None
-
-    def as_dict(self) -> dict:
-        """The non-None ranges as {field_name: (low, high)}."""
-        return {
-            f.name: getattr(self, f.name)
-            for f in fields(self)
-            if getattr(self, f.name) is not None
-        }
-
-    def with_updates(self, **updates) -> "VehicleParamRanges":
-        return replace(self, **updates)
 
 class PoseReference(IntEnum):
     """Where a model's native x/y state (and ``state.poses``) is anchored.
@@ -467,9 +340,6 @@ class DynamicModel(IntEnum):
             return PoseReference.COG
         else:
             raise ValueError(f"no pose reference for model {self!r}")
-
-    def parameter_count(self) -> int:
-        return _MB_PARAMETER_COUNT if self is DynamicModel.MB else _BASE_PARAMETER_COUNT
 
     def velocity_indices(self) -> tuple[int, ...]:
         """State indices holding velocities/rates — what a collision halt zeroes.
@@ -501,20 +371,6 @@ class DynamicModel(IntEnum):
             return (0, 1, 4)
         else:
             raise ValueError(f"no pose indices for model {self!r}")
-
-    @staticmethod
-    def from_string(model: str):
-        if model == "ks":
-            warnings.warn(
-                "Chosen model is KS. This is different from previous versions of the gym."
-            )
-            return DynamicModel.KS
-        elif model == "st":
-            return DynamicModel.ST
-        elif model == "mb":
-            return DynamicModel.MB
-        else:
-            raise ValueError(f"Unknown model type {model}")
 
     def get_initial_state(self, pose=None, params=None):
         if self == DynamicModel.MB and params is None:

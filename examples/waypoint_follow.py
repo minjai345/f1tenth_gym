@@ -458,8 +458,12 @@ def build_config() -> EnvConfig:
         # ---- domain randomization (per-episode, at reset) ------------------
         domain_randomization_config=DomainRandomizationConfig(
             enabled=False,
-            # ABSOLUTE (low, high) ranges keyed by VehicleParameters field name:
-            param_ranges={},             # e.g. {"m": (3.0, 4.0), "mu": (0.9, 1.1)}
+            # The bounds are two ordinary VehicleParameters in ABSOLUTE units.
+            # Build both from your base and change only what should vary, e.g.
+            #   low =F1TENTH_VEHICLE_PARAMETERS.with_updates(m=3.0, mu=0.9),
+            #   high=F1TENTH_VEHICLE_PARAMETERS.with_updates(m=4.0, mu=1.1),
+            low=None,
+            high=None,
         ),
     )
 

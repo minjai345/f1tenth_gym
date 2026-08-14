@@ -432,7 +432,7 @@ class TestMultiBodyParameterGate(unittest.TestCase):
                 )
 
     def test_missing_mb_parameters_reports_the_whole_block(self):
-        self.assertEqual(len(F1TENTH_VEHICLE_PARAMETERS.missing_mb_parameters()), 69)
+        self.assertEqual(len(F1TENTH_VEHICLE_PARAMETERS.missing_mb_parameters()), 68)
         from f1tenth_gym.envs.dynamic_models import FULLSCALE_VEHICLE_PARAMETERS
 
         self.assertEqual(FULLSCALE_VEHICLE_PARAMETERS.missing_mb_parameters(), ())

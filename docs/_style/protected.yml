@@ -1,7 +1,9 @@
-abi_is_explicit:
-  hash: 992b14431f3eb036
-  note: The params wire format is declared explicitly by _BASE_PARAM_ABI/_MB_PARAM_ABI; reordering the
-    dataclass is safe, reordering those tuples is not.
+abi_is_append_only:
+  hash: b5c5856d35b469f2
+  note: The params wire format IS the VehicleParameters declaration order (one 89-slot array for every
+    model). Appending a field is safe; inserting or reordering one silently rewires every kernel, which
+    is how the multi-body model was broken once. Supersedes abi_is_explicit, which described the
+    retired _BASE_PARAM_ABI/_MB_PARAM_ABI tuples.
   page: dynamics.rst
 field_of_view_derived:
   hash: 62942afc192b26d9

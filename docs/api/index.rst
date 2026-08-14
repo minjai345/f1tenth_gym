@@ -56,7 +56,6 @@ Vehicle dynamics
    f1tenth_gym.envs.dynamic_models.DynamicModel
    f1tenth_gym.envs.dynamic_models.PoseReference
    f1tenth_gym.envs.dynamic_models.VehicleParameters
-   f1tenth_gym.envs.dynamic_models.VehicleParamRanges
 
 .. automodule:: f1tenth_gym.envs.dynamic_models
 

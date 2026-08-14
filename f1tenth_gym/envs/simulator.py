@@ -101,7 +101,7 @@ class F110Simulator:
         self.longitudinal_type = longitudinal_type
         self.steering_type = steering_type
 
-        self.params_array = self.vehicle_params.to_array(self.model)
+        self.params_array = self.vehicle_params.to_array()
 
         # Allocate simulation state buffers
         initial_state = self.model.get_initial_state(params=self.params_array)
@@ -223,7 +223,7 @@ class F110Simulator:
         if agent_idx >= 0:
             raise NotImplementedError("Per-agent parameter updates are not supported")
         self.vehicle_params = vehicle_params
-        self.params_array = vehicle_params.to_array(self.model)
+        self.params_array = vehicle_params.to_array()
         self._collision_body_dx, self._collision_body_dy = self._compute_collision_body_offset(
             self.vehicle_params, self.model
         )

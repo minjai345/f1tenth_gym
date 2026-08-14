@@ -1,19 +1,19 @@
 """Typed configuration structures for the simplified F1TENTH gym environment."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field, fields, replace
+from dataclasses import dataclass, field, replace
 from enum import IntEnum
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
-import warnings
+import math
 
 import numpy as np
 
 from .integrators import IntegratorType
 from .dynamic_models import (
     DynamicModel,
+    PARAMETER_ORDER,
     VehicleParameters,
-    VehicleParamRanges,
     F1TENTH_VEHICLE_PARAMETERS,
 )
 from .action import LongitudinalActionType, SteerActionType
@@ -373,17 +373,22 @@ class RewardConfig:
 class DomainRandomizationConfig:
     """Per-episode randomization of vehicle parameters, applied at ``reset()``.
 
-    ``param_ranges`` is a :class:`VehicleParamRanges` giving an ABSOLUTE
-    ``(low, high)`` range in physical units per field; each set field is
-    sampled uniformly at every reset from the env RNG (so it is reproducible
-    with ``reset(seed=...)``). Only set fields are randomized. Example::
+    The range is given as two ordinary :class:`VehicleParameters` -- the
+    per-field lower and upper bound, in ABSOLUTE physical units. Every field is
+    drawn uniformly at each reset from the env RNG (so it is reproducible with
+    ``reset(seed=...)``); a field whose ``low`` and ``high`` agree is simply not
+    randomized, which makes "leave everything else alone" the default::
 
-        DomainRandomizationConfig(enabled=True, param_ranges=VehicleParamRanges(
-            m=(3.0, 4.0), mu=(0.9, 1.1), lf=(0.14, 0.18),
-        ))
+        base = F1TENTH_VEHICLE_PARAMETERS
+        DomainRandomizationConfig(
+            enabled=True,
+            low=base.with_updates(m=3.0, mu=0.9, lf=0.14),
+            high=base.with_updates(m=4.0, mu=1.1, lf=0.18),
+        )
 
-    A plain ``{name: (low, high)}`` dict is still accepted for one release
-    (deprecated). Field names are the actual ``VehicleParameters`` fields,
+    There is no separate range type: the bounds of a vehicle parameter are
+    themselves vehicle parameters, so ``VehicleParameters`` describes both and
+    cannot drift out of sync with itself. Field names are the actual fields,
     e.g. ``m`` (mass) and ``h`` (CoG height) -- not ``mass``/``h_cg``. Prefer
     randomizing *dynamics* params (m, mu, lf, lr, I, h). Randomizing the
     actuation limits (v_min/v_max/s_min/s_max/...) is supported: the spaces
@@ -391,40 +396,65 @@ class DomainRandomizationConfig:
 
     Attributes:
         enabled: Whether to randomize at each reset.
-        param_ranges: ``VehicleParamRanges`` (or a deprecated dict) of
-            absolute ``(low, high)`` ranges.
+        low: Per-field lower bound. Required when ``enabled``.
+        high: Per-field upper bound. Required when ``enabled``.
     """
 
     enabled: bool = False
-    param_ranges: VehicleParamRanges | dict = field(default_factory=dict)
+    low: Optional[VehicleParameters] = None
+    high: Optional[VehicleParameters] = None
 
     def __post_init__(self) -> None:
-        if isinstance(self.param_ranges, dict):
-            if self.param_ranges:
-                warnings.warn(
-                    "dict param_ranges is deprecated; pass a VehicleParamRanges",
-                    DeprecationWarning,
-                    stacklevel=3,
-                )
-        elif not isinstance(self.param_ranges, VehicleParamRanges):
-            raise TypeError("param_ranges must be a VehicleParamRanges (or a deprecated dict)")
-        valid = {f.name for f in fields(VehicleParameters)}
-        for name, rng in self.ranges().items():
-            if name not in valid:
+        for name in ("low", "high"):
+            value = getattr(self, name)
+            if value is not None and not isinstance(value, VehicleParameters):
+                raise TypeError(f"{name} must be a VehicleParameters instance")
+        if self.enabled and (self.low is None or self.high is None):
+            raise ValueError(
+                "domain randomization needs both low and high VehicleParameters "
+                "when enabled (a field with low == high is simply not randomized)"
+            )
+        if self.low is None or self.high is None:
+            return
+        for name in PARAMETER_ORDER:
+            lo, hi = getattr(self.low, name), getattr(self.high, name)
+            lo_finite, hi_finite = math.isfinite(lo), math.isfinite(hi)
+            if lo_finite != hi_finite:
                 raise ValueError(
-                    f"unknown vehicle parameter {name!r} in param_ranges "
-                    f"(must be a VehicleParameters field)"
+                    f"low.{name} and high.{name} must both be finite or both not, "
+                    f"got {lo!r} and {hi!r}"
                 )
-            if len(rng) != 2 or float(rng[0]) > float(rng[1]):
+            if lo_finite and lo > hi:
                 raise ValueError(
-                    f"param_ranges[{name!r}] must be (low, high) with low <= high, got {rng!r}"
+                    f"low.{name} must be <= high.{name}, got {lo!r} > {hi!r}"
                 )
 
-    def ranges(self) -> dict:
-        """The active ranges as a plain ``{name: (low, high)}`` dict."""
-        if isinstance(self.param_ranges, VehicleParamRanges):
-            return self.param_ranges.as_dict()
-        return dict(self.param_ranges)
+    def randomized_fields(self) -> tuple[str, ...]:
+        """Names of the fields that actually vary, i.e. where ``low != high``.
+
+        A field left at ``nan`` on both sides (the whole multi-body block, on the
+        small-scale presets) does NOT count as varying, even though ``nan != nan``.
+        """
+
+        def varies(lo: float, hi: float) -> bool:
+            if math.isnan(lo) and math.isnan(hi):
+                return False
+            return lo != hi
+
+        if not self.enabled or self.low is None or self.high is None:
+            return ()
+        return tuple(
+            name
+            for name in PARAMETER_ORDER
+            if varies(getattr(self.low, name), getattr(self.high, name))
+        )
+
+    def bounds_arrays(self) -> tuple[np.ndarray, np.ndarray]:
+        """``(low, high)`` as float64 arrays in ``PARAMETER_ORDER``, for sampling."""
+        return (
+            np.array([getattr(self.low, n) for n in PARAMETER_ORDER], dtype=np.float64),
+            np.array([getattr(self.high, n) for n in PARAMETER_ORDER], dtype=np.float64),
+        )
 
     def widest_params(self, base: VehicleParameters) -> VehicleParameters:
         """``base`` with each randomized *limit* field at its widest extreme.
@@ -434,14 +464,11 @@ class DomainRandomizationConfig:
         this returns ``base`` unchanged, so spaces are byte-identical to a
         non-DR env.
         """
-        if not self.enabled:
+        if not self.enabled or self.low is None or self.high is None:
             return base
-        changes = {}
-        for name, (lo, hi) in self.ranges().items():
-            if name in _WIDEN_AT_LOW:
-                changes[name] = float(lo)
-            elif name in _WIDEN_AT_HIGH:
-                changes[name] = float(hi)
+        varying = set(self.randomized_fields())
+        changes = {n: getattr(self.low, n) for n in _WIDEN_AT_LOW if n in varying}
+        changes.update({n: getattr(self.high, n) for n in _WIDEN_AT_HIGH if n in varying})
         return base.with_updates(**changes) if changes else base
 
     def with_updates(self, **changes: Any) -> "DomainRandomizationConfig":

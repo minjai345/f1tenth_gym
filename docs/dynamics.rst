@@ -105,15 +105,15 @@ both exactly zero. ``MB`` uses the symmetric ``abs(v) < 0.5``.
 Running MB at full scale
 ------------------------
 
-The multi-body chassis reads 87 parameters where ``KS`` and ``ST`` read 18, and
-only ``FULLSCALE_VEHICLE_PARAMETERS`` populates the extra 69. The 1/10- and
+The multi-body chassis reads slots 20-87 on top of the 18 that ``KS`` and ``ST``
+read, and only ``FULLSCALE_VEHICLE_PARAMETERS`` populates those extra 68. The 1/10- and
 1/5-scale presets leave all of them at ``nan``, which used to yield a NaN
 trajectory rather than an error; ``EnvConfig`` now rejects the combination at
 construction, before the map download and the JIT:
 
 >>> from f1tenth_gym.envs.dynamic_models import FULLSCALE_VEHICLE_PARAMETERS
 >>> len(F1TENTH_VEHICLE_PARAMETERS.missing_mb_parameters())
-69
+68
 >>> len(FULLSCALE_VEHICLE_PARAMETERS.missing_mb_parameters())
 0
 
@@ -244,21 +244,28 @@ Why the parameter list is append-only
 -------------------------------------
 
 Parameters reach the numba kernels as a flat ``float32`` array that is indexed
-*positionally*, so the layout is a wire format. That layout is declared
-explicitly by ``_BASE_PARAM_ABI`` (18 entries, ``KS``/``ST``) and
-``_MB_PARAM_ABI`` (87 entries, ``MB``) in
-``f1tenth_gym.envs.dynamic_models``. Adding or reordering a *dataclass* field is
-therefore safe; changing those tuples is not, and requires updating every kernel
-that indexes them. ``tests/test_vehicle_params_abi.py`` pins the order.
+*positionally*, so the layout is a wire format — and that layout is simply the
+``VehicleParameters`` declaration order, exported as
+``f1tenth_gym.envs.dynamic_models.PARAMETER_ORDER``. There is one array for
+every model, because the parameters describe the *vehicle*, not the model
+chosen to simulate it: ``to_array()`` emits all 88 fields and each model reads
+the slots it needs. ``KS`` and ``ST`` read indices 0-17 and ignore the rest;
+``MB`` additionally reads 20-87.
+
+**Appending a field is safe. Inserting or reordering one is not** — it shifts
+every slot after it and silently rewires each kernel, which is exactly how the
+multi-body model was broken once, when ``collision_body_center_x``/``_y``
+landed at positions 18/19 and moved the whole multi-body block by two.
+``tests/test_vehicle_params_abi.py`` pins the full order against a literal list
+and fails naming the field that moved.
 
 The flat array is what makes the derivatives jittable at all: ``mu`` is
 ``params[0]``, ``v_max`` is ``params[15]``, ``width`` and ``length`` are 16 and
 17, and no dict or dataclass can cross that boundary. ``to_array`` marshals by
-name from the ABI tuple, so the price is paid once at construction and again in
-``update_params`` — never per step. ``collision_body_center_x``/``_y`` are
-deliberately outside both tuples: they are read by the simulator's Python-level
-geometry helpers, and including them once shifted every multi-body parameter by
-two positions.
+name, so the price is paid once at construction and again in ``update_params``
+— never per step. Indices 18/19 ride along in the array but no kernel reads
+them: ``collision_body_center_x``/``_y`` are consumed by the simulator's
+Python-level geometry helpers.
 
 How far one step actually integrates
 ------------------------------------

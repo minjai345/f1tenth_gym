@@ -180,9 +180,9 @@ after it — at the same seed:
 
 * Enabling domain randomization inserts the parameter draw between the
   spawn draw and the noise seed. Even a degenerate range that changes no
-  physics — ``VehicleParamRanges(mu=(1.0489, 1.0489))`` pins ``mu`` at
-  its default — leaves ``reset(seed=42)`` with the same spawn but a
-  first scan that differs by up to 0.047 m.
+  physics — ``low`` and ``high`` both equal to the base parameters — leaves
+  ``reset(seed=42)`` with the same spawn but a first scan that differs by
+  up to 0.047 m.
 * ``options={"poses": ...}`` skips the spawn draw entirely. Handing
   ``reset(seed=42)`` the exact pose it would have sampled anyway still
   shifts the noise seed one draw earlier: same physical state, scans

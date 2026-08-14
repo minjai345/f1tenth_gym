@@ -37,9 +37,9 @@ def init_mb(init_state, params) -> np.ndarray:
     v_min = params[14]  # minimum velocity [m/s]
     v_max = params[15]  # maximum velocity [m/s]
     ## masses
-    m_s = params[22]  # sprung mass [kg]
-    m_uf = params[23]  # front unsprung mass [kg]
-    m_ur = params[24]  # rear unsprung mass [kg]
+    m_s = params[24]  # sprung mass [kg]
+    m_uf = params[25]  # front unsprung mass [kg]
+    m_ur = params[26]  # rear unsprung mass [kg]
     ## axes distances
     lf = params[3]
     # distance from spring mass center of gravity to front axle [m]  LENA
@@ -47,8 +47,8 @@ def init_mb(init_state, params) -> np.ndarray:
     # distance from spring mass center of gravity to rear axle [m]  LENB
 
     ## geometric parameters
-    K_zt = params[39]  # vertical spring rate of tire [N/m]  TSPRINGR
-    R_w = params[48]
+    K_zt = params[41]  # vertical spring rate of tire [N/m]  TSPRINGR
+    R_w = params[49]
     # effective wheel/tire radius  chosen as tire rolling radius RR  taken from ADAMS documentation [m]
     # create equivalent bicycle parameters
     g = 9.81  # [m/s^2]

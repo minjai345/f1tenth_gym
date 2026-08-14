@@ -9,6 +9,7 @@ import gymnasium as gym
 import numpy as np
 
 from .dynamic_models import (
+    PARAMETER_ORDER,
     VehicleParameters,
 )
 from .simulator import F110Simulator
@@ -410,12 +411,21 @@ class F110Env(gym.Env):
         return terminated
 
     def _sample_vehicle_params(self):
-        """Draw a randomized VehicleParameters from the DR ranges (env RNG)."""
-        changes = {
-            name: float(self.np_random.uniform(lo, hi))
-            for name, (lo, hi) in self.dr_cfg.ranges().items()
-        }
-        return self.vehicle_params.with_updates(**changes)
+        """Draw a randomized VehicleParameters between the DR bounds (env RNG).
+
+        One vectorized draw over every finite field, so the RNG stream does not
+        depend on *which* fields vary. A field with ``low == high`` comes back
+        exactly equal (``low + 0 * r``); the non-finite fields (the multi-body
+        block on the small-scale presets) are passed through untouched, since
+        ``uniform`` rejects NaN bounds outright.
+        """
+        low, high = self.dr_cfg.bounds_arrays()
+        drawn = low.copy()
+        finite = np.isfinite(low) & np.isfinite(high)
+        drawn[finite] = self.np_random.uniform(low[finite], high[finite])
+        return VehicleParameters(
+            **{name: float(value) for name, value in zip(PARAMETER_ORDER, drawn)}
+        )
 
     def _compute_progress(self) -> np.ndarray:
         """Per-agent forward Frenet arclength progress (metres) since the last
@@ -579,7 +589,7 @@ class F110Env(gym.Env):
         # Domain randomization: sample vehicle params for this episode (from the
         # env RNG, so it is reproducible with reset(seed=...)) and push them to
         # the sim (rebuilds params array + scan/collision caches).
-        if self.dr_cfg.enabled and self.dr_cfg.ranges():
+        if self.dr_cfg.randomized_fields():
             self.sim.update_params(self._sample_vehicle_params())
 
         # Derive the LiDAR-noise seed from the env RNG (which gymnasium seeds

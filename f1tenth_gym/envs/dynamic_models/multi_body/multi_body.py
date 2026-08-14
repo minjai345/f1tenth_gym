@@ -100,61 +100,62 @@ def vehicle_dynamics_mb(x: np.ndarray, u_init: np.ndarray, params: np.ndarray) -
     length = params[17]  # vehicle length [m]
 
     # Curvature and jerk constraints
-    kappa_dot_max = params[18]  # max curvature rate [1/s]
-    kappa_dot_dot_max = params[19]  # max curvature acceleration [1/s^2]
-    j_max = params[20]  # max longitudinal jerk [m/s^3]
-    j_dot_max = params[21]  # max change in jerk [m/s^4]
+    kappa_dot_max = params[20]  # max curvature rate [1/s]
+    kappa_dot_dot_max = params[21]  # max curvature acceleration [1/s^2]
+    j_max = params[22]  # max longitudinal jerk [m/s^3]
+    j_dot_max = params[23]  # max change in jerk [m/s^4]
 
     # Mass breakdown
-    m_s = params[22]  # sprung mass [kg]
-    m_uf = params[23]  # front unsprung mass [kg]
-    m_ur = params[24]  # rear unsprung mass [kg]
+    m_s = params[24]  # sprung mass [kg]
+    m_uf = params[25]  # front unsprung mass [kg]
+    m_ur = params[26]  # rear unsprung mass [kg]
 
     # Sprung mass inertia
-    I_Phi_s = params[25]  # roll inertia of sprung mass [kg m^2]
-    I_y_s = params[26]  # pitch inertia of sprung mass [kg m^2]
-    I_z = params[27]  # yaw inertia of sprung mass [kg m^2]
-    I_xz_s = params[28]  # cross-product inertia [kg m^2]
+    I_Phi_s = params[27]  # roll inertia of sprung mass [kg m^2]
+    I_y_s = params[28]  # pitch inertia of sprung mass [kg m^2]
+    I_z = params[29]  # yaw inertia of sprung mass [kg m^2]
+    I_xz_s = params[30]  # cross-product inertia [kg m^2]
 
     # Suspension spring/damping
-    K_sf = params[29]  # front suspension spring rate [N/m]
-    K_sdf = params[30]  # front suspension damping [N·s/m]
-    K_sr = params[31]  # rear suspension spring rate [N/m]
-    K_sdr = params[32]  # rear suspension damping [N·s/m]
+    K_sf = params[31]  # front suspension spring rate [N/m]
+    K_sdf = params[32]  # front suspension damping [N·s/m]
+    K_sr = params[33]  # rear suspension spring rate [N/m]
+    K_sdr = params[34]  # rear suspension damping [N·s/m]
 
     # Track widths and compliant joints
-    T_f = params[33]  # front track width [m]
-    T_r = params[34]  # rear track width [m]
-    K_ras = params[35]  # lateral spring rate at pin joint [N/m]
-    K_tsf = params[36]  # front torsion roll stiffness [N·m/rad]
-    K_tsr = params[37]  # rear torsion roll stiffness [N·m/rad]
-    K_rad = params[38]  # damping rate at pin joint [N·s/m]
-    K_zt = params[39]  # vertical tire spring rate [N/m]
+    T_f = params[35]  # front track width [m]
+    T_r = params[36]  # rear track width [m]
+    K_ras = params[37]  # lateral spring rate at pin joint [N/m]
+    K_tsf = params[38]  # front torsion roll stiffness [N·m/rad]
+    K_tsr = params[39]  # rear torsion roll stiffness [N·m/rad]
+    K_rad = params[40]  # damping rate at pin joint [N·s/m]
+    K_zt = params[41]  # vertical tire spring rate [N/m]
 
-    # CoG and roll axis heights
-    h_cg = params[40]  # center of gravity height of total mass [m]
-    h_raf = params[41]  # roll axis front height [m]
-    h_rar = params[42]  # roll axis rear height [m]
-    h_s = params[43]  # sprung mass CoG height [m]
+    # CoG and roll axis heights. The total-mass CoG height is `h` (params[5]),
+    # shared with ST -- there is no separate multi-body copy; the load-transfer
+    # math below uses the sprung-mass height h_s.
+    h_raf = params[42]  # roll axis front height [m]
+    h_rar = params[43]  # roll axis rear height [m]
+    h_s = params[44]  # sprung mass CoG height [m]
 
     # Unsprung mass inertias
-    I_uf = params[44]  # front unsprung inertia [kg m^2]
-    I_ur = params[45]  # rear unsprung inertia [kg m^2]
+    I_uf = params[45]  # front unsprung inertia [kg m^2]
+    I_ur = params[46]  # rear unsprung inertia [kg m^2]
 
     # Wheel and compliance
-    I_y_w = params[46]  # wheel rotational inertia [kg m^2]
-    K_lt = params[47]  # lateral compliance rate [m/N]
-    R_w = params[48]  # wheel/tire effective radius [m]
+    I_y_w = params[47]  # wheel rotational inertia [kg m^2]
+    K_lt = params[48]  # lateral compliance rate [m/N]
+    R_w = params[49]  # wheel/tire effective radius [m]
 
     # Torque splits
-    T_sb = params[49]  # brake torque split
-    T_se = params[50]  # engine torque split
+    T_sb = params[50]  # brake torque split
+    T_se = params[51]  # engine torque split
 
     # Suspension toe parameters
-    D_f = params[51]  # front toe compliance [rad/m]
-    D_r = params[52]  # rear toe compliance [rad/m]
-    E_f = params[53]  # front compliance nonlinearity
-    E_r = params[54]  # rear compliance nonlinearity
+    D_f = params[52]  # front toe compliance [rad/m]
+    D_r = params[53]  # rear toe compliance [rad/m]
+    E_f = params[54]  # front compliance nonlinearity
+    E_r = params[55]  # rear compliance nonlinearity
 
     KIN_THRESH = 0.5
 
