@@ -5,10 +5,11 @@ handling only: anything resembling physics belongs in ``kernels`` or ``solver``,
 the migration seam stops being a deletion.
 
 Two costs here dwarf the arithmetic while the caller is still numpy, because each
-step is one launch of a ~40-point solve rather than a batch of many. On an RTX 3080
-the wall kernel takes 1.53 ms of launch latency for 0.08 ms of work, and building
-its arguments with ``jnp.asarray`` costs 0.216 ms against 0.002 ms for ``np``. So
-the kernels are pinned to a device (CPU by default) and fed numpy directly.
+step is one launch of a one-body solve rather than a batch of many. Building the
+arguments with ``jnp.asarray`` costs 0.216 ms against 0.002 ms for ``np``, so the
+kernels are fed numpy directly. And a one-body launch costs 0.10 ms on the CPU
+against 1.38 ms on an RTX 3080, so they are pinned to a device rather than left to
+whatever JAX picked. See ``ContactConfig.device`` for why that pin is CPU.
 """
 
 import jax
@@ -21,25 +22,45 @@ from .solver import ContactParams, resolve, resolve_pair, speculative_clamp
 
 
 def resolve_device(name: str):
-    """The device the contact kernels run on, or None for whatever JAX defaults to.
+    """The device the contact kernels run on.
+
+    Availability is a property of the machine, not of the config, so this is checked
+    at ``gym.make`` rather than at ``ContactConfig`` build: a config pickled from a
+    GPU box to CPU workers must still construct.
 
     Args:
-        name: ``"cpu"`` or ``"default"``.
+        name: ``"cpu"`` or ``"gpu"``.
 
     Returns:
-        A ``Device``, or None.
+        A ``Device``.
+
+    Raises:
+        ValueError: If JAX cannot see that backend here. Silently falling back would
+            cost an order of magnitude with nothing said, which is the failure mode
+            ``lidar.enabled=False`` already has.
     """
-    return jax.devices("cpu")[0] if name == "cpu" else None
+    try:
+        found = jax.devices(name)
+    except RuntimeError:
+        found = []
+    if not found:
+        available = sorted({device.platform for device in jax.devices()})
+        raise ValueError(
+            f"contact_config.device={name!r} but JAX sees no {name} backend here; "
+            f"available: {available}. Set JAX_PLATFORMS to include it, or choose "
+            f"a device that is present."
+        )
+    return found[0]
 
 
 def _pin(device):
-    """jit kwargs placing the computation on ``device``; empty for the default."""
-    return {} if device is None else {"out_shardings": SingleDeviceSharding(device)}
+    """jit kwargs placing the computation on ``device``."""
+    return {"out_shardings": SingleDeviceSharding(device)}
 
 
 def _put(array, device):
-    """A closure constant on ``device``, or wherever JAX would put it."""
-    return jnp.asarray(array) if device is None else jax.device_put(array, device)
+    """A closure constant on ``device``."""
+    return jax.device_put(array, device)
 
 
 class WallContact:
@@ -58,7 +79,7 @@ class WallContact:
             params: Solver tuning.
             iterations: Jacobi sweeps per call.
             dt: Simulation timestep, for the speculative clamp.
-            device: ``"cpu"`` or ``"default"``; see the module docstring.
+            device: ``"cpu"`` or ``"gpu"``; see ``ContactConfig.device``.
         """
         self.walls = walls
         self.index = index
@@ -181,7 +202,7 @@ class BodyPairContact:
         Args:
             params: Solver tuning.
             iterations: Jacobi sweeps per call.
-            device: ``"cpu"`` or ``"default"``; see the module docstring.
+            device: ``"cpu"`` or ``"gpu"``; see ``ContactConfig.device``.
         """
         dev = resolve_device(device)
 

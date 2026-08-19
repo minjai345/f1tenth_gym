@@ -337,9 +337,9 @@ Two causes, measured separately:
 | `np.asarray` x6 then call | **0.002 + 0.099 ms** |
 | output conversion (2 arrays, float, bool) | 0.008 ms — already cheap |
 
-Sweeps are not the lever: on CPU 1/8/64/128 sweeps cost 0.099/0.118/0.143/0.169 ms,
-so the default 64 costs 0.044 ms over a single sweep. On GPU the same sweep counts
-cost 0.881/0.441/1.160/1.909 ms — launch latency, not work.
+Sweeps are not the lever on CPU: 1/8/64/128 sweeps cost 0.099/0.118/0.143/0.169 ms,
+so the default 64 costs 0.044 ms over a single sweep. On GPU they are the lever, in
+the wrong direction — see the cost model below.
 
 `jax.jit(..., out_shardings=SingleDeviceSharding(cpu))` is what pins execution;
 `device_put` on the closure constants alone does not (output still lands on CUDA).
@@ -367,3 +367,76 @@ the racing-line clearance to the nearest wall is a median 0.401 m (Spielberg),
 circle test would skip only 62/46/41% of steps, cost 21 us of numpy each time, and
 save at most 0.147 ms. Segment AABBs are looser still — a tile-occupancy test skips
 just 0.6% of steps, because one long diagonal wall has a huge axis-aligned box.
+
+## Device choice (verified against three adversarial attacks)
+
+The GPU cost is **not** a flat launch fee. It is roughly
+
+    0.35 ms host dispatch  +  0.015 ms x solver_iterations
+
+because `resolve` is a `lax.fori_loop` of `solver_iterations` sweeps and
+`speculative_clamp` a `lax.scan` over contact slots, so one call is a chain of >=64
+tiny sequential kernels: ~21.5 us per sweep on GPU against ~2 us on CPU. Flat in the
+number of bodies, rising in configuration.
+
+Consequence: every dial a user can turn to add work adds *depth*, which makes the
+GPU relatively worse, never better. Measured at one body per launch:
+
+| config | cpu | gpu | ratio |
+|---|---|---|---|
+| `solver_iterations=64` (default) | 0.113 ms | 1.378 ms | 10.5x |
+| `solver_iterations=256` | 0.189 ms | 3.493 ms | 18.4x |
+| `solver_iterations=2048` | 0.978 ms | 24.43 ms | 25.0x |
+| `tile_size=4.0` (k=54) | 0.155 ms | 1.420 ms | 9.2x |
+| `tile_size=8.0` (k=83) | 0.188 ms | 2.235 ms | 11.9x |
+
+The only axis that amortises the sweep chain is **width** — bodies per launch — and
+nothing in the shipped code populates it. Crossover for a single vmapped launch at
+default settings is **~52 bodies** (cpu 1.140 ms at 48, 2.759 ms at 56; gpu flat
+1.39-1.48 ms). The knee is a cache/threading cliff on the CPU side, not a slope change.
+
+`_resolve_contacts` resolves one body per launch, so no `num_agents` reaches it:
+
+| N | cpu ms/step | gpu ms/step | ratio |
+|---|---|---|---|
+| 1 | 0.131 | 1.378 | 10.5x |
+| 8 | 1.020 | 9.681 | 9.5x |
+| 32 | 3.538 | 38.27 | 10.8x |
+| 64 | 6.991 | 76.34 | 10.9x |
+
+Deferring the host sync to pipeline launches does not rescue it: with device-resident
+args and one `block_until_ready` at the end, per-call GPU cost is still ~1.0 ms flat,
+and 77% of a call is *host* dispatch, which serializes in a Python loop exactly as
+device time does. Per call the GPU path also burns ~10x more host CPU than the CPU path.
+
+### Batching agents (not yet implemented)
+
+One vmapped launch over an env's agents against N sequential launches, on CPU:
+
+| N | sequential | batched | speedup |
+|---|---|---|---|
+| 2 | 0.229 ms | 0.126 ms | 1.8x |
+| 8 | 0.844 ms | 0.249 ms | 3.4x |
+| 16 | 1.608 ms | 0.433 ms | 3.7x |
+| 32 | 3.267 ms | 0.792 ms | 4.1x |
+
+Worth doing as a *CPU* optimisation. It does not enable the GPU: even a perfectly
+batched single env needs ~52 bodies, and nobody races 52 F1TENTH cars. Note
+`_resolve_agent_contacts` cannot be vmapped as written — it recomputes each body's
+vertices after every resolved pair, so pair resolution is order-dependent and its
+launch count stays O(N^2).
+
+With the LiDAR on, contact is 42% of an N=1 step but only 7.5% at N=8, because
+`ray_cast` is quadratic and owns 91% of an N=8 step. With the LiDAR off, contact is
+63-76% of the step at every N.
+
+### Env count is not a batching axis
+
+`gym.spec("f1tenth-v0").vector_entry_point` is None, so `gym.make_vec` can only build
+sync/async loops of independent `F110Env`s. Passing a shared `Track` dedupes the numpy
+side (same segment arrays, same tile table) but each `F110Simulator` still builds its
+own `WallContact` with the table baked in as a traced constant: `same jitted callable:
+False`. Sync sub-envs step in a Python loop; async sub-envs are separate processes.
+
+That last point is also why a GPU default would be hazardous: `AsyncVectorEnv` forks K
+worker processes, and JAX preallocates a large fraction of VRAM *per process*.

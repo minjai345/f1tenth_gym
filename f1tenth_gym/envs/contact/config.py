@@ -23,10 +23,15 @@ class ContactConfig:
         tile_size: Broad-phase tile side in metres. Cost scales as 1/tile_size^2.
         margin: Safety factor on the exact per-tile candidate count.
         wall_tolerance_px: Douglas-Peucker tolerance for wall extraction.
-        device: ``"cpu"`` or ``"default"`` (whatever JAX picks). One call per agent
-            per step is launch-bound, not compute-bound: on an RTX 3080 the wall
-            kernel costs 1.53 ms of launch for 0.08 ms of work, so CPU wins by 18x.
-            Revisit once the step itself is jitted and batched over environments.
+        device: ``"cpu"`` or ``"gpu"``. An escape hatch, not a dial to turn by agent
+            count. The GPU pays a fixed ~0.35 ms of host dispatch plus ~0.015 ms per
+            solver sweep -- the solve is a chain of that many sequential kernels --
+            so its cost is flat in the number of bodies but rises with
+            ``solver_iterations`` and ``tile_size``. It therefore only wins on width:
+            about 52 bodies in a *single* launch at these defaults. The simulator
+            resolves one body per launch, so no ``num_agents`` reaches that, and
+            ``"gpu"`` measures 10-11x slower at every count from 1 to 64. Batching
+            envs into one launch is what would change this; until then CPU is right.
     """
 
     restitution: float = 0.0
@@ -63,8 +68,8 @@ class ContactConfig:
         if iterations < 1:
             raise ValueError(f"solver_iterations must be >= 1, got {iterations}")
         object.__setattr__(self, "solver_iterations", iterations)
-        if self.device not in ("cpu", "default"):
-            raise ValueError(f"device must be 'cpu' or 'default', got {self.device!r}")
+        if self.device not in ("cpu", "gpu"):
+            raise ValueError(f"device must be 'cpu' or 'gpu', got {self.device!r}")
 
     def with_updates(self, **changes) -> "ContactConfig":
         """A copy with fields replaced, re-validated."""

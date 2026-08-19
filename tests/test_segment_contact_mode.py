@@ -20,6 +20,18 @@ from f1tenth_gym.envs.track.walls import wall_segments
 COAST = np.array([[0.0, 0.0]], dtype=np.float32)
 
 
+def _gpu_available():
+    import jax
+
+    try:
+        return bool(jax.devices("gpu"))
+    except RuntimeError:
+        return False
+
+
+_HAS_GPU = _gpu_available()
+
+
 def make_env(mode, lidar=True, friction=0.0, terminate=False):
     return gym.make(
         "f1tenth_gym:f1tenth-v0",
@@ -194,12 +206,12 @@ class TestConfigGuards(unittest.TestCase):
 
 
 class TestDevicePlacement(unittest.TestCase):
-    """The kernels are launch-bound, so where they run is a tuning knob."""
+    """Where the kernels run, and that asking for the impossible says so."""
 
     def test_only_the_two_known_devices_are_accepted(self):
-        for name in ("cpu", "default"):
+        for name in ("cpu", "gpu"):
             self.assertEqual(ContactConfig(device=name).device, name)
-        for bad in ("gpu", "cuda", "", None):
+        for bad in ("default", "cuda", "tpu", "", None):
             with self.assertRaises(ValueError):
                 ContactConfig(device=bad)
 
@@ -210,11 +222,21 @@ class TestDevicePlacement(unittest.TestCase):
         from f1tenth_gym.envs.contact.adapter import resolve_device
 
         self.assertEqual(resolve_device("cpu").platform, "cpu")
-        self.assertIsNone(resolve_device("default"))
 
+    def test_an_absent_backend_is_named_not_silently_swapped(self):
+        """A quiet fallback would cost 10x with nothing said."""
+        from f1tenth_gym.envs.contact.adapter import resolve_device
+
+        with self.assertRaises(ValueError) as caught:
+            resolve_device("nonexistent-backend")
+        message = str(caught.exception)
+        self.assertIn("nonexistent-backend", message)
+        self.assertIn("available", message)
+
+    @unittest.skipUnless(_HAS_GPU, "no GPU backend visible to JAX")
     def test_the_device_does_not_change_the_physics(self):
         states = []
-        for device in ("cpu", "default"):
+        for device in ("cpu", "gpu"):
             env = gym.make(
                 "f1tenth_gym:f1tenth-v0",
                 config=EnvConfig(
