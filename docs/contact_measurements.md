@@ -166,6 +166,42 @@ step-to-step normal jitter.
 
 ---
 
+## Phase 5 — solver
+
+```bash
+env -u PYTHONPATH DISPLAY= uv run pytest tests/test_contact_solver.py -q
+```
+
+**Jacobi, not Gauss-Seidel.** The plan assumed sequential impulses. Measured on the
+3080 with a flat two-point manifold, incoming 5 m/s, `e = 0`, residual is
+`max |v_c . n|` after solving:
+
+| sweeps | sequential residual | Jacobi residual | sequential cost | Jacobi cost |
+|---|---|---|---|---|
+| 16 | 0.032 | 0.536 | 3.55 ms | 0.51 ms |
+| 64 | 0.000 | **0.00066** | ~14 ms | **0.82 ms** |
+
+Sequential converges far better per sweep, and loses anyway: a `lax.scan` over
+contact slots is launch-bound, so each sweep costs ~0.25 ms of latency for a handful
+of flops. Jacobi makes a sweep one vectorised op, so sweeps are nearly free and you
+can afford 64. Same mechanism as the plan's `while_loop` anti-goal. Default is 64
+sweeps, 1.26 ms/solve over a realistic 38 slots.
+
+Restitution lands exactly: `e = 0.0 / 0.3 / 0.8` from a 5 m/s impact gives separating
+speeds of `0.00 / +1.50 / +4.00` m/s. A 2,000-step rest under gravity settles to
+exactly `slop` penetration with zero yaw drift and flat kinetic energy.
+
+**Two sign bugs the physics tests caught**, both invisible to the geometry tests:
+
+- Restitution bias was `e * -approach`, which drives `v_n` toward *minus* the bounce —
+  the body kept closing at 1.5 m/s for `e = 0.3`. It must be `e * approach`.
+- The speculative clamp fired while already penetrating. A negative gap makes
+  `-gap/dt` positive, so instead of clamping it flung the body out at `gap/dt`,
+  turning a 1 cm/s resting contact into 0.1 m/s and multiplying its energy by 100.
+  It is now gated on `gap > 0`.
+
+---
+
 ## Broad-phase back end (plan §8.1)
 
 Measured with `bench_broadphase.py` on the 3080, µs per query, all four methods
