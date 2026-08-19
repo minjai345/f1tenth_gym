@@ -59,6 +59,12 @@ def _occupancy_from_image(image: Image.Image, spec: TrackSpec) -> np.ndarray:
     occupancy_map[occ_prob > spec.occupied_thresh] = 0.0
     return occupancy_map
 
+
+def _grayscale_from_image(image: Image.Image) -> np.ndarray:
+    """The un-thresholded greys, kept so wall extraction can read sub-pixel edges."""
+    return np.array(image.convert("L"), dtype=np.uint8)
+
+
 @dataclass
 class Track:
     """Racing track with occupancy map and reference lines.
@@ -71,6 +77,7 @@ class Track:
         filepath: Path to the track files.
         ext: File extension of the map image.
         occupancy_map: 2D occupancy grid for collision detection.
+        occupancy_grey: Un-thresholded map greys, or None for synthetic tracks.
         centerline: Track centerline as a Raceline.
         raceline: Optimal racing line as a Raceline.
     """
@@ -79,6 +86,7 @@ class Track:
     filepath: Optional[str]
     ext: Optional[str]
     occupancy_map: np.ndarray
+    occupancy_grey: Optional[np.ndarray]
     centerline: Raceline
     raceline: Raceline
 
@@ -90,6 +98,7 @@ class Track:
         ext: Optional[str] = None,
         centerline: Optional[Raceline] = None,
         raceline: Optional[Raceline] = None,
+        occupancy_grey: Optional[np.ndarray] = None,
     ):
         """
         Initialize track object.
@@ -106,6 +115,7 @@ class Track:
         self.filepath = filepath
         self.ext = ext
         self.occupancy_map = occupancy_map
+        self.occupancy_grey = occupancy_grey
         self.centerline = centerline
         self.raceline = raceline
         self.s_guess = None
@@ -195,6 +205,7 @@ class Track:
                 Transpose.FLIP_TOP_BOTTOM
             )
             occupancy_map = _occupancy_from_image(image, track_spec)
+            occupancy_grey = _grayscale_from_image(image)
 
             # if exists, load centerline
             if (track_dir / f"{track}_centerline.csv").exists():
@@ -227,6 +238,7 @@ class Track:
                 filepath=str((track_dir / track).absolute()),
                 ext=map_filename.suffix,
                 occupancy_map=occupancy_map,
+                occupancy_grey=occupancy_grey,
                 centerline=centerline,
                 raceline=raceline,
             )
@@ -281,6 +293,7 @@ class Track:
             image_path = track_dir / track_spec.image
             image = Image.open(image_path).transpose(Transpose.FLIP_TOP_BOTTOM)
             occupancy_map = _occupancy_from_image(image, track_spec)
+            occupancy_grey = _grayscale_from_image(image)
 
             # if exists, load centerline
             if (track_dir / f"{stem}_centerline.csv").exists():
@@ -309,6 +322,7 @@ class Track:
                 filepath=str((track_dir / stem).absolute()),
                 ext=image_path.suffix,
                 occupancy_map=occupancy_map,
+                occupancy_grey=occupancy_grey,
                 centerline=centerline,
                 raceline=raceline,
             )
