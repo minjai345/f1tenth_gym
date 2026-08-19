@@ -9,8 +9,8 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from .kernels import segment_contact, speculative_gap
-from .solver import ContactParams, resolve, speculative_clamp
+from .kernels import body_contact, segment_contact, speculative_gap
+from .solver import ContactParams, resolve, resolve_pair, speculative_clamp
 
 
 class WallContact:
@@ -137,3 +137,47 @@ def build(track, vehicle_params, contact_config, dt, dr_config=None) -> WallCont
         slop=contact_config.slop,
     )
     return WallContact(walls, index, params, contact_config.solver_iterations, dt)
+
+
+class BodyPairContact:
+    """Resolves one pair of vehicle bodies, holding the jitted kernel."""
+
+    def __init__(self, params: ContactParams, iterations: int):
+        """
+        Args:
+            params: Solver tuning.
+            iterations: Jacobi sweeps per call.
+        """
+
+        def run(verts_a, verts_b, centre_a, centre_b, v_a, w_a, v_b, w_b, mass, inertia):
+            manifold = body_contact(verts_a, verts_b)
+            v_a, w_a, v_b, w_b, separation = resolve_pair(
+                v_a, w_a, v_b, w_b, mass, inertia,
+                manifold.points, manifold.depths, manifold.normal,
+                centre_a, centre_b, params, int(iterations),
+            )
+            return v_a, w_a, v_b, w_b, separation, jnp.any(manifold.depths > 0.0)
+
+        self._run = jax.jit(run)
+
+    def __call__(self, verts_a, verts_b, centre_a, centre_b, v_a, w_a, v_b, w_b,
+                 mass, inertia):
+        """Resolve one body pair.
+
+        Returns:
+            ``(v_a, omega_a, v_b, omega_b, separation, in_contact)``; ``separation``
+            is applied to b and its negation to a.
+        """
+        out = self._run(
+            jnp.asarray(verts_a, jnp.float32), jnp.asarray(verts_b, jnp.float32),
+            jnp.asarray(centre_a, jnp.float32), jnp.asarray(centre_b, jnp.float32),
+            jnp.asarray(v_a, jnp.float32), jnp.float32(w_a),
+            jnp.asarray(v_b, jnp.float32), jnp.float32(w_b),
+            jnp.float32(mass), jnp.float32(inertia),
+        )
+        v_a, w_a, v_b, w_b, separation, hit = out
+        return (
+            np.asarray(v_a, np.float64), float(w_a),
+            np.asarray(v_b, np.float64), float(w_b),
+            np.asarray(separation, np.float64), bool(hit),
+        )

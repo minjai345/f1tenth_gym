@@ -832,6 +832,7 @@ class F110Simulator:
 
     def _build_contact(self) -> None:
         """Compile the wall-contact kernels for the current track and body."""
+        self.pair_contact = None
         if self.collision_check_mode is not CollisionCheckMode.SEGMENT_CONTACT:
             self.contact = None
             return
@@ -846,6 +847,21 @@ class F110Simulator:
             self.time_step,
             self.config.domain_randomization_config,
         )
+        if self.num_agents > 1:
+            from .contact.adapter import BodyPairContact
+            from .contact.solver import ContactParams
+
+            cfg = self.config.contact_config
+            self.pair_contact = BodyPairContact(
+                ContactParams(
+                    restitution=cfg.restitution,
+                    friction=cfg.friction,
+                    restitution_threshold=cfg.restitution_threshold,
+                    baumgarte=cfg.baumgarte,
+                    slop=cfg.slop,
+                ),
+                cfg.solver_iterations,
+            )
 
     def _world_velocity(self, state):
         """(vx, vy, omega) in world axes for the model's native state."""
@@ -912,13 +928,72 @@ class F110Simulator:
             self.state.collisions[agent_idx] = 1.0 if hit else 0.0
             if not hit:
                 continue
-            state = self._apply_contact(state, velocity, omega, correction)
-            state[4] = (state[4] + np.pi) % (2 * np.pi) - np.pi
-            self.state.state[agent_idx] = state.astype(np.float32)
-            self.state.standard_state[agent_idx] = self._standardize(state)
-            self.state.poses[agent_idx] = np.array(
-                [state[0], state[1], state[4]], dtype=np.float32
-            )
+            self._write_back(agent_idx, self._apply_contact(state, velocity, omega, correction))
+
+        if self.pair_contact is not None:
+            self._resolve_agent_contacts()
+
+    def _resolve_agent_contacts(self) -> None:
+        """Impulse-resolve every overlapping vehicle pair.
+
+        A cheap numpy box test first, so the common case of nobody touching costs no
+        JAX dispatch at all.
+        """
+        verts = self._compute_all_vertices()
+        lows = [v.min(axis=0) for v in verts]
+        highs = [v.max(axis=0) for v in verts]
+        lr = float(self.vehicle_params.lr)
+        rear_axle = self.model.pose_reference is not PoseReference.COG
+        mass = float(self.vehicle_params.m)
+        inertia = float(self.vehicle_params.I)
+
+        def centre_of(idx, state):
+            centre = np.array([float(state[0]), float(state[1])])
+            if rear_axle:
+                yaw = float(state[4])
+                centre = centre + lr * np.array([math.cos(yaw), math.sin(yaw)])
+            return centre
+
+        for i in range(self.num_agents):
+            for j in range(i + 1, self.num_agents):
+                if np.any(highs[i] < lows[j]) or np.any(highs[j] < lows[i]):
+                    continue
+                state_i = self.state.state[i].astype(np.float64)
+                state_j = self.state.state[j].astype(np.float64)
+                c_i, c_j = centre_of(i, state_i), centre_of(j, state_j)
+                v_i, w_i = self._world_velocity(state_i)
+                v_j, w_j = self._world_velocity(state_j)
+                v_i, w_i, v_j, w_j, sep, hit = self.pair_contact(
+                    verts[i], verts[j], c_i, c_j, v_i, w_i, v_j, w_j, mass, inertia
+                )
+                if not hit:
+                    continue
+                self.state.collisions[i] = 1.0
+                self.state.collisions[j] = 1.0
+                self._write_back(i, self._apply_contact(state_i, v_i, w_i, -sep))
+                self._write_back(j, self._apply_contact(state_j, v_j, w_j, sep))
+                verts[i] = self._body_vertices(i)
+                verts[j] = self._body_vertices(j)
+                lows[i], highs[i] = verts[i].min(axis=0), verts[i].max(axis=0)
+                lows[j], highs[j] = verts[j].min(axis=0), verts[j].max(axis=0)
+
+    def _body_vertices(self, agent_idx):
+        """Collision-body corners for one agent, from its current pose."""
+        cp = self._collision_pose_from_base(self.state.poses[agent_idx])
+        return get_vertices(
+            np.asarray(cp, dtype=np.float64),
+            self.vehicle_params.length,
+            self.vehicle_params.width,
+        )
+
+    def _write_back(self, agent_idx, state) -> None:
+        """Refresh the three SoA mirrors after a contact correction."""
+        state[4] = (state[4] + np.pi) % (2 * np.pi) - np.pi
+        self.state.state[agent_idx] = state.astype(np.float32)
+        self.state.standard_state[agent_idx] = self._standardize(state)
+        self.state.poses[agent_idx] = np.array(
+            [state[0], state[1], state[4]], dtype=np.float32
+        )
 
     def _update_agent_collisions(self) -> None:
         """Detect agent-vs-agent collisions using the configured mode."""
@@ -941,7 +1016,9 @@ class F110Simulator:
                     self.collision_margin,
                 ):
                     self._halt_on_collision(agent_idx)
-        elif mode in (CollisionCheckMode.BOUNDING_BOX, CollisionCheckMode.SEGMENT_CONTACT):
+        elif mode is CollisionCheckMode.SEGMENT_CONTACT:
+            return  # resolved with the walls, before the Frenet block
+        elif mode is CollisionCheckMode.BOUNDING_BOX:
             # Agent-vs-agent via GJK on pose-derived vertices, so it works with the
             # LiDAR off. SEGMENT_CONTACT borrows it; walls it handles itself.
             vertices = self._all_vertices if self.scan_enabled else self._compute_all_vertices()

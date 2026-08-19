@@ -159,3 +159,104 @@ def resolve(
     push = jnp.sum(excess[:, None] * normals, axis=0)
     correction = params.baumgarte * push / n_live
     return velocity, omega, correction
+
+
+def resolve_pair(
+    velocity_a,
+    omega_a,
+    velocity_b,
+    omega_b,
+    mass,
+    inertia,
+    points,
+    depths,
+    normal,
+    centre_a,
+    centre_b,
+    params: ContactParams,
+    iterations: int = 64,
+):
+    """Solve impulses between two dynamic bodies sharing one contact normal.
+
+    The wall version treats the other side as infinitely massive; here both bodies
+    take the impulse, so the effective mass carries both translational and both
+    rotational terms.
+
+    Args:
+        velocity_a: (2,) world linear velocity of body a.
+        omega_a: Scalar angular velocity of body a.
+        velocity_b: (2,) world linear velocity of body b.
+        omega_b: Scalar angular velocity of body b.
+        mass: Body mass, kg; both bodies are identical vehicles.
+        inertia: Yaw inertia, kg m^2.
+        points: (N, 2) contact positions.
+        depths: (N,) penetration depths; zero marks an unused slot.
+        normal: (2,) unit normal pointing from a toward b.
+        centre_a: (2,) centre of mass of body a.
+        centre_b: (2,) centre of mass of body b.
+        params: Solver tuning.
+        iterations: Jacobi sweeps; static.
+
+    Returns:
+        ``(velocity_a, omega_a, velocity_b, omega_b, separation)`` where separation
+        is the positional push-out to apply to b, and its negation to a.
+    """
+    live = depths > 0.0
+    r_a = points - centre_a
+    r_b = points - centre_b
+    inv_m = 1.0 / mass
+    inv_i = 1.0 / inertia
+    n_live = jnp.maximum(jnp.sum(live), 1.0)
+    normals = jnp.broadcast_to(normal, points.shape)
+
+    def relative(v_a, w_a, v_b, w_b):
+        return contact_velocity(v_b, w_b, r_b) - contact_velocity(v_a, w_a, r_a)
+
+    approach = jnp.sum(relative(velocity_a, omega_a, velocity_b, omega_b) * normals, axis=-1)
+    bounce = jnp.where(
+        -approach > params.restitution_threshold, params.restitution * approach, 0.0
+    )
+    rn_a = _cross(r_a, normals)
+    rn_b = _cross(r_b, normals)
+    k_n = jnp.maximum(2.0 * inv_m + (rn_a * rn_a + rn_b * rn_b) * inv_i, _TINY)
+
+    def sweep(_, carry):
+        v_a, w_a, v_b, w_b, acc_n = carry
+        v_rel = relative(v_a, w_a, v_b, w_b)
+        v_n = jnp.sum(v_rel * normals, axis=-1)
+
+        delta = -(v_n + bounce) / k_n
+        clamped = jnp.maximum(acc_n + delta, 0.0)
+        delta = jnp.where(live, (clamped - acc_n) / n_live, 0.0)
+        acc_n = acc_n + delta
+
+        v_t_vec = v_rel - v_n[:, None] * normals
+        speed_t = jnp.linalg.norm(v_t_vec, axis=-1, keepdims=True)
+        tangent = jnp.where(
+            speed_t > _TINY,
+            v_t_vec / (speed_t + _TINY),
+            jnp.stack([-normals[:, 1], normals[:, 0]], axis=-1),
+        )
+        rt_a = _cross(r_a, tangent)
+        rt_b = _cross(r_b, tangent)
+        k_t = jnp.maximum(2.0 * inv_m + (rt_a * rt_a + rt_b * rt_b) * inv_i, _TINY)
+        bound = params.friction * acc_n
+        j_t = jnp.clip(-jnp.sum(v_rel * tangent, axis=-1) / k_t, -bound, bound)
+        j_t = jnp.where(live, j_t / n_live, 0.0)
+
+        impulse = delta[:, None] * normals + j_t[:, None] * tangent
+        total = jnp.sum(impulse, axis=0)
+        v_a = v_a - total * inv_m
+        w_a = w_a - jnp.sum(_cross(r_a, impulse)) * inv_i
+        v_b = v_b + total * inv_m
+        w_b = w_b + jnp.sum(_cross(r_b, impulse)) * inv_i
+        return (v_a, w_a, v_b, w_b, acc_n)
+
+    velocity_a, omega_a, velocity_b, omega_b, _ = jax.lax.fori_loop(
+        0, iterations, sweep, (velocity_a, omega_a, velocity_b, omega_b, jnp.zeros_like(depths))
+    )
+
+    excess = jnp.maximum(depths - params.slop, 0.0) * live
+    # Split the push-out between the two bodies rather than moving one twice as far.
+    separation = 0.5 * params.baumgarte * jnp.sum(excess) / n_live * normal
+    return velocity_a, omega_a, velocity_b, omega_b, separation

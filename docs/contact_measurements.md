@@ -243,6 +243,38 @@ guard, before any map download or JIT.
 
 ---
 
+## Phase 7 — car-to-car
+
+```bash
+env -u PYTHONPATH DISPLAY= uv run pytest tests/test_body_contact.py -q
+```
+
+`body_contact` is a separating-axis test over the two bodies' four unique face
+normals; the minimum-overlap axis is the MTV, and the manifold comes from the same
+reference-face clip the wall path uses. `resolve_pair` is the two-body solver, where
+the effective mass carries both translational and both rotational terms.
+
+**The plan's claim reproduces exactly: SAT and the existing GJK agree on
+20,000/20,000 random pose pairs.** So this is a strict extension, not a replacement.
+
+Two cars closing head-on at 3 m/s each, in the gym:
+
+| mode | restitution | car 0 after | car 1 after |
+|---|---|---|---|
+| `BOUNDING_BOX` (GJK boolean) | — | 3.00 m/s | 3.00 m/s — **passes through** |
+| `SEGMENT_CONTACT` | 0.0 | 0.00 m/s | 0.00 m/s |
+| `SEGMENT_CONTACT` | 0.5 | −1.50 m/s | +1.50 m/s |
+
+Momentum is conserved because the impulses are internal: over 174 random overlapping
+pairs with friction 0.5, worst linear drift **1.1e-5 kg m/s** and worst angular drift
+**1.9e-6 kg m^2/s**, both at float32 noise level.
+
+Pairs are resolved alongside the walls, before the Frenet block, so a corrected pose
+never leaves the Frenet frame or the scan stale. A numpy bounding-box test runs first,
+so the common case of nobody touching costs no JAX dispatch at all.
+
+---
+
 ## Broad-phase back end (plan §8.1)
 
 Measured with `bench_broadphase.py` on the 3080, µs per query, all four methods

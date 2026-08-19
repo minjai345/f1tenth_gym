@@ -7,6 +7,7 @@ silently; the regression tests in ``tests/test_contact_kernels.py`` pin them.
 
 from typing import NamedTuple
 
+import jax
 import jax.numpy as jnp
 
 # Overlap of exactly zero is touching, not separated. Using <= 0 here silently kills
@@ -143,3 +144,77 @@ def speculative_gap(verts, seg_a, seg_b, normal, valid=True):
     )
     gap = (verts @ normal).min() - seg_a @ normal
     return jnp.where(reachable, gap, NO_CONTACT_GAP)
+
+
+def _project(verts, axis):
+    proj = verts @ axis
+    return proj.min(), proj.max()
+
+
+def body_contact(verts_a, verts_b, valid=True) -> Manifold:
+    """Contact manifold between two convex quads, by separating-axis test.
+
+    The minimum-overlap axis is the minimum translation vector; the reference face
+    is the one that produced it and the incident face is the most opposed face on
+    the other body, clipped to the reference span exactly as the wall path does.
+
+    Args:
+        verts_a: (4, 2) first body's corners, counter-clockwise.
+        verts_b: (4, 2) second body's corners, counter-clockwise.
+        valid: Boolean; False produces an empty manifold.
+
+    Returns:
+        A :class:`Manifold` whose ``normal`` points from ``verts_a`` toward
+        ``verts_b``, so ``a`` is pushed along ``-normal`` and ``b`` along ``+normal``.
+    """
+    axes = jnp.concatenate([_face_normals(verts_a)[:2], _face_normals(verts_b)[:2]])
+
+    def overlap_on(axis):
+        lo_a, hi_a = _project(verts_a, axis)
+        lo_b, hi_b = _project(verts_b, axis)
+        return jnp.minimum(hi_a, hi_b) - jnp.maximum(lo_a, lo_b)
+
+    overlaps = jax.vmap(overlap_on)(axes)
+    touching = valid & jnp.all(overlaps >= -SEPARATION_EPS)
+
+    # The winning axis is the MTV direction; the depth comes from the clip below,
+    # which is per-point rather than the single scalar overlap.
+    best = jnp.argmin(overlaps)
+    axis = axes[best]
+    # Orient from a to b so the sign of the impulse is unambiguous.
+    centre_a = verts_a.mean(axis=0)
+    centre_b = verts_b.mean(axis=0)
+    normal = jnp.where(jnp.dot(centre_b - centre_a, axis) < 0.0, -axis, axis)
+
+    # The reference face belongs to whichever body owns the winning axis.
+    a_owns = best < 2
+    reference, incident = jax.lax.cond(
+        a_owns, lambda: (verts_a, verts_b), lambda: (verts_b, verts_a)
+    )
+    ref_normal = jnp.where(a_owns, normal, -normal)
+
+    incident_axes = _face_normals(incident)
+    face = jnp.argmin(incident_axes @ ref_normal)
+    p0 = incident[face]
+    p1 = incident[(face + 1) % 4]
+
+    tangent = jnp.array([-ref_normal[1], ref_normal[0]])
+    ref_t = reference @ tangent
+    span_lo, span_hi = ref_t.min(), ref_t.max()
+    t0, t1 = p0 @ tangent, p1 @ tangent
+    denom = jnp.where(jnp.abs(t1 - t0) < _TINY, _TINY, t1 - t0)
+
+    def on_face(t):
+        return p0 + (p1 - p0) * jnp.clip((t - t0) / denom, 0.0, 1.0)
+
+    points = jnp.stack([on_face(jnp.clip(t0, span_lo, span_hi)),
+                        on_face(jnp.clip(t1, span_lo, span_hi))])
+    plane = (reference @ ref_normal).max()
+    depths = plane - points @ ref_normal
+
+    live = (depths > 0.0) & touching
+    return Manifold(
+        points=jnp.where(live[:, None], points, 0.0),
+        depths=jnp.where(live, depths, 0.0),
+        normal=jnp.where(jnp.any(live), normal, 0.0),
+    )
