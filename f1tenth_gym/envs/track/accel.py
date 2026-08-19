@@ -6,8 +6,9 @@ BVH on an RTX 3080 at 256/1024/4096 queries: 0.381/0.221/0.137 us against
 """
 
 import math
-from typing import NamedTuple
+from dataclasses import dataclass
 
+import jax
 import numpy as np
 
 from .budget import (
@@ -21,8 +22,12 @@ from .budget import (
 from .walls import WallSegments
 
 
-class TileIndex(NamedTuple):
+@dataclass(frozen=True, eq=False)
+class TileIndex:
     """Per-tile candidate lists, padded to a fixed width.
+
+    Registered as a pytree whose only leaf is ``table``: the geometry is aux_data, so
+    a ``tree_map`` cannot silently rescale the grid out from under the table.
 
     Attributes:
         table: (rows, cols, k) int32 segment indices, -1 padding.
@@ -43,7 +48,14 @@ class TileIndex(NamedTuple):
 
     @property
     def is_empty(self) -> bool:
-        return self.table.size == 0
+        return self.table.size == 0 or int(self.table.max()) < 0
+
+
+jax.tree_util.register_pytree_node(
+    TileIndex,
+    lambda idx: ((idx.table,), (idx.origin, idx.tile_size, idx.query_half_extent)),
+    lambda aux, children: TileIndex(children[0], *aux),
+)
 
 
 def empty_index(tile_size: float = DEFAULT_TILE_SIZE, qh: float = 1.0) -> TileIndex:
@@ -121,7 +133,10 @@ def build_tile_index(
     ox, oy = budget.origin
     rows, cols = budget.tile_shape
     k = budget.k_tile_safe
-    _refuse_if_too_large(rows, cols, k * 4, max_bytes, tile, "build_tile_index")
+    _refuse_if_too_large(
+        rows * cols, k * 4, max_bytes, "build_tile_index",
+        f"a {rows}x{cols}x{k} candidate table at tile_size={tile} m",
+    )
 
     a, b = walls.a.astype(np.float64), walls.b.astype(np.float64)
     lo, hi = np.minimum(a, b) - qh, np.maximum(a, b) + qh
@@ -137,6 +152,13 @@ def build_tile_index(
 
     span_r, span_c = row1 - row0 + 1, col1 - col0 + 1
     per_segment = span_r * span_c
+    # ~10 live int64 arrays plus an argsort over one entry per (tile, segment) pair;
+    # this scales with fill density, not with the table the guard above covered.
+    pairs = int(per_segment.sum())
+    _refuse_if_too_large(
+        pairs, 80, max_bytes, "build_tile_index",
+        f"{pairs} (tile, segment) incidence pairs at tile_size={tile} m",
+    )
     seg = np.repeat(np.arange(len(walls), dtype=np.int64), per_segment)
     within = np.arange(per_segment.sum()) - np.repeat(
         np.cumsum(per_segment) - per_segment, per_segment
@@ -190,15 +212,15 @@ def build_for_track(
 
     walls = wall_segments(track)
     qh = widest_query_half_extent(vehicle_params, dr_config)
-    key = (qh, float(tile_size), float(margin), len(walls), tuple(track.spec.origin[:2]))
+    key = (qh, float(tile_size), float(margin), int(max_bytes))
     cached = getattr(track, "_tile_index", None)
-    if cached is not None and cached[0] == key:
-        return (walls,) + cached[1]
+    if cached is not None and cached[0] == key and cached[1] is walls:
+        return (walls,) + cached[2]
 
     budget = tile_budget(walls, qh, tile_size, margin, max_bytes)
     index = build_tile_index(walls, budget, max_bytes)
     try:
-        track._tile_index = (key, (budget, index))
+        track._tile_index = (key, walls, (budget, index))
     except (AttributeError, TypeError):
         pass
     return walls, budget, index

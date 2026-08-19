@@ -19,13 +19,18 @@ DEFAULT_MARGIN = 1.25
 DEFAULT_MAX_BYTES = 512 * 1024 * 1024
 
 
-def _refuse_if_too_large(rows, cols, per_tile_bytes, max_bytes, tile_size, what):
-    projected = int(rows) * int(cols) * int(per_tile_bytes)
+def _size(n):
+    return f"{n / 1e9:.2f} GB" if n >= 1e9 else f"{n / 1e6:.1f} MB"
+
+
+def _refuse_if_too_large(count, bytes_each, max_bytes, what, detail):
+    """Raise before allocating, rather than after the machine has started swapping."""
+    projected = int(count) * int(bytes_each)
     if projected > max_bytes:
         raise MemoryError(
-            f"{what} would need {projected / 1e9:.2f} GB for a {rows}x{cols} tile grid "
-            f"at tile_size={tile_size} m, over the {max_bytes / 1e9:.2f} GB cap. "
-            f"Use a larger tile_size (cost scales as 1/tile_size^2) or raise max_bytes."
+            f"{what} would need {_size(projected)} for {detail}, over the "
+            f"{_size(max_bytes)} cap. Use a larger tile_size (cost scales as "
+            f"1/tile_size^2) or raise max_bytes."
         )
     return projected
 
@@ -145,7 +150,10 @@ def tile_budget(
     row1 = np.floor((hi[:, 1] - origin[1]) / tile_size).astype(np.int64)
     rows, cols = int(row1.max()) + 1, int(col1.max()) + 1
     # int64 accumulator plus the two cumsum copies it spawns
-    _refuse_if_too_large(rows + 1, cols + 1, 24, max_bytes, tile_size, "tile_budget")
+    _refuse_if_too_large(
+        (rows + 1) * (cols + 1), 24, max_bytes, "tile_budget",
+        f"a {rows}x{cols} tile grid at tile_size={tile_size} m",
+    )
 
     # +1 row/col of slack so the -1 corner of each rectangle always lands in-bounds
     diff = np.zeros((rows + 1, cols + 1), dtype=np.int64)
