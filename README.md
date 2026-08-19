@@ -1,4 +1,4 @@
-![Python 3.9+](https://github.com/f1tenth/f1tenth_gym/actions/workflows/ci.yml/badge.svg)
+![Python 3.12+](https://github.com/f1tenth/f1tenth_gym/actions/workflows/ci.yml/badge.svg)
 ![Docker](https://github.com/f1tenth/f1tenth_gym/actions/workflows/docker.yml/badge.svg)
 ![Code Style](https://github.com/f1tenth/f1tenth_gym/actions/workflows/lint.yml/badge.svg)
 
@@ -27,16 +27,12 @@ Then you can run a quick waypoint follow example by:
 uv run python examples/waypoint_follow.py
 ```
 
-### Using pip
+### CPU-only machines
 
-Alternatively, you can install using pip in a virtual environment:
+`uv sync` installs GPU JAX by default. Without CUDA, skip the ~3 GB of GPU wheels:
 
 ```bash
-git clone https://github.com/f1tenth/f1tenth_gym.git
-cd f1tenth_gym
-python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-pip install -e .
+uv sync --no-group gpu
 ```
 
 Then run examples with:

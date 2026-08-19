@@ -4,7 +4,8 @@ How to install f1tenth_gym
 ``f1tenth_gym`` resolves its ``maps/`` directory four ``.parent`` hops up from its
 own source file and downloads tracks into it on first use, so an editable clone is
 the layout that behaves — installed from a wheel, the package would fetch maps into
-``site-packages/maps/`` instead. Any Python from 3.9 up works.
+``site-packages/maps/`` instead. Python 3.12 or newer is required, because the
+JAX kernels the contact and collision code is built on need it.
 
 Install from a clone
 --------------------
@@ -29,8 +30,9 @@ subsequent commands through ``uv run``, e.g. ``uv run python your_script.py``.
    ``pyproject.toml`` and ``uv.lock``. Install extra packages by adding them to
    the project rather than with ``uv pip install``, which the next sync undoes.
 
-pip works on the same clone: ``pip install -e .``, or
-``pip install -e ".[video,trackgen]"`` to include the example extras.
+``uv sync`` installs GPU JAX by default. On a machine without CUDA, add
+``--no-group gpu`` to skip roughly 3 GB of GPU wheels; plain ``jax`` remains a
+hard dependency either way and runs CPU-only.
 
 Verify the install
 ------------------

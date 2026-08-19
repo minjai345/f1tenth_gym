@@ -15,7 +15,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
+        python-version: ["3.12", "3.13", "3.14"]
     # Rendering uses OpenGL, which needs a display; tests run under xvfb-run
     # (QT_QPA_PLATFORM=xcb). The GL widget cannot render under 'offscreen'.
 
@@ -27,28 +27,22 @@ jobs:
       run: sudo apt install -y freeglut3-dev libglib2.0-0 libsm6 libxrender1 libxext6 libxkbcommon-x11-0 libdbus-1-dev xvfb
 
     - uses: actions/checkout@v4
-    
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v4
+
+    - name: Set up uv
+      uses: astral-sh/setup-uv@v5
       with:
         python-version: ${{ matrix.python-version }}
-        
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install flake8 pytest
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-    
+        enable-cache: true
+
     - name: Install
-      run: |
-        python -m pip install --upgrade pip
-        pip install -e .
-    
+      # Installs the project plus the dev group (pytest, flake8) and examples.
+      # --no-group gpu skips ~3 GB of CUDA wheels the runner has no GPU for.
+      run: uv sync --no-group gpu
+
     - name: Test with pytest
       # rgb_array rendering defaults to the GL backend, which needs a display;
       # xvfb-run provides a virtual one so the default render path is tested.
-      run: |
-        xvfb-run -a pytest
+      run: xvfb-run -a uv run --no-sync pytest
 
 
   docs:
@@ -56,24 +50,24 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Set up Python
-      uses: actions/setup-python@v4
+    - name: Set up uv
+      uses: astral-sh/setup-uv@v5
       with:
         python-version: "3.12"
+        enable-cache: true
 
     - name: Install
-      run: |
-        python -m pip install --upgrade pip
-        pip install -e .
-        pip install "sphinx>=7,<10" "sphinx-rtd-theme>=2"
+      # autodoc imports f1tenth_gym, so the project itself is needed; the docs
+      # group carries Sphinx. No GPU on the runner, so skip the CUDA wheels.
+      run: uv sync --group docs --no-group gpu
 
     - name: Build docs (warnings are errors)
-      run: python -m sphinx -W -b html docs docs/_build/html
+      run: uv run --no-sync python -m sphinx -W -b html docs docs/_build/html
 
     - name: Run doctests
-      run: python -m sphinx -b doctest docs docs/_build/doctest
+      run: uv run --no-sync python -m sphinx -b doctest docs docs/_build/doctest
 
     - name: Check links
       # external links flake; report without failing the build
       continue-on-error: true
-      run: python -m sphinx -b linkcheck docs docs/_build/linkcheck
+      run: uv run --no-sync python -m sphinx -b linkcheck docs docs/_build/linkcheck

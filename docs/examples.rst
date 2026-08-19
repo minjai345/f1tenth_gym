@@ -13,8 +13,7 @@ Run the first example
 ``uv sync`` already installs what the scripts need beyond the library. The
 ``examples`` dependency group pulls in two extras — ``video`` (``moviepy``,
 for the recorder) and ``trackgen`` (``shapely`` and ``matplotlib``, for the
-generator); under pip the equivalent is ``pip install -e ".[video,trackgen]"``
-(:doc:`installation`). From the repository root:
+generator); see :doc:`installation`. From the repository root:
 
 .. code-block:: bash
 

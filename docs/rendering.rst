@@ -245,8 +245,8 @@ captures once per step and the container fps is the env's
    env.close()   # writes videos/rl-video-episode-0.mp4
 
 Encoding goes through moviepy, which arrives with the ``examples`` dependency
-group that ``uv sync`` installs by default (``pip install f1tenth_gym[video]``
-under pip). Sync with ``--no-group examples`` and ``RecordVideo`` raises
+group that ``uv sync`` installs by default. Sync with ``--no-group examples``
+and ``RecordVideo`` raises
 ``gymnasium.error.DependencyNotInstalled`` instead; :doc:`installation` covers
 what else that sync prunes.
 

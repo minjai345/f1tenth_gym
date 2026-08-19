@@ -16,36 +16,26 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.9"]
+        python-version: ["3.12"]
 
     steps:
     - uses: actions/checkout@v4
-    
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v4
+
+    - name: Set up uv
+      uses: astral-sh/setup-uv@v5
       with:
         python-version: ${{ matrix.python-version }}
-        
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install flake8 pytest
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-    
-    - name: Install
-      run: |
-        python -m pip install --upgrade pip
-        pip install -e .
-    
+        enable-cache: true
+
+    # Neither check imports f1tenth_gym -- flake8 only walks files and
+    # style_lint.py imports nothing but the stdlib and yaml -- so the project is
+    # never synced here. `uv run --no-project --with` fetches just the tool into
+    # an ephemeral env, which also keeps the ~3 GB CUDA stack out of this job.
     - name: Lint with flake8
-      run: |
-        # stop the build if there are Python syntax errors or undefined names
-        # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
-        flake8 . --statistics --exit-zero
+      # exit-zero treats all errors as warnings; advisory only
+      run: uv run --no-project --with flake8 flake8 . --statistics --exit-zero
 
     - name: Check the docs house style
       # gating since the Batch F rewrite (#21): the registries in docs/_style
       # ratchet, so this can only get stricter
-      run: |
-        pip install pyyaml
-        python docs/style_lint.py --strict
+      run: uv run --no-project --with pyyaml python docs/style_lint.py --strict
