@@ -104,6 +104,32 @@ alone.
 
 ---
 
+## Phase 3 — tile index
+
+```bash
+env -u PYTHONPATH DISPLAY= uv run pytest tests/test_accel.py -q
+```
+
+`gather()` must return a **superset** of the segments whose grown bounding box
+contains the query centre; a miss is a silently wrong contact. Verified against
+brute force over 4,000 real free poses per map, synthetic grids at four tile sizes,
+and points sitting exactly on tile seams.
+
+| map | segments | K | table | build | misses | extra candidates |
+|---|---|---|---|---|---|---|
+| Spielberg | 833 | 19 | 2.09 MB | 0.11 s | **0** | 0.35 |
+| Monza | 650 | 13 | 3.56 MB | 0.09 s | **0** | 0.19 |
+
+**Memory guard.** A tile grid costs `rows x cols` per entry, so halving `tile_size`
+quadruples it and `map_scale=10` multiplies it by 100. Monza at scale 10 with a
+0.25 m tile projects to a 6799x3972 grid — 0.65 GB for the budget accumulator alone
+and 1.4 GB for the table. Both `tile_budget` and `build_tile_index` now compute the
+projection and raise `MemoryError` **before allocating**, in 92 ms, naming the tile
+size and the cap. Default ceiling 512 MB, raisable via `max_bytes`. Scale 10 at
+0.5 m (135 MB) still builds.
+
+---
+
 ## Broad-phase back end (plan §8.1)
 
 Measured with `bench_broadphase.py` on the 3080, µs per query, all four methods
