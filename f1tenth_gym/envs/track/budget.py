@@ -14,6 +14,20 @@ from .walls import WallSegments
 
 DEFAULT_TILE_SIZE = 0.5
 DEFAULT_MARGIN = 1.25
+# A tile grid costs rows*cols per entry, so halving tile_size quadruples it and
+# map_scale=10 multiplies it by 100. Refuse before allocating rather than after.
+DEFAULT_MAX_BYTES = 512 * 1024 * 1024
+
+
+def _refuse_if_too_large(rows, cols, per_tile_bytes, max_bytes, tile_size, what):
+    projected = int(rows) * int(cols) * int(per_tile_bytes)
+    if projected > max_bytes:
+        raise MemoryError(
+            f"{what} would need {projected / 1e9:.2f} GB for a {rows}x{cols} tile grid "
+            f"at tile_size={tile_size} m, over the {max_bytes / 1e9:.2f} GB cap. "
+            f"Use a larger tile_size (cost scales as 1/tile_size^2) or raise max_bytes."
+        )
+    return projected
 
 
 class TileBudget(NamedTuple):
@@ -84,6 +98,7 @@ def tile_budget(
     query_half_extent: float,
     tile_size: float = DEFAULT_TILE_SIZE,
     margin: float = DEFAULT_MARGIN,
+    max_bytes: int = DEFAULT_MAX_BYTES,
 ) -> TileBudget:
     """Count, exactly, the most candidates any tile can hand a single query.
 
@@ -96,6 +111,7 @@ def tile_budget(
         query_half_extent: Half-diagonal of the querying body, in metres.
         tile_size: Tile side in metres.
         margin: Safety factor applied to ``k_tile`` to get ``k_tile_safe``.
+        max_bytes: Ceiling on the accumulator this may allocate.
 
     Returns:
         A :class:`TileBudget`. All-zero with ``tile_shape == (0, 0)`` when there are
@@ -103,6 +119,7 @@ def tile_budget(
 
     Raises:
         ValueError: On a non-positive tile size or extent, or a margin below 1.
+        MemoryError: If the tile grid would exceed ``max_bytes``.
     """
     tile_size = float(tile_size)
     query_half_extent = float(query_half_extent)
@@ -127,6 +144,8 @@ def tile_budget(
     col1 = np.floor((hi[:, 0] - origin[0]) / tile_size).astype(np.int64)
     row1 = np.floor((hi[:, 1] - origin[1]) / tile_size).astype(np.int64)
     rows, cols = int(row1.max()) + 1, int(col1.max()) + 1
+    # int64 accumulator plus the two cumsum copies it spawns
+    _refuse_if_too_large(rows + 1, cols + 1, 24, max_bytes, tile_size, "tile_budget")
 
     # +1 row/col of slack so the -1 corner of each rectangle always lands in-bounds
     diff = np.zeros((rows + 1, cols + 1), dtype=np.int64)
@@ -157,6 +176,7 @@ def track_budget(
     tile_size: float = DEFAULT_TILE_SIZE,
     margin: float = DEFAULT_MARGIN,
     tol_px: float | None = None,
+    max_bytes: int = DEFAULT_MAX_BYTES,
 ) -> TileBudget:
     """Tile budget for a track and vehicle, sized at the widest randomized body.
 
@@ -167,6 +187,7 @@ def track_budget(
         tile_size: Tile side in metres.
         margin: Safety factor on the candidate count.
         tol_px: Wall simplification tolerance, or None for the extraction default.
+        max_bytes: Ceiling on the tile grid this may allocate.
 
     Returns:
         A :class:`TileBudget`.
@@ -175,5 +196,9 @@ def track_budget(
 
     walls = wall_segments(track, DEFAULT_TOL_PX if tol_px is None else tol_px)
     return tile_budget(
-        walls, widest_query_half_extent(vehicle_params, dr_config), tile_size, margin
+        walls,
+        widest_query_half_extent(vehicle_params, dr_config),
+        tile_size,
+        margin,
+        max_bytes,
     )

@@ -14,6 +14,8 @@ from f1tenth_gym.envs.track.budget import (
 )
 from f1tenth_gym.envs.track.walls import extract_walls, wall_segments
 
+QH_TEST = query_half_extent(0.58, 0.31)
+
 
 def brute_force_k(walls, qh, tile_size, origin, tile_shape):
     """Largest candidate count over every tile, counted one tile at a time."""
@@ -187,6 +189,41 @@ class TestReportedSizes(unittest.TestCase):
     def test_budget_is_deterministic(self):
         track = Track.from_track_name("Monza", 1.0)
         self.assertEqual(track_budget(track, F1TENTH), track_budget(track, F1TENTH))
+
+
+class TestMemoryGuard(unittest.TestCase):
+    """A 0.25 m tile on a map_scale=10 track projects to gigabytes."""
+
+    def test_a_tiny_tile_is_refused_before_allocating(self):
+        walls = extract_walls(blobs_grid(), 0.05)
+        with self.assertRaises(MemoryError) as caught:
+            tile_budget(walls, QH_TEST, tile_size=0.001)
+        message = str(caught.exception)
+        self.assertIn("0.001", message)
+        self.assertIn("max_bytes", message)
+
+    def test_the_cap_is_honoured_exactly(self):
+        walls = extract_walls(blobs_grid(), 0.05)
+        with self.assertRaises(MemoryError):
+            tile_budget(walls, QH_TEST, tile_size=0.5, max_bytes=1)
+        self.assertGreater(tile_budget(walls, QH_TEST, tile_size=0.5).k_tile, 0)
+
+    def test_raising_the_cap_permits_a_deliberate_large_build(self):
+        walls = extract_walls(blobs_grid(), 0.05)
+        with self.assertRaises(MemoryError):
+            tile_budget(walls, QH_TEST, tile_size=0.02, max_bytes=100_000)
+        self.assertGreater(
+            tile_budget(walls, QH_TEST, tile_size=0.02, max_bytes=64 * 1024**2).k_tile, 0
+        )
+
+    def test_track_budget_forwards_the_cap(self):
+        track = Track.from_track_name("Monza", 1.0)
+        with self.assertRaises(MemoryError):
+            track_budget(track, F1TENTH, max_bytes=1)
+
+    def test_an_empty_track_is_never_refused(self):
+        track = Track.from_track_name("Spielberg_blank", 1.0)
+        self.assertEqual(track_budget(track, F1TENTH, max_bytes=1).k_tile, 0)
 
 
 if __name__ == "__main__":
