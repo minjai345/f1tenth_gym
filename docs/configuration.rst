@@ -205,12 +205,12 @@ actuator (:doc:`sim2real`). Enums come from ``f1tenth_gym.envs.action``.
        selects the legacy bang-bang relay, which limit-cycles by roughly
        ``sv_max * timestep``. Deliberately unvalidated — any float is legal.
 
-The delay fields are validated but not coerced to ``int``, so a fractional
-value is stored verbatim:
+The delay fields index a ring buffer, so a fractional value is coerced to
+``int`` rather than stored verbatim:
 
 >>> from f1tenth_gym.envs.env_config import ControlConfig
 >>> ControlConfig(steer_delay_steps=2.7).steer_delay_steps
-2.7
+2
 
 ``SimulationConfig``
 --------------------
