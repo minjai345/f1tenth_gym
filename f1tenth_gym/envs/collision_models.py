@@ -37,11 +37,14 @@ class CollisionCheckMode(IntEnum):
 
     NONE disables collision detection entirely (walls and agent-vs-agent);
     ``state.collisions`` stays 0 and episodes never terminate on collision.
+    SEGMENT_CONTACT resolves walls geometrically and applies impulses, so a car
+    scrapes along instead of halting; it needs no LiDAR.
     """
 
     NONE = 0
     LIDAR_SCAN = 1
     BOUNDING_BOX = 2
+    SEGMENT_CONTACT = 3
 
 
 @njit(cache=True)

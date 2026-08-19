@@ -188,6 +188,7 @@ class F110Env(gym.Env):
         self.observation_cfg = cfg.observation_config
         self.reset_cfg = cfg.reset_config
         self.lidar_cfg = cfg.lidar_config
+        self.contact_cfg = cfg.contact_config
         self.render_cfg = cfg.render_config
         self.termination_cfg = cfg.termination_config
         self.reward_cfg = cfg.reward_config

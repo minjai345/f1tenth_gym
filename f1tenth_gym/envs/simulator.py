@@ -174,6 +174,8 @@ class F110Simulator:
             self.vehicle_params, self.model
         )
         self._cog_offset = self._compute_cog_offset(self.vehicle_params, self.model)
+        self.contact = None
+        self._build_contact()
         # pose at the top of the current step, used to undo a move that ends in
         # contact (see _halt_on_collision). None => nothing to restore yet.
         self._pre_pose: np.ndarray | None = None
@@ -232,6 +234,7 @@ class F110Simulator:
         if self.scan_enabled:
             for i, simulator in enumerate(self.scan_sims):
                 self.scan_cache[i] = self._build_scan_cache(simulator, vehicle_params)
+        self._build_contact()
 
     def reset(self, poses: np.ndarray, *, option: str = "pose", noise_seed: int | None = None) -> None:
         """Reset all agents to initial positions.
@@ -384,6 +387,11 @@ class F110Simulator:
                 [state[0], state[1], state[4]], dtype=np.float32
             )
 
+        # Before the Frenet block, so the corrected pose is what the Frenet frame,
+        # the scan and the observation all see, with nothing to re-derive.
+        if self.contact is not None:
+            self._resolve_contacts()
+
         if self.config.simulation_config.compute_frenet_frame and self.track is not None:
             for agent_idx in range(self.num_agents):
                 # CoG-anchored (standard_state), matching the observed pose
@@ -404,7 +412,10 @@ class F110Simulator:
             self._update_scans()
         else:
             self.state.scans.fill(0.0)
-            self.state.collisions.fill(0.0)
+            # SEGMENT_CONTACT already wrote the flag and needs no scan; the other
+            # modes detect walls inside _update_scans, so they genuinely have none.
+            if self.contact is None:
+                self.state.collisions.fill(0.0)
 
         self._update_agent_collisions()
         self.state.sim_time += self.time_step
@@ -754,11 +765,11 @@ class F110Simulator:
         # Precompute collision vertices once (reused by the ray_cast loop and _update_agent_collisions)
         self._all_vertices = self._compute_all_vertices()
         all_vertices = self._all_vertices
-        # flag_collisions=False fills the scans without adjudicating wall contact:
-        # a spawn pose is a given, not a crash, and halting there would zero the
-        # velocity of an options={"states": ...} reset.
-        wall_collision_enabled = (
-            flag_collisions and self.collision_check_mode is not CollisionCheckMode.NONE
+        # flag_collisions=False fills scans without adjudicating: a spawn is not a
+        # crash. Enumerated so SEGMENT_CONTACT, which owns walls, is not halted here.
+        wall_collision_enabled = flag_collisions and self.collision_check_mode in (
+            CollisionCheckMode.LIDAR_SCAN,
+            CollisionCheckMode.BOUNDING_BOX,
         )
         spawn_sweep = not flag_collisions and getattr(self, "_spawned_in_contact", None) is not None
 
@@ -791,7 +802,9 @@ class F110Simulator:
                 # shortens, and it costs one extra sweep on contact steps only.
                 scan_pose = self._lidar_pose_from_base(self.state.poses[agent_idx])
                 scan_clean = simulator.scan(scan_pose, rng=None)
-            else:
+            elif wall_collision_enabled:
+                # Only clear the flag this branch owns: SEGMENT_CONTACT has already
+                # written it, and clearing here would erase it.
                 self.state.collisions[agent_idx] = 0.0
 
             # Ray cast against other agents (also noise-free)
@@ -817,6 +830,96 @@ class F110Simulator:
                 noisy_scan[dropped] = simulator.max_range
             self.state.scans[agent_idx] = noisy_scan.astype(np.float32)
 
+    def _build_contact(self) -> None:
+        """Compile the wall-contact kernels for the current track and body."""
+        if self.collision_check_mode is not CollisionCheckMode.SEGMENT_CONTACT:
+            self.contact = None
+            return
+        if self.track is None:
+            raise ValueError("SEGMENT_CONTACT needs a track to extract walls from")
+        from .contact.adapter import build
+
+        self.contact = build(
+            self.track,
+            self.vehicle_params,
+            self.config.contact_config,
+            self.time_step,
+            self.config.domain_randomization_config,
+        )
+
+    def _world_velocity(self, state):
+        """(vx, vy, omega) in world axes for the model's native state."""
+        yaw = float(state[4])
+        if self.model is DynamicModel.ST:
+            speed, beta, omega = float(state[3]), float(state[6]), float(state[5])
+            course = yaw + beta
+            return np.array([speed * math.cos(course), speed * math.sin(course)]), omega
+        speed = float(state[3])
+        wheelbase = float(self.vehicle_params.lf) + float(self.vehicle_params.lr)
+        omega = speed * math.tan(float(state[2])) / wheelbase
+        return np.array([speed * math.cos(yaw), speed * math.sin(yaw)]), omega
+
+    def _apply_contact(self, state, velocity, omega, correction):
+        """Write a corrected world velocity back into the model's native state.
+
+        ST carries slip and yaw rate, so the projection is exact. KS carries neither:
+        it can only absorb the longitudinal component at the rear axle, and any
+        lateral or angular impulse is discarded.
+        """
+        state[0] += correction[0]
+        state[1] += correction[1]
+        yaw = float(state[4])
+        if self.model is DynamicModel.ST:
+            speed = float(np.hypot(velocity[0], velocity[1]))
+            course = math.atan2(velocity[1], velocity[0])
+            beta = (course - yaw + math.pi) % (2 * math.pi) - math.pi
+            # The tyre model is linear in beta, so the wrong branch of this
+            # two-fold ambiguity produces enormous restoring moments.
+            if abs(beta) > math.pi / 2:
+                speed = -speed
+                beta = (beta - math.copysign(math.pi, beta) + math.pi) % (2 * math.pi) - math.pi
+            state[3] = speed
+            state[5] = omega
+            state[6] = beta
+            return state
+        # Transporting to the rear axle adds omega x (-lr * heading), which is
+        # purely lateral, so the longitudinal projection is the same at either point.
+        state[3] = velocity[0] * math.cos(yaw) + velocity[1] * math.sin(yaw)
+        return state
+
+    def _resolve_contacts(self) -> None:
+        """Resolve wall contact for every agent and refresh the SoA mirrors."""
+        lr = float(self.vehicle_params.lr)
+        rear_axle = self.model.pose_reference is not PoseReference.COG
+        for agent_idx in range(self.num_agents):
+            state = self.state.state[agent_idx].astype(np.float64)
+            pose = self.state.poses[agent_idx]
+            verts = get_vertices(
+                np.asarray(self._collision_pose_from_base(pose), dtype=np.float64),
+                self.vehicle_params.length,
+                self.vehicle_params.width,
+            )
+            yaw = float(state[4])
+            centre = np.array([float(state[0]), float(state[1])])
+            if rear_axle:
+                centre = centre + lr * np.array([math.cos(yaw), math.sin(yaw)])
+
+            velocity, omega = self._world_velocity(state)
+            velocity, omega, correction, hit = self.contact(
+                verts, centre, velocity, omega,
+                float(self.vehicle_params.m), float(self.vehicle_params.I),
+            )
+            self.state.collisions[agent_idx] = 1.0 if hit else 0.0
+            if not hit:
+                continue
+            state = self._apply_contact(state, velocity, omega, correction)
+            state[4] = (state[4] + np.pi) % (2 * np.pi) - np.pi
+            self.state.state[agent_idx] = state.astype(np.float32)
+            self.state.standard_state[agent_idx] = self._standardize(state)
+            self.state.poses[agent_idx] = np.array(
+                [state[0], state[1], state[4]], dtype=np.float32
+            )
+
     def _update_agent_collisions(self) -> None:
         """Detect agent-vs-agent collisions using the configured mode."""
         mode = self.collision_check_mode
@@ -838,10 +941,9 @@ class F110Simulator:
                     self.collision_margin,
                 ):
                     self._halt_on_collision(agent_idx)
-        else:
-            # Agent-vs-agent via GJK bounding boxes. Vertices come from poses,
-            # so this works even with the LiDAR disabled (_update_scans is then
-            # skipped and never sets _all_vertices).
+        elif mode in (CollisionCheckMode.BOUNDING_BOX, CollisionCheckMode.SEGMENT_CONTACT):
+            # Agent-vs-agent via GJK on pose-derived vertices, so it works with the
+            # LiDAR off. SEGMENT_CONTACT borrows it; walls it handles itself.
             vertices = self._all_vertices if self.scan_enabled else self._compute_all_vertices()
             for agent_idx in range(self.num_agents):
                 self.agent_vertices[agent_idx] = vertices[agent_idx]
@@ -849,3 +951,5 @@ class F110Simulator:
             # in place: rebinding self.state.collisions would leave any handle
             # captured from sim.state.collisions stale (LIDAR_SCAN writes in place).
             self.state.collisions[:] = np.maximum(self.state.collisions, collisions.astype(np.float32))
+        else:
+            raise ValueError(f"unhandled collision check mode: {mode!r}")

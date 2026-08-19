@@ -19,6 +19,7 @@ from .dynamic_models import (
 from .action import LongitudinalActionType, SteerActionType
 from .observation import ObservationType
 from .reset import ReferenceLine, ResetStrategy
+from .contact import ContactConfig
 from .lidar import LiDARConfig
 from .collision_models import CollisionCheckMode
 
@@ -542,6 +543,7 @@ class EnvConfig:
     observation_config: ObservationConfig = field(default_factory=ObservationConfig)
     reset_config: ResetConfig = field(default_factory=ResetConfig)
     lidar_config: LiDARConfig = field(default_factory=LiDARConfig)
+    contact_config: ContactConfig = field(default_factory=ContactConfig)
     render_config: RenderConfig = field(default_factory=RenderConfig)
     termination_config: TerminationConfig = field(default_factory=TerminationConfig)
     reward_config: RewardConfig = field(default_factory=RewardConfig)
@@ -592,6 +594,26 @@ class EnvConfig:
         if not isinstance(lidar_cfg, LiDARConfig):
             raise TypeError("lidar must be a LiDARConfig instance")
 
+        contact_cfg = self.contact_config
+        if not isinstance(contact_cfg, ContactConfig):
+            raise TypeError("contact must be a ContactConfig instance")
+
+        # Coerce: dispatch is `is`-based, so a raw int silently picks the wrong
+        # branch -- 0 would not disable collisions, 1 would not select LIDAR_SCAN.
+        try:
+            collision_check = CollisionCheckMode(self.collision_check)
+        except ValueError as exc:
+            raise ValueError(f"collision_check must be a CollisionCheckMode: {exc}") from exc
+        object.__setattr__(self, "collision_check", collision_check)
+        if (
+            collision_check is CollisionCheckMode.SEGMENT_CONTACT
+            and simulation_cfg.dynamics_model is DynamicModel.MB
+        ):
+            raise ValueError(
+                "CollisionCheckMode.SEGMENT_CONTACT does not support DynamicModel.MB "
+                "in this version of the gym. Use ST, or KS for a cheaper approximation."
+            )
+
         render_cfg = self.render_config
         if not isinstance(render_cfg, RenderConfig):
             raise TypeError("render must be a RenderConfig instance")
@@ -638,6 +660,7 @@ class EnvConfig:
         object.__setattr__(self, "observation_config", observation_cfg)
         object.__setattr__(self, "reset_config", reset_cfg)
         object.__setattr__(self, "lidar_config", lidar_cfg)
+        object.__setattr__(self, "contact_config", contact_cfg)
         object.__setattr__(self, "render_config", render_cfg)
         object.__setattr__(self, "termination_config", termination_cfg)
         object.__setattr__(self, "reward_config", reward_cfg)

@@ -4,10 +4,12 @@
 migration unchanged.
 """
 
+from .config import ContactConfig
 from .kernels import Manifold, segment_contact, speculative_gap
 from .solver import ContactParams, contact_velocity, resolve, speculative_clamp
 
 __all__ = [
+    "ContactConfig",
     "ContactParams",
     "Manifold",
     "contact_velocity",

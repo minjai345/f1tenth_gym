@@ -202,6 +202,47 @@ exactly `slop` penetration with zero yaw drift and flat kinetic energy.
 
 ---
 
+## Phase 6 — gym integration
+
+```bash
+env -u PYTHONPATH DISPLAY= uv run pytest tests/test_segment_contact_mode.py -q
+```
+
+`CollisionCheckMode.SEGMENT_CONTACT = 3`, `ContactConfig`, and a `resolve_contacts`
+hook after the integration loop and before the Frenet block, so the corrected pose is
+what the Frenet frame, the scan and the observation all see with nothing re-derived.
+
+**The result the project exists for.** Coasting into a wall in `ACCL` mode, friction 0,
+measuring the first contact step:
+
+| approach | halt keeps | segment contact keeps | tangential fraction |
+|---|---|---|---|
+| 30° | 0.0% | **50.0%** | 50.0% |
+| 60° | 0.0% | **93.3%** | 86.6% |
+| 75° | 0.0% | **98.9%** | 96.6% |
+
+**The LiDAR-off trap is fixed for the new mode.** Driven into a wall with
+`lidar_config.enabled=False`: the halt flags 0/120 steps, segment contact 106/120.
+
+**Cost.** 3.98 ms/step against the halt's 0.231 ms, of which ~2.2 ms is the adapter
+call including the numpy-JAX boundary — the plan's unmeasured open question §8.5.
+That is 40% of a 10 ms budget for one agent; multi-agent vmap is unmeasured.
+
+**Four wiring bugs, all silent.** Three were flag ownership: the scan path's `else`
+cleared the flag the solver had just set; the LiDAR-off branch did the same
+unconditionally; and both were invisible because contact still *resolved* correctly
+(speed fell 4.0 to 0.002) while `info["collisions"]` read 0. The fourth was mine and
+worse: replacing an 8-space-indented line matched it as a *substring* of a
+12-space-indented one inside `reset()`, silently de-indenting the Frenet block out of
+its per-agent loop. `tests/test_frenet_multiagent.py` caught it.
+
+**Config guards.** `collision_check` is now coerced through `CollisionCheckMode(...)`,
+closing the raw-int footgun where `0` did not disable collisions and `1` did not
+select `LIDAR_SCAN`. `SEGMENT_CONTACT` + `DynamicModel.MB` raises at config build, one
+guard, before any map download or JIT.
+
+---
+
 ## Broad-phase back end (plan §8.1)
 
 Measured with `bench_broadphase.py` on the 3080, µs per query, all four methods
