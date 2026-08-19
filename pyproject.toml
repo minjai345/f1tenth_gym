@@ -35,6 +35,7 @@ dependencies = [
     "pyqtgraph>=0.13.7,<0.14",
     "pyqt6>=6.7.1,<7",
     "jax>=0.11.1",              # CPU-capable everywhere; GPU via the `cuda` extra
+    "scikit-image>=0.25",       # marching squares + Douglas-Peucker for wall extraction
 ]
 
 [project.urls]
@@ -43,16 +44,11 @@ Repository = "https://github.com/f1tenth/f1tenth_gym"
 Documentation = "https://f1tenth-gym.readthedocs.io/en/latest/"
 
 [project.optional-dependencies]
-# Extras used only by scripts in examples/ -- the library itself needs none of
-# these. They stay extras rather than dev dependencies so downstream consumers
-# can opt in with `f1tenth_gym[video]` from any installer.
+# Used only by scripts in examples/; the library needs none of them.
 video = ["moviepy>=1.0.0"]                          # gymnasium RecordVideo backend
 trackgen = ["shapely>=2.0", "matplotlib>=3.8.2,<4"] # examples/random_trackgen.py
-# GPU acceleration for the JAX kernels. Plain `jax` above is a hard dependency and
-# runs CPU-only everywhere; this swaps in the CUDA 13 plugin. jax-cuda13-plugin and
-# -pjrt publish manylinux wheels ONLY and no sdist, so without the marker every
-# macOS/Windows install fails outright. The `cuda13` extra did not exist before
-# jax 0.7.0 -- an older floor makes uv warn and silently install CPU jax.
+# jax-cuda13-plugin/-pjrt ship manylinux wheels only, no sdist: without the marker
+# every macOS/Windows install fails. The cuda13 extra does not exist before jax 0.7.
 cuda = ["jax[cuda13]>=0.11.1; sys_platform == 'linux'"]
 
 [tool.pytest.ini_options]
@@ -72,15 +68,11 @@ dev = [
     "matplotlib>=3.8.2,<4",
     "flake8>=7.0.0,<8",
 ]
-# `uv sync` is an exact sync: it prunes anything it cannot derive from
-# pyproject/uv.lock. Declaring the example dependencies here is what stops it
-# uninstalling moviepy and shapely on every sync.
+# `uv sync` is exact: it prunes anything not derivable from pyproject/uv.lock.
+# Declaring these here is what stops it uninstalling moviepy and shapely.
 examples = ["f1tenth_gym[video,trackgen]"]
-# Activating the `cuda` extra from a *default* group is what makes a bare
-# `uv sync` install GPU jax on a dev box with no flag to remember. Groups are not
-# published in the wheel, so a downstream `uv add f1tenth_gym` still gets CPU jax
-# and opts in explicitly with `uv add "f1tenth_gym[cuda]"`. CI and Read the Docs
-# opt out with `--no-group gpu` (or UV_NO_GROUP=gpu).
+# Groups are not published in the wheel, so downstream installs get CPU jax and
+# opt in with `f1tenth_gym[cuda]`. Skip locally with `uv sync --no-group gpu`.
 gpu = ["f1tenth_gym[cuda]"]
 docs = ["sphinx>=7,<10", "sphinx-rtd-theme>=2"]
 
