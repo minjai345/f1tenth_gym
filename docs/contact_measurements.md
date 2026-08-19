@@ -130,6 +130,42 @@ size and the cap. Default ceiling 512 MB, raisable via `max_bytes`. Scale 10 at
 
 ---
 
+## Phase 4 — narrow phase
+
+```bash
+env -u PYTHONPATH DISPLAY= uv run pytest tests/test_contact_kernels.py -q
+```
+
+`segment_contact` in `envs/contact/kernels.py`: pure JAX, fixed shape, `vmap`-ready.
+Each §3 invariant measured against a Cyrus-Beck oracle that clips the segment against
+the body's four half-planes.
+
+| invariant | measured |
+|---|---|
+| §3.2 far face of a 2-px strip | near face 2 points, far face **0** (without the straddle test it reports 0.271 m) |
+| §3.3 body face axes required | full kernel **0** false positives; dropping the two axes gives **10.6%** |
+| §3.4 strict separation | flat face contacts at 1e-2, 1e-4 and 1e-6 m penetration |
+| §3.5 manifold | flat → **2** points, corner-on → **1**; every point within the circumradius |
+
+**Precondition.** `normal` must be perpendicular to `seg_b - seg_a`. `WallSegments`
+guarantees it; a hand-written normal that is not perpendicular makes `seg_a @ normal`
+cease to be a plane, and the gates then admit contacts up to 0.66 m deep. Cost me an
+afternoon — it looked exactly like a kernel defect.
+
+**The reference-face clip declines some real overlaps on an isolated segment** — its
+crossing can fall outside the incident face. On a continuous wall the neighbours cover
+it: **0 misses over 1,950 poses** whose body genuinely overlaps a Monza wall cell, at
+4.3 contact points per pose. Isolated-stub false negatives are therefore not a defect
+of the chain, but a solver fed hand-made single segments should know.
+
+**`blended_normal` is not implemented, deliberately.** The plan's §5.4 blending exists
+to smooth a staircase. Sub-pixel extraction removed the staircase at source (median
+turn 3.73° against 45°), and adjacency blending at λ = body half-width was measured to
+move the contact-normal error by **less than 0.5°**. Revisit only if a solver shows
+step-to-step normal jitter.
+
+---
+
 ## Broad-phase back end (plan §8.1)
 
 Measured with `bench_broadphase.py` on the 3080, µs per query, all four methods
