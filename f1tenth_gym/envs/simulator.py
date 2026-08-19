@@ -861,6 +861,7 @@ class F110Simulator:
                     slop=cfg.slop,
                 ),
                 cfg.solver_iterations,
+                cfg.device,
             )
 
     def _world_velocity(self, state):

@@ -23,6 +23,10 @@ class ContactConfig:
         tile_size: Broad-phase tile side in metres. Cost scales as 1/tile_size^2.
         margin: Safety factor on the exact per-tile candidate count.
         wall_tolerance_px: Douglas-Peucker tolerance for wall extraction.
+        device: ``"cpu"`` or ``"default"`` (whatever JAX picks). One call per agent
+            per step is launch-bound, not compute-bound: on an RTX 3080 the wall
+            kernel costs 1.53 ms of launch for 0.08 ms of work, so CPU wins by 18x.
+            Revisit once the step itself is jitted and batched over environments.
     """
 
     restitution: float = 0.0
@@ -34,6 +38,7 @@ class ContactConfig:
     tile_size: float = 0.5
     margin: float = 1.25
     wall_tolerance_px: float = 0.25
+    device: str = "cpu"
 
     def __post_init__(self):
         for name in ("restitution", "baumgarte"):
@@ -58,6 +63,8 @@ class ContactConfig:
         if iterations < 1:
             raise ValueError(f"solver_iterations must be >= 1, got {iterations}")
         object.__setattr__(self, "solver_iterations", iterations)
+        if self.device not in ("cpu", "default"):
+            raise ValueError(f"device must be 'cpu' or 'default', got {self.device!r}")
 
     def with_updates(self, **changes) -> "ContactConfig":
         """A copy with fields replaced, re-validated."""

@@ -3,14 +3,43 @@
 The only file here that knows the gym is currently numpy. Marshalling and dtype
 handling only: anything resembling physics belongs in ``kernels`` or ``solver``, or
 the migration seam stops being a deletion.
+
+Two costs here dwarf the arithmetic while the caller is still numpy, because each
+step is one launch of a ~40-point solve rather than a batch of many. On an RTX 3080
+the wall kernel takes 1.53 ms of launch latency for 0.08 ms of work, and building
+its arguments with ``jnp.asarray`` costs 0.216 ms against 0.002 ms for ``np``. So
+the kernels are pinned to a device (CPU by default) and fed numpy directly.
 """
 
 import jax
 import jax.numpy as jnp
 import numpy as np
+from jax.sharding import SingleDeviceSharding
 
 from .kernels import body_contact, segment_contact, speculative_gap
 from .solver import ContactParams, resolve, resolve_pair, speculative_clamp
+
+
+def resolve_device(name: str):
+    """The device the contact kernels run on, or None for whatever JAX defaults to.
+
+    Args:
+        name: ``"cpu"`` or ``"default"``.
+
+    Returns:
+        A ``Device``, or None.
+    """
+    return jax.devices("cpu")[0] if name == "cpu" else None
+
+
+def _pin(device):
+    """jit kwargs placing the computation on ``device``; empty for the default."""
+    return {} if device is None else {"out_shardings": SingleDeviceSharding(device)}
+
+
+def _put(array, device):
+    """A closure constant on ``device``, or wherever JAX would put it."""
+    return jnp.asarray(array) if device is None else jax.device_put(array, device)
 
 
 class WallContact:
@@ -20,7 +49,8 @@ class WallContact:
     particular body, and the solver constants are baked into the traced closure.
     """
 
-    def __init__(self, walls, index, params: ContactParams, iterations: int, dt: float):
+    def __init__(self, walls, index, params: ContactParams, iterations: int, dt: float,
+                 device: str = "cpu"):
         """
         Args:
             walls: A ``WallSegments`` for the track.
@@ -28,6 +58,7 @@ class WallContact:
             params: Solver tuning.
             iterations: Jacobi sweeps per call.
             dt: Simulation timestep, for the speculative clamp.
+            device: ``"cpu"`` or ``"default"``; see the module docstring.
         """
         self.walls = walls
         self.index = index
@@ -35,16 +66,17 @@ class WallContact:
         self.iterations = int(iterations)
         self.dt = float(dt)
         self.is_empty = walls.is_empty
+        dev = resolve_device(device)
 
         if self.is_empty:
             self._resolve = None
             return
 
-        seg_a = jnp.asarray(walls.a)
-        seg_b = jnp.asarray(walls.b)
-        seg_n = jnp.asarray(walls.n)
-        table = jnp.asarray(index.table)
-        origin = jnp.asarray(index.origin, dtype=jnp.float32)
+        seg_a = _put(walls.a, dev)
+        seg_b = _put(walls.b, dev)
+        seg_n = _put(walls.n, dev)
+        table = _put(index.table, dev)
+        origin = _put(np.asarray(index.origin, dtype=np.float32), dev)
         tile = float(index.tile_size)
         rows, cols = int(table.shape[0]), int(table.shape[1])
 
@@ -72,7 +104,7 @@ class WallContact:
             )
             return velocity, omega, correction, jnp.any(depths > 0.0)
 
-        self._resolve = jax.jit(run)
+        self._resolve = jax.jit(run, **_pin(dev))
 
     def __call__(self, vertices, centre, velocity, omega, mass, inertia):
         """Resolve one body against the walls.
@@ -91,12 +123,12 @@ class WallContact:
         if self._resolve is None:
             return np.asarray(velocity, np.float64), float(omega), np.zeros(2), False
         v, w, correction, hit = self._resolve(
-            jnp.asarray(vertices, jnp.float32),
-            jnp.asarray(centre, jnp.float32),
-            jnp.asarray(velocity, jnp.float32),
-            jnp.float32(omega),
-            jnp.float32(mass),
-            jnp.float32(inertia),
+            np.asarray(vertices, np.float32),
+            np.asarray(centre, np.float32),
+            np.asarray(velocity, np.float32),
+            np.float32(omega),
+            np.float32(mass),
+            np.float32(inertia),
         )
         return (
             np.asarray(v, dtype=np.float64),
@@ -136,18 +168,22 @@ def build(track, vehicle_params, contact_config, dt, dr_config=None) -> WallCont
         baumgarte=contact_config.baumgarte,
         slop=contact_config.slop,
     )
-    return WallContact(walls, index, params, contact_config.solver_iterations, dt)
+    return WallContact(
+        walls, index, params, contact_config.solver_iterations, dt, contact_config.device
+    )
 
 
 class BodyPairContact:
     """Resolves one pair of vehicle bodies, holding the jitted kernel."""
 
-    def __init__(self, params: ContactParams, iterations: int):
+    def __init__(self, params: ContactParams, iterations: int, device: str = "cpu"):
         """
         Args:
             params: Solver tuning.
             iterations: Jacobi sweeps per call.
+            device: ``"cpu"`` or ``"default"``; see the module docstring.
         """
+        dev = resolve_device(device)
 
         def run(verts_a, verts_b, centre_a, centre_b, v_a, w_a, v_b, w_b, mass, inertia):
             manifold = body_contact(verts_a, verts_b)
@@ -158,7 +194,7 @@ class BodyPairContact:
             )
             return v_a, w_a, v_b, w_b, separation, jnp.any(manifold.depths > 0.0)
 
-        self._run = jax.jit(run)
+        self._run = jax.jit(run, **_pin(dev))
 
     def __call__(self, verts_a, verts_b, centre_a, centre_b, v_a, w_a, v_b, w_b,
                  mass, inertia):
@@ -169,11 +205,11 @@ class BodyPairContact:
             is applied to b and its negation to a.
         """
         out = self._run(
-            jnp.asarray(verts_a, jnp.float32), jnp.asarray(verts_b, jnp.float32),
-            jnp.asarray(centre_a, jnp.float32), jnp.asarray(centre_b, jnp.float32),
-            jnp.asarray(v_a, jnp.float32), jnp.float32(w_a),
-            jnp.asarray(v_b, jnp.float32), jnp.float32(w_b),
-            jnp.float32(mass), jnp.float32(inertia),
+            np.asarray(verts_a, np.float32), np.asarray(verts_b, np.float32),
+            np.asarray(centre_a, np.float32), np.asarray(centre_b, np.float32),
+            np.asarray(v_a, np.float32), np.float32(w_a),
+            np.asarray(v_b, np.float32), np.float32(w_b),
+            np.float32(mass), np.float32(inertia),
         )
         v_a, w_a, v_b, w_b, separation, hit = out
         return (

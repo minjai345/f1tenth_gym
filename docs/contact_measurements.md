@@ -312,3 +312,58 @@ Best retained speed across all 21 impacts: `0.000000 m/s`.
 under the halt sits in a bit-identical step-rate limit cycle: 1200/1200 steps
 flagged, one distinct velocity, 21.34 N discarded per step. Resting-contact energy
 tests must command zero speed or use `ACCL`, or the controller reads as a leak.
+
+## Step cost (RTX 3080 Laptop, Spielberg, 833 segments, k=19, 64 sweeps)
+
+The contact call is one launch of a ~40-point solve per agent per step, so latency
+dominates and the arithmetic does not register.
+
+| | before | after |
+|---|---|---|
+| `SEGMENT_CONTACT` step, N=1 | 2.346 ms | **0.502 ms** |
+| `_resolve_contacts` | 1.862 ms | **0.147 ms** |
+| `LIDAR_SCAN` step, N=1 (reference) | 0.258 ms | 0.245 ms |
+
+Two causes, measured separately:
+
+| | GPU | CPU |
+|---|---|---|
+| wall kernel, synced | 1.531 ms | **0.084 ms** |
+| adapter path incl. marshalling | 1.812 ms | **0.372 ms** |
+
+| argument marshalling | cost |
+|---|---|
+| `jnp.asarray` x6 then call | 0.216 + 0.081 ms |
+| `np.asarray` x6 then call | **0.002 + 0.099 ms** |
+| output conversion (2 arrays, float, bool) | 0.008 ms — already cheap |
+
+Sweeps are not the lever: on CPU 1/8/64/128 sweeps cost 0.099/0.118/0.143/0.169 ms,
+so the default 64 costs 0.044 ms over a single sweep. On GPU the same sweep counts
+cost 0.881/0.441/1.160/1.909 ms — launch latency, not work.
+
+`jax.jit(..., out_shardings=SingleDeviceSharding(cpu))` is what pins execution;
+`device_put` on the closure constants alone does not (output still lands on CUDA).
+
+Physics is unchanged: over a 900-step wall-scrape both devices flag 807 contact
+steps, max state divergence 6.3e-6 (float32 reassociation).
+
+### Scaling
+
+| N | `LIDAR_SCAN` | `SEGMENT_CONTACT` | contact |
+|---|---|---|---|
+| 1 | 0.254 ms | 0.497 ms | +0.242 |
+| 2 | 1.410 ms | 1.875 ms | +0.465 |
+| 4 | 6.377 ms | 7.315 ms | +0.938 |
+
+Contact is linear in N at ~0.24 ms/agent (one dispatch each). At N=4 the LiDAR
+`ray_cast` quadratic is 87% of the step, so batching agents into one `vmap` call
+would recover ~10% and is not the next lever.
+
+### Why a broad-phase skip was not added
+
+Skipping the solve when no wall is near sounds free, but F1TENTH tracks are tight:
+the racing-line clearance to the nearest wall is a median 0.401 m (Spielberg),
+0.298 m (Monza), 0.275 m (Austin) against a body half-diagonal of 0.329 m. A
+circle test would skip only 62/46/41% of steps, cost 21 us of numpy each time, and
+save at most 0.147 ms. Segment AABBs are looser still — a tile-occupancy test skips
+just 0.6% of steps, because one long diagonal wall has a huge axis-aligned box.

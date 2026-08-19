@@ -193,5 +193,45 @@ class TestConfigGuards(unittest.TestCase):
             EnvConfig(contact_config={"restitution": 0.5})
 
 
+class TestDevicePlacement(unittest.TestCase):
+    """The kernels are launch-bound, so where they run is a tuning knob."""
+
+    def test_only_the_two_known_devices_are_accepted(self):
+        for name in ("cpu", "default"):
+            self.assertEqual(ContactConfig(device=name).device, name)
+        for bad in ("gpu", "cuda", "", None):
+            with self.assertRaises(ValueError):
+                ContactConfig(device=bad)
+
+    def test_the_default_is_cpu(self):
+        self.assertEqual(ContactConfig().device, "cpu")
+
+    def test_cpu_placement_is_honoured(self):
+        from f1tenth_gym.envs.contact.adapter import resolve_device
+
+        self.assertEqual(resolve_device("cpu").platform, "cpu")
+        self.assertIsNone(resolve_device("default"))
+
+    def test_the_device_does_not_change_the_physics(self):
+        states = []
+        for device in ("cpu", "default"):
+            env = gym.make(
+                "f1tenth_gym:f1tenth-v0",
+                config=EnvConfig(
+                    simulation_config=SimulationConfig(max_laps=None),
+                    termination_config=TerminationConfig(terminate_on_collision=False),
+                    contact_config=ContactConfig(device=device),
+                    collision_check=CollisionCheckMode.SEGMENT_CONTACT,
+                    render_enabled=False,
+                ),
+            )
+            env.reset(seed=7)
+            for _ in range(150):
+                env.step(np.array([[0.28, 5.0]], dtype=np.float32))
+            states.append(env.unwrapped.sim.state.state[0].copy())
+            env.close()
+        np.testing.assert_allclose(states[0], states[1], atol=1e-4)
+
+
 if __name__ == "__main__":
     unittest.main()
