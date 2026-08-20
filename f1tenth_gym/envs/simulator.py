@@ -1027,7 +1027,7 @@ class F110Simulator:
             return  # resolved with the walls, before the Frenet block
         elif mode is CollisionCheckMode.BOUNDING_BOX:
             # Agent-vs-agent via GJK on pose-derived vertices, so it works with the
-            # LiDAR off. SEGMENT_CONTACT borrows it; walls it handles itself.
+            # LiDAR off. Detection only -- SEGMENT_CONTACT resolves its own pairs above.
             vertices = self._all_vertices if self.scan_enabled else self._compute_all_vertices()
             for agent_idx in range(self.num_agents):
                 self.agent_vertices[agent_idx] = vertices[agent_idx]
