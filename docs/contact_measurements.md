@@ -440,3 +440,57 @@ False`. Sync sub-envs step in a Python loop; async sub-envs are separate process
 
 That last point is also why a GPU default would be hazardous: `AsyncVectorEnv` forks K
 worker processes, and JAX preallocates a large fraction of VRAM *per process*.
+
+## Phase 8 — gradient surrogate
+
+`deepest_depth` is the differentiable companion to `segment_contact`: the penetration
+of the single deepest body vertex, with an optional softmin over vertices.
+
+Measured over 417 poses on Spielberg (one per sampled wall segment, 5 mm penetration,
+yaw jittered +/-0.6 rad), against central differences at h = 1e-4. Median relative
+error, and the count of poses where finite differences return no signal on any axis:
+
+| loss | d/dx | d/dy | d/dpsi | FD dead |
+|---|---|---|---|---|
+| manifold sum, float32 | 9.7% | 8.4% | 6.8% | 12 / 417 |
+| deepest point, float32 | 1.4% | 1.0% | 1.8% | **0 / 417** |
+| manifold sum, float64 | 0.0% | 0.0% | 0.0% | 0 / 417 |
+| deepest point, float64 | 0.0% | 0.0% | 0.0% | 0 / 417 |
+
+Softened (3 mm) and swept by penetration depth, float64, median relative d/dpsi error
+is **0.03% at every depth from 2 mm to 200 mm** — the solver's slop is 2 mm, so the
+whole realistic range is covered.
+
+### Two plan claims that do not reproduce
+
+Plan §3.9 says summed manifold depth is discontinuous in yaw, with central differences
+spiking to `|d/dpsi| = 10503` against 2.3 for the deepest point. **On this tree both
+sit at 1.0-1.5**, and in float64 both match autodiff to 0.0% on every component. The
+surrogate is still worth having, but for the float32 reasons in the table above, not
+for a discontinuity that is not there.
+
+`PLAN_REVISION.md` §Phase 8 says the float32 deepest-point signal is "exactly 0.0 at
+every pose" at ~100 m world coordinates. **Not reproduced**: 0 of 417 poses are dead
+in either frame. Body-frame recentring is a real but modest precision gain, not a
+correctness fix — same maths in world axes, same probes:
+
+| projection frame | d/dx | d/dpsi | max depth difference |
+|---|---|---|---|
+| body-centred (shipped) | **0.86%** | **1.72%** | — |
+| world axes | 3.25% | 2.43% | 1.55e-5 m |
+
+Script: `scratchpad/frame_ab.py`.
+
+### The residual discontinuities are real, and small
+
+Two remain, both inherent to summing one-sided per-segment depths:
+
+**Flush contact ties two vertices.** With the body exactly parallel to a wall the hard
+minimum breaks the tie arbitrarily and reports a median `|d/dpsi|` of **0.29** where the
+true two-sided derivative is near zero. 0.5 mm of softening cuts that to **0.0004**, and
+3 mm to 0.0001. Use a nonzero `softness` for anything that learns from yaw.
+
+**A segment's tangential gate can flip while it is still deep.** At 1 pose in 417 a body
+straddling a seven-segment corner rotates 1e-4 rad and one segment's contribution drops
+0.3146 -> 0.0000, giving `|FD d/dpsi| = 1572`. Verified not to be the broad phase: the
+candidate set is identical either side. Rare and geometry-driven, not depth-driven.
