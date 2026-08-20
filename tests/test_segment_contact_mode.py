@@ -1,5 +1,6 @@
 import math
 import unittest
+import warnings
 
 import gymnasium as gym
 import numpy as np
@@ -182,6 +183,30 @@ class TestConfigGuards(unittest.TestCase):
                 simulation_config=SimulationConfig(dynamics_model=DynamicModel.MB),
             )
         self.assertIn("MB", str(caught.exception))
+
+    def test_kinematic_contact_warns_about_diagonals(self):
+        """KS halts on an angled hit instead of sliding; say so, do not refuse."""
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            EnvConfig(
+                simulation_config=SimulationConfig(dynamics_model=DynamicModel.KS),
+                collision_check=CollisionCheckMode.SEGMENT_CONTACT,
+            )
+        messages = [str(w.message) for w in caught]
+        self.assertTrue(any("diagonal" in m for m in messages), messages)
+
+    def test_the_warning_is_specific_to_kinematic_segment_contact(self):
+        for config in (
+            dict(
+                simulation_config=SimulationConfig(dynamics_model=DynamicModel.ST),
+                collision_check=CollisionCheckMode.SEGMENT_CONTACT,
+            ),
+            dict(simulation_config=SimulationConfig(dynamics_model=DynamicModel.KS)),
+        ):
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                EnvConfig(**config)
+            self.assertEqual([str(w.message) for w in caught], [])
 
     def test_a_raw_int_is_coerced_not_silently_mishandled(self):
         # `is`-based dispatch means a bare int would pick the wrong branch entirely.

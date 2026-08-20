@@ -6,6 +6,7 @@ from enum import IntEnum
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
 import math
+import warnings
 
 import numpy as np
 
@@ -612,6 +613,19 @@ class EnvConfig:
             raise ValueError(
                 "CollisionCheckMode.SEGMENT_CONTACT does not support DynamicModel.MB "
                 "in this version of the gym. Use ST, or KS for a cheaper approximation."
+            )
+        if (
+            collision_check is CollisionCheckMode.SEGMENT_CONTACT
+            and simulation_cfg.dynamics_model is DynamicModel.KS
+        ):
+            warnings.warn(
+                "CollisionCheckMode.SEGMENT_CONTACT is not accurate on diagonal "
+                "contact under DynamicModel.KS: KS carries no slip angle or yaw "
+                "rate, so an angled hit halts the vehicle instead of sliding it "
+                "along the wall. Head-on contact is faithful. Use ST for angled "
+                "contact.",
+                UserWarning,
+                stacklevel=2,
             )
 
         render_cfg = self.render_config
