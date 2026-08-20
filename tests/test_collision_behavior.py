@@ -12,7 +12,13 @@ import unittest
 import gymnasium as gym
 import numpy as np
 
+from f1tenth_gym.envs.collision_models import CollisionCheckMode
 from f1tenth_gym.envs.env_config import EnvConfig, SimulationConfig
+
+# `_halt_on_collision` is what LIDAR_SCAN and BOUNDING_BOX do on contact. The
+# default is now SEGMENT_CONTACT, which resolves the contact instead, so every
+# test of the halt has to name the mode it is testing.
+HALT_MODE = CollisionCheckMode.LIDAR_SCAN
 
 
 def _env(map_name="Spielberg"):
@@ -21,6 +27,7 @@ def _env(map_name="Spielberg"):
         config=EnvConfig(
             map_name=map_name,
             simulation_config=SimulationConfig(max_laps=None),
+            collision_check=HALT_MODE,
             render_enabled=False,
         ),
     )
@@ -79,6 +86,7 @@ class TestCollisionModes(unittest.TestCase):
     def test_none_mode_disables_collisions(self):
         """CollisionCheckMode.NONE: driving into a wall never flags a collision (#124)."""
         from f1tenth_gym.envs.collision_models import CollisionCheckMode
+
         env = gym.make(
             "f1tenth_gym:f1tenth-v0",
             config=EnvConfig(
@@ -149,6 +157,7 @@ class TestHaltIsModelAware(unittest.TestCase):
                 dynamics_model=DynamicModel.MB, max_laps=None
             ),
             reset_config=ResetConfig(strategy=ResetStrategy.RL_RANDOM_STATIC),
+            collision_check=HALT_MODE,
             render_enabled=False,
         )
         env = gym.make("f1tenth_gym:f1tenth-v0", config=cfg)
@@ -174,7 +183,8 @@ class TestHaltIsModelAware(unittest.TestCase):
         untouched, and yaw is still never snapped to 0/east (the original bug
         this test was written for).
         """
-        env = gym.make("f1tenth_gym:f1tenth-v0", config=EnvConfig(render_enabled=False))
+        env = gym.make("f1tenth_gym:f1tenth-v0", config=EnvConfig(
+            collision_check=HALT_MODE, render_enabled=False))
         env.reset(seed=1)
         for _ in range(10):
             env.step(np.array([[0.2, 3.0]], dtype=np.float32))
@@ -234,6 +244,7 @@ class TestHaltRejectsTheMove(unittest.TestCase):
             config=EnvConfig(
                 simulation_config=SimulationConfig(max_laps=None),
                 termination_config=TerminationConfig(terminate_on_collision=terminate),
+                collision_check=HALT_MODE,
                 render_enabled=False,
             ),
         )
@@ -280,6 +291,7 @@ class TestHaltRejectsTheMove(unittest.TestCase):
             config=EnvConfig(
                 simulation_config=SimulationConfig(max_laps=None),
                 termination_config=TerminationConfig(terminate_on_collision=False),
+                collision_check=HALT_MODE,
                 render_enabled=False,
             ),
         )
@@ -319,6 +331,7 @@ class TestHaltRefreshesDerivedState(unittest.TestCase):
                 simulation_config=SimulationConfig(max_laps=None),
                 termination_config=TerminationConfig(terminate_on_collision=False),
                 lidar_config=LiDARConfig(noise_std=noise_std),
+                collision_check=HALT_MODE,
                 render_enabled=False,
             ),
         )

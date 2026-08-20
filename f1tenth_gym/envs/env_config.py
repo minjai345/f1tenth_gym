@@ -529,7 +529,9 @@ class EnvConfig:
         termination_config: Episode termination / truncation configuration.
         reward_config: Per-step reward configuration.
         domain_randomization_config: Per-episode vehicle-param randomization.
-        collision_check: Collision detection mode.
+        collision_check: Collision detection mode. Defaults to
+            ``SEGMENT_CONTACT``, which resolves contact rather than only
+            reporting it; ``LIDAR_SCAN`` is the detection-only predecessor.
         render_enabled: Whether rendering is enabled.
     """
 
@@ -551,7 +553,7 @@ class EnvConfig:
     domain_randomization_config: DomainRandomizationConfig = field(
         default_factory=DomainRandomizationConfig
     )
-    collision_check: CollisionCheckMode = CollisionCheckMode.LIDAR_SCAN
+    collision_check: CollisionCheckMode = CollisionCheckMode.SEGMENT_CONTACT
     render_enabled: bool = True
 
     def __post_init__(self) -> None:
@@ -611,8 +613,10 @@ class EnvConfig:
             and simulation_cfg.dynamics_model is DynamicModel.MB
         ):
             raise ValueError(
-                "CollisionCheckMode.SEGMENT_CONTACT does not support DynamicModel.MB "
-                "in this version of the gym. Use ST, or KS for a cheaper approximation."
+                "CollisionCheckMode.SEGMENT_CONTACT does not support the multi-body "
+                "model DynamicModel.MB in this version of the gym. Use ST, or KS for a "
+                "cheaper approximation. SEGMENT_CONTACT is now the default, so an MB "
+                "run must ask for collision_check=CollisionCheckMode.LIDAR_SCAN."
             )
         if (
             collision_check is CollisionCheckMode.SEGMENT_CONTACT

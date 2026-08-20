@@ -211,6 +211,8 @@ class F110Simulator:
             map_scale: Scale factor applied to the map.
         """
         self.track = track
+        # Walls come from the track, so contact has to be rebuilt whenever it changes.
+        self._build_contact()
         if not self.scan_enabled:
             return
         for simulator in self.scan_sims:
@@ -837,7 +839,11 @@ class F110Simulator:
             self.contact = None
             return
         if self.track is None:
-            raise ValueError("SEGMENT_CONTACT needs a track to extract walls from")
+            # A simulator built before its map has no walls to extract; set_map
+            # builds the kernels as soon as there is a track. Raising here instead
+            # would make the default mode unusable in that order.
+            self.contact = None
+            return
         from .contact.adapter import build
 
         self.contact = build(

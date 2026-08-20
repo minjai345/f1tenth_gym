@@ -432,11 +432,15 @@ class TestMultiBodyParameterGate(unittest.TestCase):
     """
 
     def _cfg(self, params):
+        from f1tenth_gym.envs.collision_models import CollisionCheckMode
         from f1tenth_gym.envs.dynamic_models import DynamicModel
 
         return EnvConfig(
             params=params,
             simulation_config=SimulationConfig(dynamics_model=DynamicModel.MB),
+            # MB predates SEGMENT_CONTACT and is refused by it, so an MB config has
+            # to name the detection-only mode now that contact is the default.
+            collision_check=CollisionCheckMode.LIDAR_SCAN,
             render_enabled=False,
         )
 
@@ -492,9 +496,12 @@ class TestUpdateParamsIsAllOrNothing(unittest.TestCase):
             DynamicModel, FULLSCALE_VEHICLE_PARAMETERS,
         )
 
+        from f1tenth_gym.envs.collision_models import CollisionCheckMode
+
         cfg = EnvConfig(
             map_name="Spielberg", map_scale=10.0,
             params=FULLSCALE_VEHICLE_PARAMETERS, render_enabled=False,
+            collision_check=CollisionCheckMode.LIDAR_SCAN,
             simulation_config=SimulationConfig(
                 dynamics_model=DynamicModel.MB, max_laps=None),
         )

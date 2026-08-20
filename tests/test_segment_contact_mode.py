@@ -8,7 +8,10 @@ import numpy as np
 from f1tenth_gym.envs.action import LongitudinalActionType, SteerActionType
 from f1tenth_gym.envs.collision_models import CollisionCheckMode
 from f1tenth_gym.envs.contact import ContactConfig
-from f1tenth_gym.envs.dynamic_models import DynamicModel
+from f1tenth_gym.envs.dynamic_models import (
+    FULLSCALE_VEHICLE_PARAMETERS,
+    DynamicModel,
+)
 from f1tenth_gym.envs.env_config import (
     ControlConfig,
     EnvConfig,
@@ -186,14 +189,18 @@ class TestConfigGuards(unittest.TestCase):
 
     def test_kinematic_contact_warns_about_diagonals(self):
         """KS halts on an angled hit instead of sliding; say so, do not refuse."""
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter("always")
-            EnvConfig(
-                simulation_config=SimulationConfig(dynamics_model=DynamicModel.KS),
-                collision_check=CollisionCheckMode.SEGMENT_CONTACT,
-            )
-        messages = [str(w.message) for w in caught]
-        self.assertTrue(any("diagonal" in m for m in messages), messages)
+        for config in (
+            dict(collision_check=CollisionCheckMode.SEGMENT_CONTACT),
+            dict(),  # SEGMENT_CONTACT is the default, so plain KS warns too
+        ):
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                EnvConfig(
+                    simulation_config=SimulationConfig(dynamics_model=DynamicModel.KS),
+                    **config,
+                )
+            messages = [str(w.message) for w in caught]
+            self.assertTrue(any("diagonal" in m for m in messages), messages)
 
     def test_the_warning_is_specific_to_kinematic_segment_contact(self):
         for config in (
@@ -201,7 +208,10 @@ class TestConfigGuards(unittest.TestCase):
                 simulation_config=SimulationConfig(dynamics_model=DynamicModel.ST),
                 collision_check=CollisionCheckMode.SEGMENT_CONTACT,
             ),
-            dict(simulation_config=SimulationConfig(dynamics_model=DynamicModel.KS)),
+            dict(
+                simulation_config=SimulationConfig(dynamics_model=DynamicModel.KS),
+                collision_check=CollisionCheckMode.LIDAR_SCAN,
+            ),
         ):
             with warnings.catch_warnings(record=True) as caught:
                 warnings.simplefilter("always")
@@ -218,6 +228,25 @@ class TestConfigGuards(unittest.TestCase):
             self.assertIs(EnvConfig(collision_check=value).collision_check, expected)
         with self.assertRaises(ValueError):
             EnvConfig(collision_check=99)
+
+    def test_contact_is_the_default_mode(self):
+        self.assertIs(EnvConfig().collision_check, CollisionCheckMode.SEGMENT_CONTACT)
+
+    def test_multi_body_names_the_mode_to_ask_for(self):
+        """MB is refused by the default now, so the message has to say what to pass."""
+        with self.assertRaises(ValueError) as caught:
+            EnvConfig(
+                params=FULLSCALE_VEHICLE_PARAMETERS,
+                simulation_config=SimulationConfig(dynamics_model=DynamicModel.MB),
+            )
+        message = str(caught.exception)
+        self.assertIn("multi-body", message)
+        self.assertIn("LIDAR_SCAN", message)
+
+    def test_the_detection_only_modes_are_still_reachable(self):
+        for mode in (CollisionCheckMode.NONE, CollisionCheckMode.LIDAR_SCAN,
+                     CollisionCheckMode.BOUNDING_BOX):
+            self.assertIs(EnvConfig(collision_check=mode).collision_check, mode)
 
     def test_the_section_round_trips(self):
         cfg = EnvConfig(contact_config=ContactConfig(restitution=0.25))
