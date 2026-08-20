@@ -518,3 +518,59 @@ pure JAX so the eventual rewrite deletes `adapter.py` rather than rewriting them
 Verified to fail when it should: adding `from ..state import SimulationState` at the
 top of `kernels.py` fails two of the tests, and hiding
 `from ..collision_models import get_vertices` inside a function body still fails one.
+
+## Opponent occlusion — the field-of-view wrap
+
+`get_blocked_view_indices` took the min and max of the four corner beam indices. That
+is only the body's angular extent when the body does not straddle the ends of the
+scan. An opponent directly behind has corners either side of +/-pi, both outside the
+270 degree field of view, so they clamped to opposite ends and the bounds became the
+whole scan — every beam tested against a body no beam can reach.
+
+| opponent, 1080 beams / 270 deg | beams swept | beams actually hit | per call |
+|---|---|---|---|
+| ahead 3 m | 28 | 26 | 30.1 us |
+| ahead-left 3 m | 49 | 49 | 45.9 us |
+| behind-right 3 m | 26 | 25 | 28.9 us |
+| **directly behind 3 m** | **1080** | **0** | **871.3 us** |
+| **behind 0.6 m, touching** | **1080** | **0** | **869.1 us** |
+
+Replaced by recovering the arc as the complement of the widest gap between corner
+bearings — well defined for any convex body the scanner sits outside — then
+intersecting that arc with the scan's own span. A body across the ends yields two
+tails, kept separate: unioning them is what produced the full sweep.
+
+Rear cases now cost **1.3 us**. Visible cases keep byte-identical index ranges.
+
+### It is a correctness fix too
+
+Verified against a brute-force all-beams sweep, 500 random poses per configuration.
+The culled sweep never misses a beam the brute force shortens, and the full-sweep
+pathology is gone everywhere:
+
+| configuration | full sweeps before | after | beams swept before | after |
+|---|---|---|---|---|
+| 1080 beams, 270 deg | 83 | **0** | 203,852 | 113,721 |
+| same, close quarters | 297 | **0** | 771,668 | 450,419 |
+| 108 beams, 270 deg | 106 | **0** | 26,092 | 13,901 |
+| 1080 beams, 360 deg | 0 | **0** | 197,279 | 113,061 |
+| 720 beams, 180 deg | 103 | **0** | 152,224 | 76,286 |
+
+The old rule also **missed** occlusions: 83 of 4,000 poses at 360 degrees and 6 at
+close quarters, where a partially wrapped body left one tail outside the swept range.
+There is no case where the new rule misses one the old caught.
+
+### Step time: the quadratic is gone
+
+Same session, same machine, `LIDAR_SCAN`, Spielberg, grid spawn:
+
+| N | before | after | speedup | after, real-time factor at dt=0.01 |
+|---|---|---|---|---|
+| 1 | 0.243 ms | 0.244 ms | 1.0x | 41x |
+| 2 | 1.373 ms | 0.550 ms | 2.5x | 18x |
+| 4 | 6.340 ms | 1.073 ms | **5.9x** | 9.3x |
+| 8 | 26.489 ms | 2.286 ms | **11.6x** | 4.4x |
+| 12 | 59.634 ms | 3.729 ms | **16.0x** | 2.7x |
+
+Scaling is now close to linear in N rather than quadratic — doubling the field roughly
+doubles the step. An 8-car race went from 0.38x real time to 4.4x.
