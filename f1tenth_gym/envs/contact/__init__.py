@@ -5,7 +5,13 @@ migration unchanged.
 """
 
 from .config import ContactConfig
-from .kernels import Manifold, body_contact, segment_contact, speculative_gap
+from .kernels import (
+    Manifold,
+    body_contact,
+    deepest_depth,
+    segment_contact,
+    speculative_gap,
+)
 from .solver import (
     ContactParams,
     contact_velocity,
@@ -20,6 +26,7 @@ __all__ = [
     "Manifold",
     "body_contact",
     "contact_velocity",
+    "deepest_depth",
     "resolve",
     "resolve_pair",
     "segment_contact",

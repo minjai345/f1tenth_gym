@@ -494,3 +494,27 @@ true two-sided derivative is near zero. 0.5 mm of softening cuts that to **0.000
 straddling a seven-segment corner rotates 1e-4 rad and one segment's contribution drops
 0.3146 -> 0.0000, giving `|FD d/dpsi| = 1572`. Verified not to be the broad phase: the
 candidate set is identical either side. Rare and geometry-driven, not depth-driven.
+
+## Phase 9 — migration seam
+
+The seam is a property, not a deliverable: `kernels.py` and `solver.py` must stay
+pure JAX so the eventual rewrite deletes `adapter.py` rather than rewriting them.
+`tests/test_migration_seam.py` makes that mechanical rather than a matter of care:
+
+- An AST walk over both modules rejects any import outside
+  `jax / numpy / typing / math / dataclasses / functools`, **including imports nested
+  inside functions**, which a top-of-file grep would miss.
+- Both modules are loaded straight off disk with `importlib`, outside the package, to
+  prove there is no gym coupling at all.
+- Neither may import numpy: that is the adapter's job, and physics drifting into the
+  adapter is what would stop the seam being a deletion.
+- Every public kernel is `jit(vmap(...))`-ed over a batch of 8, and the surrogate
+  additionally through `jax.grad`, pinning fixed shapes and no data-dependent control flow.
+- `WallSegments` is checked to carry a unit outward normal per segment, and
+  `segment_contact` to require one. A wall array built for a scan backend would drop
+  the normals -- segment-segment intersection returns a boolean with no side, which
+  contact cannot use.
+
+Verified to fail when it should: adding `from ..state import SimulationState` at the
+top of `kernels.py` fails two of the tests, and hiding
+`from ..collision_models import get_vertices` inside a function body still fails one.
