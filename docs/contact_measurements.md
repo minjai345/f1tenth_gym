@@ -1,8 +1,8 @@
 # Contact system — measured numbers
 
-Every number here was produced on this tree by the command shown. Numbers in
-`IMPROVED CONTACT AND SCANS PLAN/CONTACT_IMPLEMENTATION_PLAN.md` §7 predate the
-sub-pixel extraction and are superseded by this file.
+Every number here was produced on this tree by the command shown. This file is the
+only surviving record of the contact measurements; the working plan it grew out of
+has been deleted.
 
 Machine: RTX 3080 Laptop, py3.13, jax 0.11.1, numpy 2.4, scikit-image 0.26.
 
