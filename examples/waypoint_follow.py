@@ -1,13 +1,8 @@
 """Pure-pursuit waypoint follower AND a fully-spelled-out configuration reference.
 
-Every field of ``EnvConfig`` and all of its nested config dataclasses is set
-explicitly in ``main()`` -- mostly to its *default* value -- so this file
-doubles as a live catalogue of every knob and what it defaults to. Where a value
-must deviate from the default for the follower to work (e.g. the observation
-type), the deviation is flagged with a ``# default: ...`` comment.
-
-Rendering needs an X display (real or ``xvfb``); set ``render_enabled=False`` in
-the config below to run fully headless.
+Every field of ``EnvConfig`` and its nested dataclasses is set explicitly in
+``build_config()``, mostly to its default, so this doubles as a catalogue of every
+attribute. Deviations carry a ``# default: ...`` comment.
 """
 import time
 from typing import Tuple
@@ -50,17 +45,15 @@ Planner Helpers
 
 @njit(fastmath=False, cache=True)
 def nearest_point_on_trajectory(point, trajectory):
-    """
-    Return the nearest point along the given piecewise linear trajectory.
+    """Return the nearest point along the given piecewise linear trajectory.
 
-    Same as nearest_point_on_line_segment, but vectorized. This method is quite fast, time constraints should
-    not be an issue so long as trajectories are not insanely long.
+    Args:
+        point: Size-2 array.
+        trajectory: Nx2 matrix of (x, y) waypoints. Waypoints must be unique,
+            duplicates result in a division by zero.
 
-        Order of magnitude: trajectory length: 1000 --> 0.0002 second computation (5000fps)
-
-    point: size 2 numpy array
-    trajectory: Nx2 matrix of (x,y) trajectory waypoints
-        - these must be unique. If they are not unique, a divide by 0 error will destroy the world
+    Returns:
+        ``(projection, distance, t, segment_index)``.
     """
     diffs = trajectory[1:, :] - trajectory[:-1, :]
     l2s = diffs[:, 0] ** 2 + diffs[:, 1] ** 2
@@ -335,11 +328,8 @@ class PurePursuitPlanner:
 def build_config() -> EnvConfig:
     """Build a *fully-explicit* EnvConfig.
 
-    Every field of every config dataclass is listed below, almost all set to
-    their real default. This is the point of the file: a copy-paste template
-    where you can see every knob and its default at a glance, and flip only what
-    you need. ``EnvConfig()`` with no arguments produces the same thing (minus
-    the observation-type deviation noted below).
+    A copy-paste template listing every attribute and its default. ``EnvConfig()`` with
+    no arguments produces the same thing, minus the observation-type deviation.
     """
     return EnvConfig(
         # ---- top-level -----------------------------------------------------
@@ -390,7 +380,7 @@ def build_config() -> EnvConfig:
         # ---- observations --------------------------------------------------
         # ObservationType.DEFAULT: packaged per-agent dict (scan + std_state + state + lap info).
         # We use KINEMATIC_STATE so the follower can read pose_x/pose_y/pose_theta
-        # directly (DIRECT does not expose those derived fields -- see CLAUDE.md).
+        # directly (DIRECT does not expose those derived fields).
         observation_config=ObservationConfig(
             type=ObservationType.KINEMATIC_STATE,  # default: DEFAULT
             features=None,          # only used with type=FEATURES (a custom field tuple)
@@ -409,9 +399,8 @@ def build_config() -> EnvConfig:
         lidar_config=LiDARConfig(
             enabled=True,
             num_beams=1080,                 # ~2000 is the internal angular-LUT ceiling
-            # The angles ARE the geometry; field_of_view is a read-only property
-            # equal to angle_max - angle_min. For a symmetric sweep use
-            # LiDARConfig.from_fov(4.712389) instead of spelling both out.
+            # field_of_view is derived from the min and max angles.
+            # To construct from fov, use LiDARConfig.from_fov(4.712389) instead.
             angle_min=-2.3561945,           # -135 deg
             angle_max=2.3561945,            # +135 deg  (270 deg total)
             range_min=0.0,
@@ -420,9 +409,6 @@ def build_config() -> EnvConfig:
             dropout_prob=0.0,               # per-beam no-return probability (sim2real)
             range_bias_std=0.0,             # per-beam systematic bias, drawn once/episode
             base_link_to_lidar_tf=(0.275, 0.0, 0.0),  # (x, y, yaw) sensor offset
-            # RASTER sphere-traces the occupancy grid's distance transform, which
-            # measures to the nearest cell centre and so reads long by half a pixel.
-            # SEGMENT casts the wall segments: exact, and differentiable in the pose.
             backend=ScanBackend.SEGMENT,     # RASTER | SEGMENT
             scan_device="cpu",              # SEGMENT only; "gpu" wins from ~4 agents up
         ),

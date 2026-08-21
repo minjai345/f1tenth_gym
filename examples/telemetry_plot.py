@@ -1,33 +1,18 @@
 """Standalone real-time telemetry dashboard for f1tenth_gym.
 
-Live-plots vehicle state (speed, steering, yaw rate, slip angle) in a
-`pyqtgraph <https://www.pyqtgraph.org/>`_ window while a simple pure-pursuit
-follower drives a lap, alongside the gym's own track view. Both are Qt windows
-and share one ``QApplication``, so the dashboard is a pattern you can lift into
-your own training or eval script without giving up the track view. Pass
-``--no-render`` for the plots alone. A display/X server is needed either way;
-use ``xvfb-run`` for a virtual one.
-
-The GUI refreshes at a fixed rate (``--fps``) while the dynamics advance by a
-configurable real-time factor (``--rtf``) -- i.e. the sim can run several
-physics steps per plotted frame, decoupling dynamics speed from plot refresh.
-
-Run::
+Live-plots speed, steering, yaw rate and slip angle in a pyqtgraph window while
+a pure-pursuit follower drives, alongside the gym's own track view. Needs a
+display (``xvfb-run`` works)::
 
     python examples/telemetry_plot.py --map Spielberg --rtf 1.0
     python examples/telemetry_plot.py --no-render          # plots only
-
-Dependencies: ``pyqtgraph`` and a Qt binding (PyQt5/PySide2/PyQt6/PySide6).
 """
 from __future__ import annotations
 
 import os
 
-# Must precede the pyqtgraph import. The gym sets these in make_renderer, but that
-# runs inside gym.make -- by which point a script that imported a Qt/GL consumer at
-# module level has already resolved the platform. Qt on xcb with PyOpenGL on EGL
-# (its default under Wayland) leaves every GLMeshItem.paint raising "no valid
-# context", pyqtgraph swallows it, and the track view comes up empty.
+# Must precede the pyqtgraph import: the gym's own pins run inside gym.make, by
+# which point the platform is resolved and the track view comes up empty.
 os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
 os.environ.setdefault("PYOPENGL_PLATFORM", "x11")
 
@@ -163,10 +148,8 @@ def main():
                     help="skip the gym track view and plot only")
     args = ap.parse_args()
 
-    # Build the env first when rendering: the renderer pins QT_QPA_PLATFORM and
-    # PYOPENGL_PLATFORM before the first GL import and creates the QApplication,
-    # and pyqtgraph then reuses that instance. mkQApp first would fix the Qt
-    # platform too early and the pins would land after it.
+    # Build the env first when rendering: it creates the QApplication pyqtgraph
+    # reuses. mkQApp first would fix the Qt platform before the pins land.
     env = gym.make(
         "f1tenth_gym:f1tenth-v0",
         config=EnvConfig(

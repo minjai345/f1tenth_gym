@@ -1,20 +1,13 @@
 """Record an rgb_array rollout to an MP4 with gymnasium's RecordVideo wrapper.
 
-rgb_array rendering uses the OpenGL backend (a fast framebuffer grab), which
-needs an X display -- real or virtual. On a desktop with a display this just
-works. On a headless server or in Google Colab, start a virtual display first:
+Needs an X display, real or virtual::
 
-    # shell / headless server:
     xvfb-run -a python examples/video_recording.py
 
-    # Google Colab (in a cell, before creating the env):
-    #   !apt-get -qq install -y xvfb
-    #   !pip -q install pyvirtualdisplay
+    # Google Colab, in a cell before creating the env:
+    #   !apt-get -qq install -y xvfb && pip -q install pyvirtualdisplay
     #   from pyvirtualdisplay import Display
     #   Display(visible=0, size=(800, 800)).start()
-    # then run this script's main(); embed the result inline with:
-    #   from IPython.display import Video
-    #   Video("video_<timestamp>/rl-video-episode-0.mp4", embed=True)
 """
 import time
 import gymnasium as gym

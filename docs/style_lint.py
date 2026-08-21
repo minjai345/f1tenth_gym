@@ -1,23 +1,15 @@
 #!/usr/bin/env python3
-"""Check the docs against the house style agreed in ISSUES_PLAN.md #21.
+"""Check the docs against the house style.
 
-Advisory by default; ``--strict`` makes findings fail the build, which is how
-CI runs it (``.github/workflows/lint.yml``) now that the Batch F rewrite has
-landed and the tree is at zero findings.
+Advisory by default; ``--strict`` makes findings fail the build, which is how CI
+runs it. The tree is at zero findings.
 
     python docs/style_lint.py            # report, exit 0
     python docs/style_lint.py --strict   # report, exit 1 if anything is found
 
-Two registries live beside this file and are the part that ratchets:
-
-``_style/canonical_facts.yml``
-    Facts that must have exactly one full statement. ``max_elsewhere`` starts at
-    today's count and is lowered as each page-rewrite PR removes a duplicate, so
-    the check is green on day one and can only get stricter.
-
-``_style/protected.yml``
-    Hard-won sentences that a voice pass must not delete. Keyed by a hash of the
-    normalised sentence, not by line number, so they survive being moved.
+Two registries beside this file ratchet: ``_style/canonical_facts.yml`` (facts
+needing exactly one full statement) and ``_style/protected.yml`` (sentences a
+voice pass must not delete, keyed by content hash so they survive a move).
 """
 from __future__ import annotations
 
@@ -59,9 +51,8 @@ BANNED_PHRASES = [
     "everything you need", "clean interfaces", "easy to use", "easy-to-use",
     "seamless", "state-of-the-art", "comprehensive", "powerful",
     "byte-identical to before", "see below.", "included for completeness",
-    # Blames the library for ordinary user error (ISSUES_PLAN.md #8). The action
-    # columns are both valid float ranges, so a transposed action is a *valid*
-    # action the simulator executes -- say that instead.
+    # Blames the library for user error: both action columns are valid float
+    # ranges, so a transposed action is a valid action. Say that instead.
     "fails silently", "fail silently",
 ]
 
@@ -190,9 +181,7 @@ def check_page(path: Path, out: list[Finding]) -> None:
         out.append(Finding(path, 1, "warning-budget", f"{n_warn} warnings (max {MAX_WARNINGS})"))
 
     # finditer, not findall: the match carries its own position, so a bold span
-    # anchors to where it actually is. Searching for the text instead used to
-    # report the FIRST place those characters appeared anywhere on the page, and
-    # `index(...) and lineno` short-circuited to line 0 when that was offset 0.
+    # anchors where it actually is rather than at the text's first occurrence.
     bolds = list(BOLD.finditer(text))
     budget = max(1, len(lines) // BOLD_LINES_PER_SPAN)
     if len(bolds) > budget:

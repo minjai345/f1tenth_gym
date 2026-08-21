@@ -23,12 +23,9 @@
 
 """
 Generates random tracks.
-Adapted from https://gym.openai.com/envs/CarRacing-v0
-Author: Hongrui Zheng
 
-Note: additional requirements
-    - shapely
-    - opencv-python
+Adapted from https://gym.openai.com/envs/CarRacing-v0.
+Author: Hongrui Zheng
 """
 import math
 import pathlib

@@ -1,5 +1,4 @@
-# Configuration file for the Sphinx documentation builder.
-# https://www.sphinx-doc.org/en/master/usage/configuration.html
+# Sphinx build configuration: https://www.sphinx-doc.org/en/master/usage/configuration.html
 # flake8: noqa
 import os
 import sys
@@ -45,19 +44,17 @@ autodoc_default_options = {
     # documentation (and it kept publishing test scaffolding like ScanTests)
     "show-inheritance": True,
 }
-# GUI / native-graphics deps that need not (and on a headless RTD builder cannot)
-# be imported just to read docstrings. numba/scipy/numpy/gymnasium are real deps
-# and are installed for the build.
+# GUI deps a headless RTD builder cannot import just to read docstrings; the real
+# runtime deps are installed for the build.
 autodoc_mock_imports = ["pyqtgraph", "PyQt6", "OpenGL"]
 
 napoleon_google_docstring = True
-# Google is the single convention (#22): a NumPy-style relapse renders raw
-# section underlines, which the -W build then rejects as malformed RST.
+# Google is the single convention: NumPy style renders raw section underlines,
+# which the -W build rejects as malformed RST.
 napoleon_numpy_docstring = False
 napoleon_include_init_with_doc = True
-# Render "Attributes:" docstring sections as inline :ivar: fields rather than
-# separate object descriptions, so dataclass fields aren't documented twice
-# (once as an autodoc member, once from the Attributes section).
+# Render "Attributes:" as inline :ivar: fields, so dataclass fields are not
+# documented twice (once as an autodoc member, once from the section).
 napoleon_use_ivar = True
 
 # -- Intersphinx -------------------------------------------------------------

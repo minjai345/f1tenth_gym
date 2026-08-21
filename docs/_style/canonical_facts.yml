@@ -1,6 +1,5 @@
-# One canonical home per fact (ISSUES_PLAN.md #21, rule 3).
-# max_elsewhere starts at today's count so the check is green on day one;
-# lower it in whichever page-rewrite PR removes a duplicate. It must never rise.
+# One canonical home per fact. max_elsewhere starts at today's count and is
+# lowered as each page-rewrite PR removes a duplicate. It must never rise.
 
 steering_column_zero:
   pattern: 'steering is (action )?column 0|\[steering, longitudinal\]|\[steer, longitudinal\]'

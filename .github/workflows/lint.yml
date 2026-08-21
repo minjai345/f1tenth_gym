@@ -27,10 +27,8 @@ jobs:
         python-version: ${{ matrix.python-version }}
         enable-cache: true
 
-    # Neither check imports f1tenth_gym -- flake8 only walks files and
-    # style_lint.py imports nothing but the stdlib and yaml -- so the project is
-    # never synced here. `uv run --no-project --with` fetches just the tool into
-    # an ephemeral env, which also keeps the ~3 GB CUDA stack out of this job.
+    # Neither check imports f1tenth_gym, so the project is never synced here:
+    # `--no-project --with` also keeps the ~3 GB CUDA stack out of this job.
     - name: Lint with flake8
       # exit-zero treats all errors as warnings; advisory only
       run: uv run --no-project --with flake8 flake8 . --statistics --exit-zero
