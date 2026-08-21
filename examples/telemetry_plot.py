@@ -2,11 +2,11 @@
 
 Live-plots vehicle state (speed, steering, yaw rate, slip angle) in a
 `pyqtgraph <https://www.pyqtgraph.org/>`_ window while a simple pure-pursuit
-follower drives a lap. This is intentionally *not* wired into the gym's own
-renderer -- it is a self-contained example of low-latency plotting you can
-lift into your own training/eval scripts. Nothing here imports the OpenGL
-renderer, so it runs without a GPU (a display/X server is still needed for the
-Qt window; use ``xvfb-run`` for a virtual one).
+follower drives a lap, alongside the gym's own track view. Both are Qt windows
+and share one ``QApplication``, so the dashboard is a pattern you can lift into
+your own training or eval script without giving up the track view. Pass
+``--no-render`` for the plots alone. A display/X server is needed either way;
+use ``xvfb-run`` for a virtual one.
 
 The GUI refreshes at a fixed rate (``--fps``) while the dynamics advance by a
 configurable real-time factor (``--rtf``) -- i.e. the sim can run several
@@ -15,20 +15,31 @@ physics steps per plotted frame, decoupling dynamics speed from plot refresh.
 Run::
 
     python examples/telemetry_plot.py --map Spielberg --rtf 1.0
+    python examples/telemetry_plot.py --no-render          # plots only
 
 Dependencies: ``pyqtgraph`` and a Qt binding (PyQt5/PySide2/PyQt6/PySide6).
 """
 from __future__ import annotations
 
-import argparse
-from collections import deque
+import os
 
-import numpy as np
-import gymnasium as gym
-import pyqtgraph as pg
-from pyqtgraph.Qt import QtCore
+# Must precede the pyqtgraph import. The gym sets these in make_renderer, but that
+# runs inside gym.make -- by which point a script that imported a Qt/GL consumer at
+# module level has already resolved the platform. Qt on xcb with PyOpenGL on EGL
+# (its default under Wayland) leaves every GLMeshItem.paint raising "no valid
+# context", pyqtgraph swallows it, and the track view comes up empty.
+os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
+os.environ.setdefault("PYOPENGL_PLATFORM", "x11")
 
-from f1tenth_gym.envs.env_config import EnvConfig, SimulationConfig
+import argparse  # noqa: E402
+from collections import deque  # noqa: E402
+
+import numpy as np  # noqa: E402
+import gymnasium as gym  # noqa: E402
+import pyqtgraph as pg  # noqa: E402
+from pyqtgraph.Qt import QtCore  # noqa: E402
+
+from f1tenth_gym.envs.env_config import EnvConfig, SimulationConfig  # noqa: E402
 
 
 # std_state layout: [X, Y, steering, speed, yaw, yaw_rate, beta]
@@ -76,9 +87,11 @@ class PurePursuitFollower:
 
 
 class TelemetryDashboard:
-    def __init__(self, env, follower, window_s: float, fps: float, rtf: float):
+    def __init__(self, env, follower, window_s: float, fps: float, rtf: float,
+                 render: bool = True):
         self.env = env
         self.follower = follower
+        self.render = render
         self.dt = env.unwrapped.timestep
         self.window = int(window_s / self.dt)
         self.steps_per_tick = max(1, round(rtf * (1.0 / fps) / self.dt))
@@ -131,6 +144,10 @@ class TelemetryDashboard:
         self.c_steer.setData(t, list(self.steer))
         self.c_yaw.setData(t, list(self.yaw_rate))
         self.c_slip.setData(t, list(self.slip))
+        # Once per tick, not once per physics step: the track view has nothing new
+        # to show between them and each call costs a GL round trip.
+        if self.render:
+            self.env.render()
 
 
 def main():
@@ -142,16 +159,27 @@ def main():
     ap.add_argument("--fps", type=float, default=50.0, help="plot refresh rate")
     ap.add_argument("--window", type=float, default=10.0,
                     help="seconds of history shown")
+    ap.add_argument("--no-render", dest="render", action="store_false",
+                    help="skip the gym track view and plot only")
     args = ap.parse_args()
 
+    # Build the env first when rendering: the renderer pins QT_QPA_PLATFORM and
+    # PYOPENGL_PLATFORM before the first GL import and creates the QApplication,
+    # and pyqtgraph then reuses that instance. mkQApp first would fix the Qt
+    # platform too early and the pins would land after it.
     env = gym.make(
         "f1tenth_gym:f1tenth-v0",
         config=EnvConfig(
             map_name=args.map,
             simulation_config=SimulationConfig(max_laps=None),
-            render_enabled=False,
+            render_enabled=args.render,
         ),
+        render_mode="human" if args.render else None,
     )
+    if args.render:
+        # The QTimer below already paces the run through --rtf; leaving the
+        # renderer's own pacing on would sleep a second time for the same reason.
+        env.unwrapped.set_real_time_factor(float("inf"))
     params = env.unwrapped.sim.vehicle_params
     follower = PurePursuitFollower(
         env.unwrapped.track.raceline, wheelbase=float(params.lf + params.lr)
@@ -160,7 +188,8 @@ def main():
     app = pg.mkQApp("F1TENTH Telemetry")
     # keep a reference alive: the dashboard owns the driving QTimer, so letting
     # it be garbage-collected would silently stop the updates.
-    dash = TelemetryDashboard(env, follower, args.window, args.fps, args.rtf)  # noqa: F841
+    dash = TelemetryDashboard(  # noqa: F841
+        env, follower, args.window, args.fps, args.rtf, args.render)
     try:
         app.exec()  # pyqtgraph>=0.13 (Qt6-compatible); older uses exec_()
     except AttributeError:  # pragma: no cover
