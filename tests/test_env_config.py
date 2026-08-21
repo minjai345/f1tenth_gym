@@ -69,6 +69,15 @@ class TestSimulationConfigValidation(unittest.TestCase):
         cfg = SimulationConfig(timestep=0.02, integrator_timestep=0.01)
         self.assertEqual(cfg.timestep, 0.02)
 
+    def test_count_partial_first_lap_defaults_true_and_coerces(self):
+        """Every finish-line crossing counts unless the out-lap rule is asked for."""
+        self.assertIs(SimulationConfig().count_partial_first_lap, True)
+        self.assertIs(SimulationConfig(count_partial_first_lap=0).count_partial_first_lap, False)
+        self.assertIs(
+            SimulationConfig().with_updates(count_partial_first_lap=False).count_partial_first_lap,
+            False,
+        )
+
     def test_zero_timestep(self):
         """Test that zero timestep raises ValueError."""
         with self.assertRaises(ValueError):

@@ -197,6 +197,7 @@ class F110Env(gym.Env):
         self.loop_counter_mode = self.simulation_cfg.loop_counter
         self.compute_frenet = self.simulation_cfg.compute_frenet_frame
         self.max_laps = self.simulation_cfg.max_laps
+        self.count_partial_first_lap = self.simulation_cfg.count_partial_first_lap
 
         self.collision_check_mode = cfg.collision_check
         self.render_enabled = cfg.render_enabled
@@ -246,6 +247,8 @@ class F110Env(gym.Env):
         self.lap_times = np.zeros((self.num_agents,))
         self.lap_times_finish = np.zeros((self.num_agents,))
         self.lap_counts = np.zeros((self.num_agents,))
+        # Finish-line crossings, which lead lap_counts by one under the out-lap rule.
+        self._line_crossings = np.zeros((self.num_agents,))
         # per-agent previous Frenet s for the progress reward (independent of the
         # lap counter so it works under any LoopCounterMode)
         self._reward_prev_s = np.zeros((self.num_agents,))
@@ -339,6 +342,22 @@ class F110Env(gym.Env):
             self.renderer = None
             self.render_config = None
 
+    def _record_crossing(self, ind: int, crossings: int) -> None:
+        """Bank a finish-line crossing for one agent.
+
+        Every crossing splits the lap time, so the out-lap rule still times full
+        circuits; only the lap count skips the partial first lap.
+        """
+        if crossings <= self._line_crossings[ind] or self.sim_time <= self.timestep:
+            return
+        self._line_crossings[ind] = crossings
+        split = self.sim_time - self.lap_times_finish[ind]
+        self.lap_times_finish[ind] = self.sim_time
+        laps = crossings if self.count_partial_first_lap else crossings - 1
+        if laps > self.lap_counts[ind]:
+            self.lap_counts[ind] = laps
+            self.lap_times[ind] = split
+
     def _check_done(self):
         """
         Check if the current rollout is done
@@ -360,11 +379,9 @@ class F110Env(gym.Env):
                     delta_s -= s_frame_max
                 self.cumulative_s[ind] += delta_s
                 self.agents_prev_s[ind] = current_s
-                new_lap_count = int(self.cumulative_s[ind] / s_frame_max)
-                if new_lap_count > self.lap_counts[ind] and self.sim_time > self.timestep:
-                    self.lap_counts[ind] = new_lap_count
-                    self.lap_times[ind] = self.sim_time - self.lap_times_finish[ind]
-                    self.lap_times_finish[ind] = self.sim_time
+                # cumulative_s is seeded with the spawn arclength at reset, so this
+                # counts crossings of the s=0 datum, not loops back to the spawn.
+                self._record_crossing(ind, int(self.cumulative_s[ind] / s_frame_max))
 
         elif (
             self.loop_counter_mode is LoopCounterMode.WINDING_ANGLE
@@ -382,11 +399,9 @@ class F110Env(gym.Env):
                 delta_angle = np.arctan2(cross, dot) * wd
                 self.cumulative_angle[ind] += delta_angle
                 self.agents_prev_angle[ind] = curr_vec
-                new_lap_count = int(self.cumulative_angle[ind] / (2.0 * np.pi))
-                if new_lap_count > self.lap_counts[ind] and self.sim_time > self.timestep:
-                    self.lap_counts[ind] = new_lap_count
-                    self.lap_times[ind] = self.sim_time - self.lap_times_finish[ind]
-                    self.lap_times_finish[ind] = self.sim_time
+                # Seeded at reset with the angle from the s=0 ray, so a full 2pi is
+                # a crossing of that ray rather than a loop back to the spawn.
+                self._record_crossing(ind, int(self.cumulative_angle[ind] / (2.0 * np.pi)))
 
         terminated = False
         if self.terminate_on_collision:
@@ -470,8 +485,7 @@ class F110Env(gym.Env):
         self.sim.step(action)
         self._elapsed_steps += 1
 
-        # advance the render clock's sim-time frame accumulator (drives fixed-fps
-        # frame emission; decoupled from how often the user calls render()).
+        # advance the render clock's sim-time frame accumulator (drives render fps); decoupled from how often the user calls render()).
         self._render_clock.advance()
 
         # check done
@@ -547,6 +561,7 @@ class F110Env(gym.Env):
         self.lap_counts.fill(0.0)
         self.lap_times.fill(0.0)
         self.lap_times_finish.fill(0.0)
+        self._line_crossings.fill(0.0)
         if options is not None and "poses" in options:
             poses = options["poses"]
             option = "pose"
@@ -593,20 +608,28 @@ class F110Env(gym.Env):
             and self.compute_frenet
             and self.track is not None
         ):
-            # Seed the lap-progress reference from the spawn arclength so laps
-            # are measured from where the car starts, not from the spline's s=0
-            # datum. Without this a car spawned at s>0 completes lap 1 early
-            # (its spawn s is counted as progress on the first step).
+            # prev_s stops the first delta being the whole spawn arclength; seeding
+            # cumulative_s with it makes a lap a crossing of s=0, not a loop.
             self.agents_prev_s[:] = self.sim.state.frenet[:, 0]
+            self.cumulative_s[:] = self.sim.state.frenet[:, 0]
 
         if (
             self.loop_counter_mode is LoopCounterMode.WINDING_ANGLE
             and self._winding_point is not None
         ):
             wp = self._winding_point
+            wd = self._winding_direction
+            cl = self.track.centerline
+            datum = np.array([float(cl.xs[0]) - wp[0], float(cl.ys[0]) - wp[1]])
             for ind in range(self.num_agents):
                 pose = self.sim.state.poses[ind]
-                self.agents_prev_angle[ind] = np.array([pose[0] - wp[0], pose[1] - wp[1]])
+                spawn_vec = np.array([pose[0] - wp[0], pose[1] - wp[1]])
+                self.agents_prev_angle[ind] = spawn_vec
+                # Angle already travelled from the s=0 ray, so the first 2pi lands on
+                # that ray instead of back at the spawn bearing.
+                cross = float(datum[0] * spawn_vec[1] - datum[1] * spawn_vec[0])
+                dot = float(datum.dot(spawn_vec))
+                self.cumulative_angle[ind] = float(np.arctan2(cross, dot) * wd) % (2.0 * np.pi)
 
         obs = self.observation_type.observe()
         if self.render_enabled and self.renderer is not None:
@@ -654,12 +677,7 @@ class F110Env(gym.Env):
         else:
             raise TypeError("params must be a VehicleParameters instance")
 
-        # Validate BEFORE mutating anything. `with_updates` re-runs
-        # EnvConfig.__post_init__, which can reject the params (the MB gate is
-        # the live case). Assigning first left `self.vehicle_params` holding a
-        # rejected set while the sim, the spaces and the renderer kept the old
-        # one -- and with DR enabled the next reset() rebuilt from the poisoned
-        # attribute and pushed NaNs into the physics with no error.
+        # Validate BEFORE mutating anything.
         new_config = self.env_config.with_updates(params=vehicle_params)
 
         self.vehicle_params = vehicle_params

@@ -124,6 +124,11 @@ class SimulationConfig:
         loop_counter: Method for counting completed laps.
         compute_frenet_frame: Whether to compute Frenet frame coordinates.
         max_laps: Maximum laps before episode ends (None for infinite).
+        count_partial_first_lap: Whether the first finish-line crossing completes
+            a lap. True counts every crossing, so a car spawned mid-track scores a
+            short first lap. False treats the spawn-to-line stretch as an out lap:
+            the first crossing only starts the timer, so every lap time is a full
+            circuit and ``max_laps`` always means that many complete laps.
     """
 
     timestep: float = 0.01
@@ -133,8 +138,10 @@ class SimulationConfig:
     loop_counter: LoopCounterMode = LoopCounterMode.FRENET_BASED
     compute_frenet_frame: bool = True
     max_laps: Optional[int] = 1
+    count_partial_first_lap: bool = True
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "count_partial_first_lap", bool(self.count_partial_first_lap))
         if self.timestep <= 0:
             raise ValueError(f"timestep must be > 0, got {self.timestep}")
         if self.integrator_timestep <= 0:
