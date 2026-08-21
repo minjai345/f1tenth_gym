@@ -71,6 +71,9 @@ def make_renderer(
         # process environment mutated for every other Qt consumer.
         os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
         os.environ.setdefault("PYOPENGL_PLATFORM", "x11")
+        # NVIDIA ignores the backend's swap interval 0 and holds swapBuffers to the
+        # vblank, pinning human modes to the monitor refresh: 59.9 vs 1051 Hz.
+        os.environ.setdefault("__GL_SYNC_TO_VBLANK", "0")
 
         from .rendering_pyqtgl import PyQtEnvRendererGL as EnvRenderer
 
