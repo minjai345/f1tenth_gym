@@ -14,7 +14,7 @@ from f1tenth_gym.envs.track.track import TrackSpec, _occupancy_from_image
 
 
 class TestTrackLoader(unittest.TestCase):
-    """Pins ISSUES_PLAN.md #2: the loaders accept every shipped layout and fail loudly."""
+    """The loaders accept every shipped layout and fail loudly."""
 
     def test_from_track_path_accepts_dir_stem_and_yaml(self):
         ref = Track.from_track_name("Spielberg")
@@ -109,7 +109,7 @@ class TestTrackLoader(unittest.TestCase):
 
 
 class TestOccupancySemantics(unittest.TestCase):
-    """Pins ISSUES_PLAN.md #1: the YAML thresholds are honoured, ROS map_server style."""
+    """The YAML thresholds are honoured, ROS map_server style."""
 
     @staticmethod
     def _spec(**kwargs):
@@ -183,14 +183,8 @@ class TestTrack(unittest.TestCase):
         self.assertTrue(np.isclose(track.raceline.axs, raceline[:, ax_idx]).all())
 
     def test_map_dir_structure(self):
-        """
-        Check that the map dir structure is correct:
-        - maps/
-            - Trackname/
-                - Trackname_map.*               # map image
-                - Trackname_map.yaml            # map specification
-                - [Trackname_raceline.csv]      # raceline (optional)
-                - [Trackname_centerline.csv]    # centerline (optional)
+        """Check the ``maps/Trackname/`` layout: a map image and YAML, plus an
+        optional raceline and centerline CSV.
         """
         mapdir = pathlib.Path(__file__).parent.parent / "maps"
         for trackdir in mapdir.iterdir():
@@ -330,7 +324,7 @@ class TestTrack(unittest.TestCase):
 
 
 class TestSyntheticGridOrientation(unittest.TestCase):
-    """Pins ISSUES_PLAN.md #3's grid bug: synthetic grids are (rows=y, cols=x)."""
+    """Synthetic grids are (rows=y, cols=x)."""
 
     def test_from_refline_grid_is_height_by_width(self):
         track = Track.from_refline(

@@ -1,9 +1,8 @@
 """Opponent occlusion: which beams `ray_cast` bothers to test.
 
-The body's angular extent has to be recovered as an arc on the circle. Taking the
-min and max of the four corner bearings instead assumes the body does not straddle
-the ends of the scan, and an opponent directly behind does exactly that -- which used
-to collapse the bounds to the first and last beam and sweep all 1080 for nothing.
+The body's angular extent has to be recovered as an arc on the circle: min/max of
+the four corner bearings assumes the body does not straddle the ends of the scan,
+which an opponent directly behind does.
 """
 
 import unittest

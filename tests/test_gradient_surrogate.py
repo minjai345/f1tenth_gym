@@ -1,9 +1,7 @@
 """The differentiable contact surrogate: `deepest_depth`.
 
-The physics manifold carries two points so a resting body cannot spin, but summing
-their depths is not what you want to differentiate. This pins the surrogate's value
-against the manifold, its gradient against central finite differences, and the
-float32 behaviour that made an earlier prototype return a gradient of exactly zero.
+Pins the surrogate's value against the manifold, its gradient against central
+finite differences, and its float32 behaviour at track coordinates.
 """
 
 import math

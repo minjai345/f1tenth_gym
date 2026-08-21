@@ -333,7 +333,7 @@ class TestLidarNoiseSeeding(unittest.TestCase):
 
 
 class TestScanOnReset(unittest.TestCase):
-    """Pins ISSUES_PLAN.md #15: reset() runs a LiDAR sweep, without collision adjudication."""
+    """reset() runs a LiDAR sweep, without collision adjudication."""
 
     def test_first_scan_is_populated_and_reproducible(self):
         env = gym.make("f1tenth_gym:f1tenth-v0", config=EnvConfig(render_enabled=False))
@@ -358,7 +358,7 @@ class TestScanOnReset(unittest.TestCase):
 
 
 class TestConfigSeed(unittest.TestCase):
-    """Pins ISSUES_PLAN.md #7: EnvConfig.seed covers the first unseeded reset."""
+    """EnvConfig.seed covers the first unseeded reset."""
 
     @staticmethod
     def _first_scan(cfg, seed=None):

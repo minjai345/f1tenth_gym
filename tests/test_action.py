@@ -170,7 +170,7 @@ class TestMultiAgentActionSpace(unittest.TestCase):
 
 
 class TestSteeringPController(unittest.TestCase):
-    """Pins ISSUES_PLAN.md #16: STEERING_ANGLE is a saturated P controller."""
+    """STEERING_ANGLE is a saturated P controller."""
 
     def test_proportional_saturation_and_relay_hatch(self):
         from f1tenth_gym.envs.dynamic_models.utils import pid_steer

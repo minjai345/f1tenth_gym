@@ -1,10 +1,8 @@
 """Guards on the test suite itself.
 
-`unittest.main()` calls `sys.exit()`, so anything declared *below* a
-``if __name__ == "__main__"`` guard is never even defined when the file is run
-as a script — `python tests/test_x.py` exits 0 green having executed a fraction
-of it. Four files had drifted that way and hid 17 regression pins (#5, #6, #13,
-#26, #27, #28, #124); pytest imports the module so CI never noticed.
+`unittest.main()` calls `sys.exit()`, so anything declared below a
+``if __name__ == "__main__"`` guard is never defined when the file runs as a
+script: it exits 0 green having executed a fraction of itself.
 """
 import ast
 import pathlib

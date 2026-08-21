@@ -1,19 +1,8 @@
 """Keep CLAUDE.md's line anchors honest.
 
-CLAUDE.md is the brief agents are told to trust over prior knowledge, and it is
-dense with ``[label](path#L123)`` links. Those rot silently as the code moves —
-a whole review pass once found simulator.py citations off by ~+90 and track.py
-citations past the end of the file — and a wrong anchor is worse than none: it
-sends the reader to unrelated code that looks authoritative.
-
-Only unambiguous breakage is checked here:
-
-* the target file must exist and be long enough for the cited line;
-* when the link *label* is a single symbol (``[`F110Simulator`](...#L42)``), the
-  cited line must fall inside that symbol's definition.
-
-Anchors that point into the middle of a function, or whose label is a bare line
-number, are not machine-checkable and are not asserted.
+The brief is dense with ``[label](path#L123)`` links that rot as code moves. Two
+checks: the target file exists and is long enough, and a single-symbol label lands
+inside that symbol's definition. Mid-function anchors are not checkable.
 """
 import ast
 import pathlib

@@ -1,16 +1,8 @@
 """Pin the VehicleParameters -> flat float32 wire format that the kernels index.
 
-Every dynamics kernel reads the array from ``VehicleParameters.to_array``
-POSITIONALLY, so the field order is a wire format. Inserting
-``collision_body_center_x/y`` at positions 18/19 once silently shifted every
-multi-body parameter by +2, which is what made the MB model return NaN.
-
-There is deliberately no hand-maintained ABI tuple any more: the parameters
-describe the vehicle, not the model, so ``to_array`` emits every field in
-declaration order and each model reads the slots it cares about. That keeps the
-source simple but puts the whole guard here -- ``EXPECTED_PARAMETER_ORDER``
-below is the contract, and it is checked name-by-name so a reorder fails with
-the moved field named rather than as a mysterious physics change.
+Every dynamics kernel reads ``VehicleParameters.to_array`` POSITIONALLY, so the
+field order is a wire format. ``EXPECTED_PARAMETER_ORDER`` below is the contract,
+checked name-by-name so a reorder fails naming the field that moved.
 """
 import dataclasses
 import math
@@ -27,11 +19,8 @@ from f1tenth_gym.envs.dynamic_models import (
     VehicleParameters,
 )
 
-# THE WIRE FORMAT, spelled out. Changing this is a breaking change and must be
-# matched by every kernel that indexes the array. Slots 0-17 are read by
-# KS/ST/MB; 18-19 are Python-side collision geometry that no kernel reads;
-# 20-87 are the multi-body block. There is no multi-body copy of the
-# total-mass CoG height -- MB shares the base `h` at slot 5.
+# THE WIRE FORMAT. Slots 0-17 are read by KS/ST/MB, 18-19 are Python-side collision
+# geometry no kernel reads, 20-87 are the multi-body block (which shares `h` at 5).
 EXPECTED_PARAMETER_ORDER = (
     "mu", "C_Sf", "C_Sr", "lf", "lr", "h", "m", "I",
     "s_min", "s_max", "sv_min", "sv_max",

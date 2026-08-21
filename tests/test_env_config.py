@@ -38,11 +38,8 @@ class TestControlConfigValidation(unittest.TestCase):
     def test_non_finite_steer_kp_is_rejected(self):
         """NaN defeats both guards inside pid_steer.
 
-        ``kp <= 0.0`` is False for NaN so the legacy relay branch is not taken,
-        and neither clip branch fires either, so the kernel returns NaN and the
-        steering angle is NaN from the first step. Under the default
-        FRENET_BASED counter that surfaces as a baffling ``cannot convert float
-        NaN to integer`` from the lap counter; under WINDING_ANGLE it is silent.
+        ``kp <= 0.0`` is False for NaN and neither clip branch fires, so the
+        steering angle is NaN from the first step.
         """
         for bad in (float("nan"), float("inf"), float("-inf")):
             with self.assertRaisesRegex(ValueError, "steer_kp must be finite"):
@@ -248,7 +245,7 @@ class TestResetConfigValidation(unittest.TestCase):
         self.assertNotEqual(cfg.strategy, updated.strategy)
 
     def test_reference_line_and_start_width_validation(self):
-        """ISSUES_PLAN.md #13/#27: the new fields validate against the strategy."""
+        """reference_line and start_width validate against the strategy."""
         from f1tenth_gym.envs.reset import ReferenceLine, ResetStrategy
 
         ResetConfig(reference_line=ReferenceLine.CENTERLINE)
@@ -258,9 +255,8 @@ class TestResetConfigValidation(unittest.TestCase):
                 reference_line=ReferenceLine.CENTERLINE,
                 strategy=ResetStrategy.MAP_RANDOM_STATIC,
             )
-        # accepted for every RL_* member: the check allow-lists the family that
-        # _rl_reset_factory consumes the key for, rather than denying the one
-        # MAP member that happens to exist today
+        # Accepted for every RL_* member: the check allow-lists the family
+        # _rl_reset_factory consumes the key for.
         for strategy in (
             ResetStrategy.RL_GRID_STATIC,
             ResetStrategy.RL_RANDOM_STATIC,
@@ -354,12 +350,9 @@ class TestLiDARConfigValidation(unittest.TestCase):
 class TestSubstepValidation(unittest.TestCase):
     """`timestep` must divide evenly into `integrator_timestep`.
 
-    The check lives in ``F110Simulator.__init__``, not in ``SimulationConfig``,
-    so it fires at ``gym.make`` rather than at config construction. It is
-    validated against the substep ratio the simulator actually uses; an earlier
-    version tested ``timestep % integrator_timestep`` against zero, which
-    rejected exact multiples that IEEE-754 cannot represent (``0.03 % 0.01`` is
-    ``0.00999999999999999847``).
+    The check lives in ``F110Simulator.__init__``, so it fires at ``gym.make``
+    rather than at config construction, and compares the substep ratio rather than
+    ``timestep % integrator_timestep`` (``0.03 % 0.01`` is not 0 in IEEE-754).
     """
 
     def _substeps(self, timestep, integrator_timestep):
@@ -425,10 +418,8 @@ class TestSubstepValidation(unittest.TestCase):
 class TestMultiBodyParameterGate(unittest.TestCase):
     """`DynamicModel.MB` is only usable with a preset that populates its ABI.
 
-    The two small-scale presets leave every multi-body field at ``nan``, which
-    used to yield an all-NaN state with no exception. The gate fires at config
-    construction — before the map download and the numba JIT — so the failure is
-    cheap and names the cause.
+    The two small-scale presets leave every multi-body field at ``nan``. The gate
+    fires at config construction, before the map download and the numba JIT.
     """
 
     def _cfg(self, params):
@@ -483,11 +474,9 @@ class TestMultiBodyParameterGate(unittest.TestCase):
 class TestUpdateParamsIsAllOrNothing(unittest.TestCase):
     """A rejected params set must leave the env exactly as it was.
 
-    ``update_params`` used to assign ``self.vehicle_params`` and only then call
-    ``with_updates``, which re-runs ``EnvConfig.__post_init__`` and can raise
-    (the MB gate). The exception propagated but the attribute kept the rejected
-    params, disagreeing with the sim, both spaces and the renderer — and with DR
-    enabled the next ``reset()`` rebuilt from it and pushed NaNs into the sim.
+``with_updates`` re-runs ``EnvConfig.__post_init__`` and can raise, so assigning
+    ``self.vehicle_params`` first leaves it disagreeing with the sim, the spaces
+    and the renderer, and DR then rebuilds NaNs from it on the next ``reset()``.
     """
 
     def test_a_rejected_params_set_changes_nothing(self):

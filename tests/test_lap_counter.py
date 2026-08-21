@@ -1,9 +1,8 @@
 """FRENET_BASED lap-counter regressions.
 
-Lap progress must be measured from the spawn arclength, not from the spline's
-s=0 datum. Previously ``agents_prev_s`` was zero-filled at reset, so on the
-first step a car spawned at s>0 counted its whole spawn arclength as progress
-(``cumulative_s`` jumped to ~spawn s) and completed lap 1 early.
+Lap progress is measured from the spawn arclength, not the spline's s=0 datum:
+zero-filling ``agents_prev_s`` counts the whole spawn arclength as first-step
+progress and completes lap 1 early.
 """
 import unittest
 

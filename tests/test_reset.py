@@ -1,5 +1,4 @@
-"""ResetConfig now exposes the spawn-spacing / shuffle / lateral params that
-were previously hardcoded in the reset functions."""
+"""ResetConfig exposes the spawn-spacing, shuffle and lateral params."""
 import unittest
 
 import gymnasium as gym
@@ -64,7 +63,7 @@ class TestResetConfig(unittest.TestCase):
 
 
 class TestReferenceLineAndStartWidth(unittest.TestCase):
-    """Pins ISSUES_PLAN.md #13 (centerline resets) and #27 (start_width clamp)."""
+    """Centerline resets, and the start_width clamp."""
 
     def test_centerline_spawn_has_zero_ey(self):
         from f1tenth_gym.envs.reset import ReferenceLine

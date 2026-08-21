@@ -1,9 +1,8 @@
 """Multi-agent Frenet regression.
 
-The Frenet arclength search uses a per-agent guess. Previously all agents
-shared one ``Track.s_guess`` scalar, so during a step each agent's local search
-was windowed around the *previous* agent's position -- an agent far from the
-others would snap to the wrong arclength branch (a >100 m jump without moving).
+The Frenet arclength search uses a per-agent guess. Sharing one
+``Track.s_guess`` windows each agent around the previous agent's position, so a
+distant agent snaps to the wrong arclength branch.
 """
 import unittest
 

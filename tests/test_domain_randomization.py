@@ -1,10 +1,7 @@
 """DomainRandomizationConfig: per-episode vehicle-param randomization.
 
-The range is two ordinary ``VehicleParameters`` (low/high) rather than a
-separate range type — the bounds of a vehicle parameter are themselves vehicle
-parameters, so there is nothing to keep in sync. A field with ``low == high``
-is not randomized, which is what makes "leave everything else alone" the
-default.
+The range is two ordinary ``VehicleParameters`` (low/high); a field with
+``low == high`` is not randomized.
 """
 import unittest
 
@@ -102,7 +99,7 @@ class TestDomainRandomization(unittest.TestCase):
 
     def test_config_stays_hashable(self):
         # VehicleParameters is frozen and hashable, so an EnvConfig carrying a DR
-        # config is too — the old dict-valued param_ranges made it unhashable.
+        # the config is hashable too.
         self.assertIsInstance(hash(EnvConfig()), int)
         self.assertIsInstance(
             hash(EnvConfig(domain_randomization_config=_dr(m=(3.0, 4.0)))), int
@@ -125,8 +122,7 @@ class TestDomainRandomization(unittest.TestCase):
             )
 
     def test_unknown_field_is_a_typo_error_at_the_bound(self):
-        # The old str-keyed dict accepted any name and failed much later; a bound
-        # is a VehicleParameters, so a typo cannot be spelled at all.
+        # A bound is a VehicleParameters, so a misspelled field cannot be passed.
         with self.assertRaises(TypeError):
             BASE.with_updates(mass=3.0)
 

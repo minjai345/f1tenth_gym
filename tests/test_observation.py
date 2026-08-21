@@ -246,9 +246,8 @@ class TestFiniteObsBounds(unittest.TestCase):
         self.assertGreater(max(mags), 1.0, "car never actually reversed")
 
     def test_hard_steer_and_accel_stay_in_space(self):
-        # full-lock steering + max accel: the actuator constraints zero the rate
-        # only AFTER crossing the limit, so delta/speed overshoot by one step.
-        # The bounds must include that margin.
+        # Full lock + max accel: the constraints zero the rate only after the
+        # limit is crossed, so the bounds must include one step of overshoot.
         import numpy as _np
         for ot in (ObservationType.DEFAULT, ObservationType.DYNAMIC_STATE,
                    ObservationType.KINEMATIC_STATE):
@@ -259,7 +258,7 @@ class TestFiniteObsBounds(unittest.TestCase):
 
 
 class TestScanFieldGating(unittest.TestCase):
-    """Pins ISSUES_PLAN.md #14: no scan key when the LiDAR is disabled."""
+    """No scan key when the LiDAR is disabled."""
 
     def test_scan_dropped_when_lidar_disabled(self):
         from f1tenth_gym.envs.lidar import LiDARConfig
@@ -289,7 +288,7 @@ class TestScanFieldGating(unittest.TestCase):
 
 
 class TestRawObservation(unittest.TestCase):
-    """Pins ISSUES_PLAN.md #12: DIRECT is raw batched arrays; DEFAULT is the dict."""
+    """DIRECT is raw batched arrays; DEFAULT is the dict."""
 
     def _raw_env(self, num_agents=2):
         import warnings
@@ -321,9 +320,8 @@ class TestRawObservation(unittest.TestCase):
         self.assertTrue(any("changed meaning" in str(w.message) for w in caught))
 
     def test_original_alias_is_gone(self):
-        # Removed deliberately in v1.0.0: ORIGINAL said nothing about what the
-        # observation was. Use DEFAULT. By-value access still resolves, so a
-        # config storing the raw int keeps working.
+        # ORIGINAL was removed in v1.0.0 in favour of DEFAULT; by-value access
+        # still resolves, so a config storing the raw int keeps working.
         self.assertFalse(hasattr(ObservationType, "ORIGINAL"))
         self.assertIs(ObservationType(2), ObservationType.DEFAULT)
 

@@ -1,11 +1,7 @@
 """Env-level collision behaviour regressions.
 
-Covers two things:
-* a collision must halt the car (zero velocity) but PRESERVE its yaw -- the old
-  code did ``state[3:] = 0`` which also wiped yaw (index 4), snapping the
-  heading to 0/east.
-* a car centred in the track must never falsely collide (f1tenth/f1tenth_gym
-  issue #91 "unexpected collision ... without any visible collision").
+A collision must halt the car (zero velocity) while preserving its yaw, and a
+car centred in the track must never falsely collide (issue #91).
 """
 import unittest
 
@@ -15,9 +11,8 @@ import numpy as np
 from f1tenth_gym.envs.collision_models import CollisionCheckMode
 from f1tenth_gym.envs.env_config import EnvConfig, SimulationConfig
 
-# `_halt_on_collision` is what LIDAR_SCAN and BOUNDING_BOX do on contact. The
-# default is now SEGMENT_CONTACT, which resolves the contact instead, so every
-# test of the halt has to name the mode it is testing.
+# The default SEGMENT_CONTACT resolves contact instead of halting, so every test
+# of `_halt_on_collision` has to name the mode it is testing.
 HALT_MODE = CollisionCheckMode.LIDAR_SCAN
 
 
@@ -143,7 +138,7 @@ class TestCollisionModes(unittest.TestCase):
 
 
 class TestHaltIsModelAware(unittest.TestCase):
-    """Pins ISSUES_PLAN.md #26: the halt zeroes velocities only, per model."""
+    """The halt zeroes velocities only, per model."""
 
     def test_mb_stays_finite_after_a_halt(self):
         from f1tenth_gym.envs.dynamic_models import DynamicModel, FULLSCALE_VEHICLE_PARAMETERS
@@ -177,11 +172,8 @@ class TestHaltIsModelAware(unittest.TestCase):
     def test_st_halt_zeroes_velocities_and_rewinds_the_pose(self):
         """ST halt semantics: velocities die, the pose rewinds one step.
 
-        Was ``test_st_halt_semantics_unchanged``. #28 added the pose rewind, so
-        ``(x, y, yaw)`` now come back as the pre-step values rather than the
-        post-integration ones. The steering angle is still carried over
-        untouched, and yaw is still never snapped to 0/east (the original bug
-        this test was written for).
+        ``(x, y, yaw)`` come back as the pre-step values; the steering angle
+        carries over untouched and yaw is never snapped to 0/east.
         """
         env = gym.make("f1tenth_gym:f1tenth-v0", config=EnvConfig(
             collision_check=HALT_MODE, render_enabled=False))
@@ -211,13 +203,10 @@ class TestHaltIsModelAware(unittest.TestCase):
 
 
 class TestHaltRejectsTheMove(unittest.TestCase):
-    """Pins ISSUES_PLAN.md #28: a halted car never ends up inside geometry.
+    """A halted car never ends up inside geometry.
 
-    Zeroing the velocity is not enough on its own. The dynamics integrate
-    before the collision check, so a car held against a wall re-accelerates
-    from v=0 every step and keeps the few hundred micrometres of penetration
-    it gained. That accumulates monotonically: before the fix it crossed
-    Spielberg's 23 cm walls in ~1800 steps and drove out the far side.
+    The dynamics integrate before the collision check, so a car held against a
+    wall re-accelerates from v=0 each step and its penetration accumulates.
     """
 
     @staticmethod
@@ -312,12 +301,8 @@ class TestHaltRejectsTheMove(unittest.TestCase):
 class TestHaltRefreshesDerivedState(unittest.TestCase):
     """A rejected move must not survive in anything derived from the pose.
 
-    `step` computes the Frenet frame before the collision pass, and
-    `_update_scans` snapshots collision vertices before the per-agent loop, so
-    all of it described the pose the halt undoes. Before this was fixed the
-    published observation was internally inconsistent on every contact step:
-    `frenet_pose` sat ~2 cm of arclength ahead of the `pose_x`/`pose_y` beside
-    it, and the scan belonged to the rejected pose (23 m out on grazing beams).
+    `step` computes the Frenet frame and `_update_scans` snapshots the collision
+    vertices before the collision pass, so both describe the pose the halt undoes.
     """
 
     def _crash(self, noise_std=0.0, num_agents=1):
@@ -385,10 +370,8 @@ class TestHaltRefreshesDerivedState(unittest.TestCase):
     def test_spawning_in_contact_warns(self):
         """The move-rejection invariant assumes a clear pre-step pose.
 
-        A pose supplied through ``options={"poses": ...}`` that already overlaps
-        geometry breaks that base case: every later move is rejected too, so the
-        car cannot drive or reverse out. No shipped reset strategy can produce
-        such a pose, so this is purely a guard on caller-supplied ones.
+        A supplied pose already overlapping geometry breaks that base case: every
+        later move is rejected, so the car cannot drive or reverse out.
         """
         import warnings
 

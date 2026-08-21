@@ -169,8 +169,7 @@ class LiDARConfigTests(unittest.TestCase):
         """field_of_view is derived, so it can never disagree with the angles.
 
         ScanSimulator2D computes its own fov as ``angle_max - angle_min``, so a
-        config reporting a different number would be lying. It used to be a
-        stored field that was validated and then overwritten from the angles.
+        config reporting a different number would be lying.
         """
         cfg = LiDARConfig(angle_min=-0.5, angle_max=1.5)
         self.assertAlmostEqual(cfg.field_of_view, 2.0)

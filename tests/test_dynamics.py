@@ -660,7 +660,7 @@ class DynamicsTest(unittest.TestCase):
 
 
 class TestPoseReference(unittest.TestCase):
-    """Pins ISSUES_PLAN.md #18: one canonical (CoG) frame for observations."""
+    """One canonical (CoG) frame for observations."""
 
     def test_pose_reference_property(self):
         from f1tenth_gym.envs.dynamic_models import DynamicModel, PoseReference
