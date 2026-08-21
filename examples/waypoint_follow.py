@@ -25,6 +25,7 @@ from f1tenth_gym.envs.observation import ObservationType
 from f1tenth_gym.envs.reset import ResetStrategy
 from f1tenth_gym.envs.action import LongitudinalActionType, SteerActionType
 from f1tenth_gym.envs.collision_models import CollisionCheckMode
+from f1tenth_gym.envs.contact import ContactConfig
 from f1tenth_gym.envs.env_config import (
     ControlConfig,
     DomainRandomizationConfig,
@@ -347,7 +348,10 @@ def build_config() -> EnvConfig:
         map_scale=1.0,              # >1 enlarges the track
         num_agents=1,               # rows in the sim; >1 is multi-agent
         ego_index=0,                # which agent is "ego" (0 <= ego_index < num_agents)
-        collision_check=CollisionCheckMode.LIDAR_SCAN,  # LIDAR_SCAN | BOUNDING_BOX | NONE
+        # SEGMENT_CONTACT resolves contact with impulses; the other three only
+        # detect it. SEGMENT_CONTACT needs no LiDAR and refuses DynamicModel.MB.
+        collision_check=CollisionCheckMode.SEGMENT_CONTACT,
+        #   SEGMENT_CONTACT | LIDAR_SCAN | BOUNDING_BOX | NONE
         render_enabled=True,        # False -> no renderer built, runs fully headless
 
         # Vehicle physical parameters. F1TENTH_VEHICLE_PARAMETERS is the default
@@ -415,6 +419,20 @@ def build_config() -> EnvConfig:
             dropout_prob=0.0,               # per-beam no-return probability (sim2real)
             range_bias_std=0.0,             # per-beam systematic bias, drawn once/episode
             base_link_to_lidar_tf=(0.275, 0.0, 0.0),  # (x, y, yaw) sensor offset
+        ),
+
+        # ---- contact response (used by SEGMENT_CONTACT only) ---------------
+        contact_config=ContactConfig(
+            restitution=0.0,                # 0 is a dead stop, 1 a perfect bounce
+            friction=0.6,                   # Coulomb bound on the tangential impulse
+            restitution_threshold=0.6,      # below this approach speed, no bounce
+            baumgarte=0.4,                  # fraction of excess penetration removed/step
+            slop=0.002,                     # penetration left alone, so resting is quiet
+            solver_iterations=64,           # Jacobi sweeps; distinct from integrator substeps
+            tile_size=0.5,                  # broad-phase tile side, cost scales as 1/size^2
+            margin=1.25,                    # safety factor on the per-tile candidate count
+            wall_tolerance_px=0.25,         # Douglas-Peucker tolerance for wall extraction
+            device="cpu",                   # "gpu" loses by ~10x at one body per launch
         ),
 
         # ---- rendering (pacing + visuals) ----------------------------------
