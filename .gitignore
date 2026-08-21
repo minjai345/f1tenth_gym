@@ -177,3 +177,10 @@ uv.lock
 
 # XLA persistent compilation cache
 .jax_cache/
+
+# Agent working files, kept local and out of the repo
+CLAUDE.md
+.claude/
+ISSUES.md
+ISSUES_PLAN.md
+IMPROVED CONTACT AND SCANS PLAN/
