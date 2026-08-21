@@ -2,8 +2,23 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, replace
+from enum import IntEnum
 
-__all__ = ["LiDARConfig"]
+__all__ = ["LiDARConfig", "ScanBackend"]
+
+
+class ScanBackend(IntEnum):
+    """How a range is produced.
+
+    RASTER sphere-traces the occupancy grid's distance transform, which measures to
+    the nearest occupied cell *centre* and so reads long by up to half a cell
+    diagonal. SEGMENT intersects the extracted wall segments analytically: exact,
+    and differentiable with respect to the pose.
+    """
+
+    RASTER = 1
+    SEGMENT = 2
+
 
 # 270 degrees, the default sweep. Stored as the angle pair, since that is what
 # the sensor actually has; field_of_view is derived from it.
@@ -52,9 +67,20 @@ class LiDARConfig:
     range_bias_std: float = 0.0
     # (x, y, yaw) offset from base_link in meters/radians.
     base_link_to_lidar_tf: tuple[float, float, float] = (0.275, 0.0, 0.0)
+    backend: ScanBackend = ScanBackend.RASTER
+    # SEGMENT only. Per agent per launch it trails RASTER by 10%, and batching is
+    # what pays: at 12 agents "gpu" is 7x faster per agent, "cpu" 0.86x.
+    scan_device: str = "cpu"
 
     def __post_init__(self) -> None:
         # Validation
+        try:
+            object.__setattr__(self, "backend", ScanBackend(self.backend))
+        except ValueError as exc:
+            raise ValueError(f"backend must be a ScanBackend: {exc}") from exc
+        if self.scan_device not in ("cpu", "gpu"):
+            raise ValueError(
+                f"scan_device must be 'cpu' or 'gpu', got {self.scan_device!r}")
         if self.num_beams < 1:
             raise ValueError(f"num_beams must be >= 1, got {self.num_beams}")
         if self.range_max <= 0:

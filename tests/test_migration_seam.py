@@ -14,8 +14,9 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-CONTACT = pathlib.Path(__file__).resolve().parents[1] / "f1tenth_gym" / "envs" / "contact"
-PORTABLE = ("kernels.py", "solver.py")
+ENVS = pathlib.Path(__file__).resolve().parents[1] / "f1tenth_gym" / "envs"
+CONTACT = ENVS / "contact"
+PORTABLE = (CONTACT / "kernels.py", CONTACT / "solver.py", ENVS / "lidar" / "kernels.py")
 ALLOWED_ROOTS = {"jax", "numpy", "typing", "math", "dataclasses", "functools"}
 
 
@@ -36,23 +37,24 @@ def imported_roots(path):
 
 class TestPortability(unittest.TestCase):
     def test_the_portable_modules_import_nothing_local(self):
-        for name in PORTABLE:
-            roots = imported_roots(CONTACT / name)
+        for path in PORTABLE:
+            roots = imported_roots(path)
             stray = {r for r in roots if r.startswith(".") or r not in ALLOWED_ROOTS}
-            self.assertEqual(stray, set(), f"{name} imports {sorted(stray)}")
+            self.assertEqual(stray, set(), f"{path.name} imports {sorted(stray)}")
 
     def test_they_load_with_no_package_at_all(self):
         """Loaded straight off disk, outside f1tenth_gym, they still work."""
-        for name in PORTABLE:
-            spec = importlib.util.spec_from_file_location(f"detached_{name}", CONTACT / name)
+        for path in PORTABLE:
+            spec = importlib.util.spec_from_file_location(
+                f"detached_{path.parent.name}_{path.stem}", path)
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
             self.assertTrue(hasattr(module, "__name__"))
 
     def test_the_adapter_is_the_only_module_that_knows_numpy_marshalling(self):
         """Physics belongs in kernels/solver, or cutting the seam stops being a delete."""
-        for name in PORTABLE:
-            self.assertNotIn("numpy", imported_roots(CONTACT / name), name)
+        for path in PORTABLE:
+            self.assertNotIn("numpy", imported_roots(path), path.name)
 
 
 class TestKernelsAreBatchable(unittest.TestCase):
@@ -94,6 +96,18 @@ class TestKernelsAreBatchable(unittest.TestCase):
         out = grad(self.verts, self.a, self.b, self.n)
         self.assertEqual(out.shape, self.verts.shape)
         self.assertTrue(bool(jnp.all(jnp.isfinite(out))))
+
+    def test_the_scan_kernel_vmaps_jits_and_differentiates(self):
+        from f1tenth_gym.envs.lidar.kernels import scan
+
+        corner = np.array([[1.0, -1.0], [1.0, 1.0], [-1.0, 1.0], [-1.0, -1.0]])
+        seg_a = jnp.asarray(corner)
+        seg_b = jnp.asarray(np.roll(corner, -1, axis=0))
+        angles = jnp.linspace(-1.0, 1.0, 16)
+        run = jax.jit(jax.vmap(lambda p: scan(p, angles, seg_a, seg_b, 30.0)))
+        self.assertEqual(run(jnp.zeros((8, 3))).shape, (8, 16))
+        grad = jax.jit(jax.grad(lambda p: jnp.sum(scan(p, angles, seg_a, seg_b, 30.0))))
+        self.assertTrue(bool(jnp.all(jnp.isfinite(grad(jnp.zeros(3))))))
 
     def test_the_solver_vmaps_and_jits(self):
         from f1tenth_gym.envs.contact import ContactParams, resolve

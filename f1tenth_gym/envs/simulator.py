@@ -18,6 +18,7 @@ from .collision_models import CollisionCheckMode, collision_multiple, get_vertic
 from .dynamic_models import DynamicModel, PoseReference, VehicleParameters
 from .env_config import EnvConfig
 from .lidar import ScanSimulator2D, check_collision, ray_cast
+from .lidar.config import ScanBackend
 from .state import SimulationState
 from .track import Track
 
@@ -38,6 +39,24 @@ class ScanCache:
 
     angles: np.ndarray
     side_distances: np.ndarray
+
+
+def _make_scan_simulator(lidar_cfg):
+    """The scan backend named by the config, built from its shared arguments."""
+    kwargs = dict(
+        angle_min=lidar_cfg.angle_min,
+        angle_max=lidar_cfg.angle_max,
+        std_dev=lidar_cfg.noise_std,
+        min_range=lidar_cfg.range_min,
+        max_range=lidar_cfg.range_max,
+    )
+    if lidar_cfg.backend is ScanBackend.SEGMENT:
+        from .lidar.segment_scan import SegmentScanSimulator2D
+
+        return SegmentScanSimulator2D(
+            lidar_cfg.num_beams, lidar_cfg.field_of_view,
+            device=lidar_cfg.scan_device, **kwargs)
+    return ScanSimulator2D(lidar_cfg.num_beams, lidar_cfg.field_of_view, **kwargs)
 
 
 class F110Simulator:
@@ -150,15 +169,7 @@ class F110Simulator:
             lidar_cfg = env_config.lidar_config
             for agent_index in range(self.num_agents):
                 rng = np.random.default_rng(seed + agent_index)
-                simulator = ScanSimulator2D(
-                    lidar_cfg.num_beams,
-                    lidar_cfg.field_of_view,
-                    angle_min=lidar_cfg.angle_min,
-                    angle_max=lidar_cfg.angle_max,
-                    std_dev=lidar_cfg.noise_std,
-                    min_range=lidar_cfg.range_min,
-                    max_range=lidar_cfg.range_max,
-                )
+                simulator = _make_scan_simulator(lidar_cfg)
                 if self.track is not None:
                     simulator.set_map(self.track, env_config.map_scale)
                 cache = self._build_scan_cache(simulator, self.vehicle_params)
