@@ -1,0 +1,30 @@
+# Collapse duplicate author identities so `git shortlog`, `git log --author` and
+# GitHub's contributor graph show one entry per person. Display-time only; no
+# commit is rewritten. `user+name@users.noreply.github.com` addresses come from
+# commits made through the GitHub web UI.
+
+Hongrui Zheng <billyzheng.bz@gmail.com> <billyzheng.bz@gmail.com>
+Hongrui Zheng <billyzheng.bz@gmail.com> Hongrui <billyzheng.bz@gmail.com>
+Hongrui Zheng <billyzheng.bz@gmail.com> Billy <billyzheng.bz@gmail.com>
+Hongrui Zheng <billyzheng.bz@gmail.com> Billy Zheng <billyzheng.bz@gmail.com>
+Hongrui Zheng <billyzheng.bz@gmail.com> billyzheng <billyzheng.bz@gmail.com>
+Hongrui Zheng <billyzheng.bz@gmail.com> billyzheng-mlab <billyzheng.bz@gmail.com>
+Hongrui Zheng <billyzheng.bz@gmail.com> f1tenth-eval <billyzheng.bz@gmail.com>
+Hongrui Zheng <billyzheng.bz@gmail.com> Hongrui (Billy) Zheng <hzheng40@users.noreply.github.com>
+
+Ahmad Amine <ahmadamine998@gmail.com> <AhmadAmine998@gmail.com>
+Ahmad Amine <ahmadamine998@gmail.com> ahmadamine998 <ahmadamine998@gmail.com>
+Ahmad Amine <ahmadamine998@gmail.com> <35192516+AhmadAmine998@users.noreply.github.com>
+
+Luigi Berducci <luigi.berd@gmail.com> luigiberducci <luigi.berd@gmail.com>
+Luigi Berducci <luigi.berd@gmail.com> Berducci, Luigi <luigi.berducci@tuwien.ac.at>
+
+Nandan Tumu <nandan.t@live.com> nandantumu <nandan.t@live.com>
+Nandan Tumu <nandan.t@live.com> nandant <nandan.t@live.com>
+Nandan Tumu <nandan.t@live.com> nandant <nandan@nandantumu.com>
+Nandan Tumu <nandan.t@live.com> <10603428+nandantumu@users.noreply.github.com>
+
+Zirui Zang <zzang@seas.upenn.edu> <zzang@seas.upenn.edu>
+Zirui Zang <zzang@seas.upenn.edu> zzangupenn <zzang@seas.upenn.edu>
+
+Teodor Ilie <teo.altum.quinque@gmail.com> TeoIlie <teo.altum.quinque@gmail.com>
