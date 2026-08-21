@@ -1,0 +1,18 @@
+.git
+.github
+.venv
+**/__pycache__
+*.pyc
+*.egg-info
+.pytest_cache
+.jax_cache
+docs/_build
+docs/html
+# Map data is downloaded at runtime, but maps/.gitkeep must survive: the
+# directory has to exist, as it does in a git checkout.
+maps/*
+!maps/.gitkeep
+# Agent working files, present locally but never part of the image.
+CLAUDE.md
+ISSUES.md
+.claude
