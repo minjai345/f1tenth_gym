@@ -116,10 +116,9 @@ class CubicSplineND:
     def calc_position_and_yaw(self, s: float, segment=None):
         """Evaluate x, y and yaw at ``s`` in a single polynomial evaluation.
 
-        Equivalent to ``calc_position(s, segment)`` plus ``calc_yaw(s, segment)``
-        but shares the one ``(s - knot)**power`` vector and does a single
-        matrix-vector product over channels [x, y, cos, sin] -- the hot path in
-        ``Track.cartesian_to_frenet`` (called once per agent per step).
+        ``calc_position`` plus ``calc_yaw``, but sharing one ``(s - knot)**power``
+        vector and a single matrix-vector product over [x, y, cos, sin]. Hot path:
+        called once per agent per step from ``Track.cartesian_to_frenet``.
         """
         segment = segment if segment is not None else self.find_segment_for_s(s)
         exp_x = (s - self.spline_x[segment % self.length]) ** _CUBIC_POW

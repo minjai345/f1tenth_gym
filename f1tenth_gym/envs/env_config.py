@@ -49,9 +49,8 @@ class LoopCounterMode(IntEnum):
 class RewardMode(IntEnum):
     """How the per-step scalar reward is computed (see ``RewardConfig``).
 
-    - ``SURVIVAL``: reward = timestep (time-alive; the historical default).
-    - ``PROGRESS``: weighted sum of forward Frenet arclength progress, speed, a
-      survival bonus, and a collision penalty. Needs the Frenet frame.
+    - ``SURVIVAL``: reward = timestep (the default).
+    - ``PROGRESS``: weighted arclength, speed, survival, collision. Needs Frenet.
     - ``CUSTOM``: reward = reward_fn(obs, action, info, terminated, truncated).
     """
 
@@ -105,9 +104,8 @@ class ControlConfig:
         if self.accl_noise_std < 0:
             raise ValueError(f"accl_noise_std must be >= 0, got {self.accl_noise_std}")
         if self.steer_kp is not None and not math.isfinite(self.steer_kp):
-            # NaN defeats both guards in pid_steer: `kp <= 0` is False for NaN,
-            # and neither clip branch fires, so the kernel returns NaN and the
-            # steering angle is NaN from the first step.
+            # NaN defeats both guards in pid_steer (`kp <= 0` is False for NaN),
+            # so the steering angle comes back NaN from the first step.
             raise ValueError(f"steer_kp must be finite, got {self.steer_kp}")
 
     def with_updates(self, **changes: Any) -> "ControlConfig":
@@ -164,9 +162,8 @@ class ObservationConfig:
     features: Optional[tuple[str, ...]] = None
 
     def __post_init__(self) -> None:
-        # `features` only affects the FEATURES observation type; every other
-        # type uses a fixed preset, so silently ignoring features here hides a
-        # config mistake (the user probably meant type=FEATURES).
+        # Every other type uses a fixed preset, so silently ignoring `features`
+        # would hide a config mistake (the user probably meant type=FEATURES).
         if self.features is not None and self.type is not ObservationType.FEATURES:
             raise ValueError(
                 f"observation `features` only applies to ObservationType.FEATURES, "
@@ -225,10 +222,8 @@ class ResetConfig:
         if self.reference_line is not None:
             if not isinstance(self.reference_line, ReferenceLine):
                 raise TypeError("reference_line must be a ReferenceLine")
-            # Allow-list the RL_* family rather than denying the one MAP member
-            # that exists today: only _rl_reset_factory consumes this key, so a
-            # second MAP strategy would otherwise pass config validation and
-            # then die inside gym.make with an unexpected-kwarg TypeError.
+            # Only _rl_reset_factory consumes this key, so allow-list RL_*: a
+            # second MAP strategy would die on an unexpected kwarg in gym.make.
             if self.strategy not in (
                 ResetStrategy.RL_GRID_STATIC,
                 ResetStrategy.RL_RANDOM_STATIC,
@@ -363,7 +358,7 @@ class RewardConfig:
 
     Attributes:
         mode: RewardMode (SURVIVAL / PROGRESS / CUSTOM). Default SURVIVAL keeps
-            the historical ``reward = timestep``.
+            ``reward = timestep``.
         progress_weight: reward per metre of forward arclength (PROGRESS mode).
         velocity_weight: reward per m/s of ego speed (PROGRESS mode).
         timestep_weight: survival bonus per step, scaled by timestep (PROGRESS).
@@ -396,26 +391,9 @@ class RewardConfig:
 class DomainRandomizationConfig:
     """Per-episode randomization of vehicle parameters, applied at ``reset()``.
 
-    The range is given as two ordinary :class:`VehicleParameters` -- the
-    per-field lower and upper bound, in ABSOLUTE physical units. Every field is
-    drawn uniformly at each reset from the env RNG (so it is reproducible with
-    ``reset(seed=...)``); a field whose ``low`` and ``high`` agree is simply not
-    randomized, which makes "leave everything else alone" the default::
-
-        base = F1TENTH_VEHICLE_PARAMETERS
-        DomainRandomizationConfig(
-            enabled=True,
-            low=base.with_updates(m=3.0, mu=0.9, lf=0.14),
-            high=base.with_updates(m=4.0, mu=1.1, lf=0.18),
-        )
-
-    There is no separate range type: the bounds of a vehicle parameter are
-    themselves vehicle parameters, so ``VehicleParameters`` describes both and
-    cannot drift out of sync with itself. Field names are the actual fields,
-    e.g. ``m`` (mass) and ``h`` (CoG height) -- not ``mass``/``h_cg``. Prefer
-    randomizing *dynamics* params (m, mu, lf, lr, I, h). Randomizing the
-    actuation limits (v_min/v_max/s_min/s_max/...) is supported: the spaces
-    are built from :meth:`widest_params`, a fixed superset of every episode.
+    The range is two ordinary :class:`VehicleParameters` giving per-field bounds
+    in ABSOLUTE units; a field whose ``low`` and ``high`` agree is not randomized.
+    Spaces come from :meth:`widest_params`, a fixed superset of every episode.
 
     Attributes:
         enabled: Whether to randomize at each reset.
@@ -483,9 +461,8 @@ class DomainRandomizationConfig:
         """``base`` with each randomized *limit* field at its widest extreme.
 
         Spaces built from the result are a fixed valid superset of every
-        randomized episode (gymnasium requires fixed spaces). With DR disabled
-        this returns ``base`` unchanged, so spaces are byte-identical to a
-        non-DR env.
+        randomized episode, as gymnasium requires. With DR disabled this returns
+        ``base`` unchanged.
         """
         if not self.enabled or self.low is None or self.high is None:
             return base
@@ -653,10 +630,8 @@ class EnvConfig:
         if not isinstance(dr_cfg, DomainRandomizationConfig):
             raise TypeError("domain_randomization must be a DomainRandomizationConfig instance")
 
-        # The multi-body model needs the full 87-parameter ABI. The two small-scale
-        # presets leave all 69 multi-body fields at nan, which produced a NaN state
-        # with no error rather than a trajectory. Fail here instead, before the map
-        # download and the JIT.
+        # MB needs the full parameter ABI; the small-scale presets leave the 69
+        # multi-body fields at nan. Fail before the map download and the JIT.
         if simulation_cfg.dynamics_model is DynamicModel.MB:
             missing = self.params.missing_mb_parameters()
             if missing:

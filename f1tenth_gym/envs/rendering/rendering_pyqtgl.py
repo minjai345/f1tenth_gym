@@ -308,9 +308,8 @@ class PyQtEnvRendererGL(EnvRenderer):
         # Convert to RGB format for consistent pixel layout
         qimg = qimg.convertToFormat(QImage.Format.Format_RGB888)
 
-        # Pin the output to window_size regardless of the display's device-pixel
-        # ratio (a HiDPI X server grabs window_size*dpr; xvfb grabs window_size),
-        # so recorded frame shapes are deterministic across machines.
+        # Pin to window_size regardless of device-pixel ratio (HiDPI grabs
+        # window_size*dpr), so frame shapes are deterministic across machines.
         target = int(self.render_config.window_size)
         if qimg.width() != target or qimg.height() != target:
             qimg = qimg.scaled(target, target)
@@ -413,9 +412,8 @@ class PyQtEnvRendererGL(EnvRenderer):
         return ClosedLinesRenderer(self, points, color, size, **kwargs)
 
     def close(self):
-        # Release the GL widget/context in every mode. Previously rgb_array was a
-        # no-op, which leaked an OpenGL context per env and could crash on
-        # repeated env creation (notably under software GL / xvfb).
+        # Release the GL widget/context in every mode: skipping rgb_array leaks a
+        # context per env and can crash repeated env creation under software GL.
         try:
             self.window.close()
             self.view.setParent(None)

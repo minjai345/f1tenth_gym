@@ -12,20 +12,15 @@ from .tire_model import (
 from ..kinematic import vehicle_dynamics_ks_cog
 
 def vehicle_dynamics_mb(x: np.ndarray, u_init: np.ndarray, params: np.ndarray) -> np.ndarray:
-    """
-    vehicleDynamics_mb - multi-body vehicle dynamics based on the DoT (department of transportation) vehicle dynamics
-    reference point: center of mass
+    """Multi-body vehicle dynamics based on the DoT model, referenced to the CoG.
 
-    Syntax:
-        f = vehicleDynamics_mb(x,u,p)
+    Args:
+        x: Vehicle state vector.
+        u_init: Vehicle input vector.
+        params: Flat vehicle parameter array.
 
-    Inputs:
-        :param x: vehicle state vector
-        :param uInit: vehicle input vector
-        :param params: vehicle parameter vector
-
-    Outputs:
-        :return f: right-hand side of differential equations
+    Returns:
+        Right-hand side of the differential equations.
     """
 
     # ------------- BEGIN CODE --------------
@@ -131,9 +126,8 @@ def vehicle_dynamics_mb(x: np.ndarray, u_init: np.ndarray, params: np.ndarray) -
     K_rad = params[40]  # damping rate at pin joint [N·s/m]
     K_zt = params[41]  # vertical tire spring rate [N/m]
 
-    # CoG and roll axis heights. The total-mass CoG height is `h` (params[5]),
-    # shared with ST -- there is no separate multi-body copy; the load-transfer
-    # math below uses the sprung-mass height h_s.
+    # CoG and roll axis heights. Total-mass CoG height is `h` (params[5]), shared
+    # with ST; the load-transfer math below uses the sprung-mass height h_s.
     h_raf = params[42]  # roll axis front height [m]
     h_rar = params[43]  # roll axis rear height [m]
     h_s = params[44]  # sprung mass CoG height [m]

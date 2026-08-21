@@ -22,11 +22,8 @@ def _batched(space: gym.spaces.Box, num_agents: int) -> gym.spaces.Box:
 class _Key(NamedTuple):
     """One raw output key: how to size it, and how to read it.
 
-    Space builder and value getter live side by side on purpose. They used to be
-    two independent ``if/elif`` chains (plus a third list naming the keys), so
-    adding a key to one and forgetting the other produced an ``observation_space``
-    that silently disagreed with ``observe()`` — surfacing as a ``check_env``
-    failure nowhere near this file.
+    Space builder and value getter live side by side so a new key cannot reach
+    ``observation_space`` without also reaching ``observe()``.
     """
 
     space: Callable[..., gym.Space]
@@ -76,20 +73,8 @@ _KEYS: dict[str, _Key] = {
 class RawObservation(Observation):
     """Raw agent-batched arrays straight off the simulator's SoA state.
 
-    ``observe()`` returns a flat dict of arrays batched over agents::
-
-        state          (N, state_dim)   model-native state rows
-        standard_state (N, 7)           CoG-anchored standardized rows
-        scans          (N, num_beams)   only when the LiDAR is enabled
-        collisions     (N,)
-        frenet         (N, 3)           only when the Frenet frame is computed
-        lap_times      (N,)
-        lap_counts     (N,)
-        sim_time       ()
-
-    Every array is a **copy** (``.astype(np.float32)``) — the SoA buffers are
-    overwritten in place each step, so returning live views would silently
-    corrupt anything stored (RL replay buffers most of all).
+    Every array is a copy: the SoA buffers are overwritten in place each step, so
+    live views would corrupt anything stored.
     """
 
     def _selected_keys(self) -> tuple[str, ...]:
@@ -117,6 +102,20 @@ class RawObservation(Observation):
         )
 
     def observe(self):
+        """Read the selected raw arrays off the SoA state.
+
+        Returns:
+            A flat dict of arrays batched over agents::
+
+                state          (N, state_dim)   model-native state rows
+                standard_state (N, 7)           CoG-anchored standardized rows
+                scans          (N, num_beams)   only when the LiDAR is enabled
+                collisions     (N,)
+                frenet         (N, 3)           only when the Frenet frame is on
+                lap_times      (N,)
+                lap_counts     (N,)
+                sim_time       ()
+        """
         sim = self._sim
         state = self._state
         env = self.env.unwrapped

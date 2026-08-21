@@ -40,11 +40,12 @@ class ResetFn(ABC):
 class ResetStrategy(IntEnum):
     """Strategy for placing agents at episode reset.
 
-    RL_GRID_STATIC: Grid formation near start line, fixed order.
-    RL_RANDOM_STATIC: Random position along track, fixed order.
-    RL_GRID_RANDOM: Grid formation near start line, shuffled order.
-    RL_RANDOM_RANDOM: Random position along track, shuffled order.
-    MAP_RANDOM_STATIC: Random position on map free space.
+    Attributes:
+        RL_GRID_STATIC: Grid formation near start line, fixed order.
+        RL_RANDOM_STATIC: Random position along track, fixed order.
+        RL_GRID_RANDOM: Grid formation near start line, shuffled order.
+        RL_RANDOM_RANDOM: Random position along track, shuffled order.
+        MAP_RANDOM_STATIC: Random position on map free space.
     """
 
     RL_GRID_STATIC = 1

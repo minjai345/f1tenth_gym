@@ -118,10 +118,9 @@ def pid_steer(steer, current_steer, max_sv, kp):
 def pid_accl(speed, current_speed, max_a, max_v, min_v):
     """Speed tracking: a P controller with four gain quadrants.
 
-    The gain depends on the sign of the current speed and of the speed error
-    (accelerating forward, braking forward, braking from reverse, accelerating
-    in reverse). Note the quadrant test is ``current_speed > 0.0``, so a car
-    at exactly rest uses the weaker reverse gains.
+    The gain depends on the sign of the current speed and of the speed error. The
+    quadrant test is ``current_speed > 0.0``, so a car at exactly rest uses the
+    weaker reverse gains.
 
     Args:
         speed: Target speed in m/s.

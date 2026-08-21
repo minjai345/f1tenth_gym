@@ -22,12 +22,13 @@ __all__ = [
 class ObservationType(IntEnum):
     """Type of observation returned by the environment.
 
-    DIRECT: Raw agent-batched arrays (changed meaning in v1.0.0; warns).
-    DEFAULT: Per-agent dict of named fields (the packaged form; the default).
-    FEATURES: Custom subset of fields specified via config.
-    KINEMATIC_STATE: Kinematic state fields (x, y, delta, vx, theta).
-    DYNAMIC_STATE: Dynamic state fields including angular velocity and slip angle.
-    FRENET_DYNAMIC_STATE: Dynamic state with separate vx/vy components.
+    Attributes:
+        DIRECT: Raw agent-batched arrays (changed meaning in v1.0.0; warns).
+        DEFAULT: Per-agent dict of named fields (the packaged form; the default).
+        FEATURES: Custom subset of fields specified via config.
+        KINEMATIC_STATE: Kinematic state fields (x, y, delta, vx, theta).
+        DYNAMIC_STATE: Dynamic fields including angular velocity and slip angle.
+        FRENET_DYNAMIC_STATE: Dynamic state with separate vx/vy components.
     """
 
     DIRECT = 1

@@ -254,13 +254,8 @@ def check_collision(scan, side_distances, margin):
     """Contact/distance collision check against a wall-only LiDAR scan.
 
     A beam registers a collision when the obstacle it hits is within ``margin``
-    metres of the vehicle's bounding-box edge along that beam
-    (``scan - side_distances <= margin``). ``side_distances`` is the distance
-    from the LiDAR to the car's side at each beam angle.
-
-    NOTE: this is a **distance margin**, not a time-to-collision -- it is
-    velocity-independent. (An earlier version had a commented-out iTTC branch;
-    it was never used and has been removed.)
+    metres of the bounding-box edge along that beam. This is a distance margin,
+    not a time-to-collision, so it is velocity-independent.
 
     Args:
         scan (np.ndarray(num_beams, )): current (noise-free) scan to check.
@@ -344,16 +339,9 @@ def get_range(pose, beam_theta, va, vb):
 def get_blocked_view_ranges(pose, vertices, scan_angles):
     """Beam index ranges an opponent body could occlude, clipped to the field of view.
 
-    The four corner bearings are not enough on their own: taking their min and max
-    assumes the body does not straddle the rear of the scan. An opponent directly
-    behind has corners either side of +/-pi, so the naive bounds collapse to the
-    first and last beam and the caller sweeps every beam for a body no beam reaches
-    -- measured 1080 beams and 871 us for zero hits, against 28 beams and 30 us for
-    the same car in front.
-
-    Instead the body's angular arc is recovered as the complement of the widest gap
-    between corner bearings, which is well defined for any convex body the scanner
-    sits outside of, and then intersected with the scan's own angular span.
+    Min/max of the corner bearings collapses to every beam for a body straddling
+    the rear of the scan, so the arc is the complement of the widest gap between
+    those bearings, intersected with the scan span.
 
     Args:
         pose: Pose ``(3,)`` of the scanning vehicle.
@@ -487,7 +475,7 @@ class ScanSimulator2D(object):
     """
     2D LIDAR scan simulator class
 
-    Init params:
+    Args:
         num_beams (int): number of beams in the scan
         fov (float): field of view of the laser scan (used if angle_min/angle_max not specified)
         angle_min (float, optional): start angle of the scan in radians
@@ -579,11 +567,8 @@ class ScanSimulator2D(object):
         self.orig_s = np.sin(self.origin[2])
         self.orig_c = np.cos(self.origin[2])
 
-        # get the distance transform. It is a pure function of (occupancy_map,
-        # resolution), which are identical for every agent's scan sim and across
-        # repeated set_map calls with the same track. The EDT is the single most
-        # expensive step of env init, so cache it on the shared Track to compute
-        # it once instead of once per agent (x2 with the old double set_map).
+        # The EDT is the most expensive step of env init and is a pure function of
+        # (occupancy_map, resolution), so cache it on the shared Track.
         cached = getattr(self.track, "_lidar_dt", None)
         if cached is not None and cached[0] == self.map_resolution:
             self.dt = cached[1]

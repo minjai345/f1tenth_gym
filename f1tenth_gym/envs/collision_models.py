@@ -35,10 +35,12 @@ from enum import IntEnum
 class CollisionCheckMode(IntEnum):
     """Available collision detection strategies for the environment.
 
-    NONE disables collision detection entirely (walls and agent-vs-agent);
-    ``state.collisions`` stays 0 and episodes never terminate on collision.
-    SEGMENT_CONTACT resolves walls geometrically and applies impulses, so a car
-    scrapes along instead of halting; it needs no LiDAR.
+    Attributes:
+        NONE: No collision detection at all; ``state.collisions`` stays 0.
+        LIDAR_SCAN: Wall and agent contact from the scan.
+        BOUNDING_BOX: Agent-vs-agent GJK; walls still come from the scan.
+        SEGMENT_CONTACT: Geometric walls plus impulses, so a car scrapes along
+            instead of halting. Needs no LiDAR.
     """
 
     NONE = 0

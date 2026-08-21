@@ -99,11 +99,8 @@ class F110Simulator:
         self.ego_idx = env_config.ego_index
         self.time_step = env_config.simulation_config.timestep
         self.integrator_dt = env_config.simulation_config.integrator_timestep
-        # Validate the way we compute. Testing `time_step % integrator_dt` against 0
-        # rejects exact multiples that IEEE754 cannot represent: 0.03 % 0.01 is
-        # 0.00999999999999999847, not 0. Compare the ratio to the substep count that
-        # is actually used instead, which accepts every pair that divides evenly in
-        # real arithmetic.
+        # `time_step % integrator_dt` rejects exact multiples IEEE754 cannot
+        # represent (0.03 % 0.01 is 0.00999...), so compare the ratio instead.
         ratio = self.time_step / self.integrator_dt
         self.substeps = max(1, int(round(ratio)))
         if not np.isclose(ratio, self.substeps, rtol=0.0, atol=1e-9):
@@ -211,9 +208,7 @@ class F110Simulator:
             std[1] += self._cog_offset * math.sin(std[4])
         return std
 
-    # ---------------------------------------------------------------------
-    # Public API
-    # ---------------------------------------------------------------------
+    # --- Public API ---
     def set_map(self, track: Track, map_scale: float = 1.0) -> None:
         """Set or update the track used for simulation.
 
@@ -326,17 +321,11 @@ class F110Simulator:
             self._spawned_in_contact = []
             self._update_scans(flag_collisions=False)
             if self._spawned_in_contact:
-                # The halt rejects the move that causes contact, which keeps a
-                # car out of geometry by induction from a clear pre-step pose.
-                # A spawn that is ALREADY inside the margin breaks that base
-                # case: every later move is rejected too, so the car cannot
-                # drive or reverse out. Only reachable by supplying the pose --
-                # every shipped reset strategy spawns well clear.
+                # A spawn already inside the margin breaks the halt's base case:
+                # every later move is rejected too, so the car cannot drive out.
                 warnings.warn(
-                    f"agents {self._spawned_in_contact} spawned inside the collision "
-                    f"margin ({self.collision_margin} m). A collision halt rejects "
-                    f"the move that causes contact, so a car that starts in contact "
-                    f"cannot move until it is reset to a clear pose.",
+                    f"agents {self._spawned_in_contact} spawned inside the collision, margin ({self.collision_margin} m). "
+                    f"These agents cannot move until they are reset to a clear pose.",
                     RuntimeWarning,
                     stacklevel=3,
                 )
@@ -409,9 +398,8 @@ class F110Simulator:
             for agent_idx in range(self.num_agents):
                 # CoG-anchored (standard_state), matching the observed pose
                 std = self.state.standard_state[agent_idx]
-                # Anchor the local arclength search to THIS agent's own previous s.
-                # Falling back to the shared Track.s_guess windows each agent around
-                # the *previous* agent's position, corrupting multi-agent Frenet.
+                # Anchor the search to THIS agent's own previous s: the shared
+                # Track.s_guess windows it around the previous agent instead.
                 prev_s = float(self.state.frenet[agent_idx, 0])
                 self.state.frenet[agent_idx] = np.array(
                     self.track.cartesian_to_frenet(
@@ -433,9 +421,7 @@ class F110Simulator:
         self._update_agent_collisions()
         self.state.sim_time += self.time_step
 
-    # ------------------------------------------------------------------
-    # Convenience accessors
-    # ------------------------------------------------------------------
+    # --- Convenience accessors ---
     @property
     def agent_scans(self) -> np.ndarray:
         return self.state.scans
@@ -448,18 +434,11 @@ class F110Simulator:
     def scan_num_beams(self) -> int:
         return self.config.lidar_config.num_beams if self.scan_enabled else 0
 
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
+    # --- Internal helpers ---
 
     def _build_scan_cache(self, simulator: ScanSimulator2D, vehicle_params: VehicleParameters) -> ScanCache:
-        """Build precomputed scan geometry for collision detection.
-
-        Computes side_distances as the distance from the LiDAR position to the
-        vehicle body edge for each beam angle. This correctly accounts for the
-        LiDAR offset (base_link_to_lidar_tf) and collision body center offset
-        (collision_body_center_x/y) from the vehicle parameters, with an
-        adjustment for collision checks when the pose is at the center of gravity.
+        """Build precomputed scan geometry for collision detection: per-beam
+        distance from the LiDAR to the body edge, offsets included.
         """
         num_beams = simulator.num_beams
 
@@ -652,41 +631,11 @@ class F110Simulator:
         return np.where(min_t == np.inf, 0.0, min_t)
 
     def _halt_on_collision(self, agent_idx: int) -> None:
-        """Stop a car that has collided, undo the move that caused it, and flag it.
+        """Zero the velocities, rewind the pose that caused the contact, flag it.
 
-        Two things happen, and both are needed:
-
-        1. Zero the velocities and rates, but KEEP every other pose-like state.
-           The indices come from ``model.velocity_indices()`` — a blanket
-           ``[5:] = 0`` would wipe MB's roll/pitch angles and ride heights
-           (indices 5-28) and divide-by-zero the suspension math next step.
-        2. Restore ``(x, y, yaw)`` to the pose captured at the top of ``step``,
-           rejecting the move that produced the contact. Zeroing the velocity
-           alone is not enough: the dynamics integrate BEFORE this check runs,
-           so each step a car held against a wall re-accelerates from ``v=0``,
-           gains a few hundred micrometres inside the wall, and keeps only the
-           position. That penetration is monotonic — it accumulated past
-           Spielberg's 23 cm walls in ~1800 steps and the car drove out the far
-           side. Undoing the move restores the invariant "a halted car is never
-           inside geometry", by induction on the pre-step pose being clear.
-
-        A move *away* from the wall does not trigger a contact, so it is never
-        rejected — a car can always reverse off a wall it is pinned against.
-        That guarantee holds by induction from a collision-free pre-step pose;
-        a pose handed in through ``options={"poses"/"states": ...}`` that
-        already overlaps geometry breaks the base case and cannot recover while
-        ``terminate_on_collision=False``.
-
-        ``standard_state`` is always ``[X, Y, steer, speed, yaw, yaw_rate,
-        beta]``, so its speed (3) and rates (5:) zero unconditionally; yaw at
-        [4] is preserved in both buffers (the old ``state[3:] = 0`` snapped the
-        heading to east).
-
-        Rewinding the pose invalidates everything derived from it earlier in the
-        step, so all four mirrors are re-derived here: ``standard_state``,
-        ``poses``, the Frenet frame and this agent's collision vertices. The
-        published scan is re-traced by the caller, which owns the scan
-        simulator.
+        Zero via ``model.velocity_indices()``, not ``[5:] = 0``, which wipes MB's
+        ride heights. The dynamics integrate before this check, so without the
+        rewind a car held against a wall creeps monotonically through it.
         """
         for i in self.model.velocity_indices():
             self.state.state[agent_idx, i] = 0.0
@@ -695,11 +644,8 @@ class F110Simulator:
             pose_indices = self.model.pose_indices()
             for i in pose_indices:
                 self.state.state[agent_idx, i] = self._pre_pose[agent_idx, i]
-            # re-derive the mirrors so state / standard_state / poses agree.
-            # `poses` is built from pose_indices() too, not from hardcoded
-            # columns: a model that laid its state out differently would
-            # otherwise have the halt restore the right cells and then publish
-            # the wrong ones.
+            # Re-derive the mirrors from pose_indices(), not hardcoded columns,
+            # so state / standard_state / poses stay in agreement.
             self.state.standard_state[agent_idx] = self._standardize(
                 self.state.state[agent_idx]
             )
@@ -716,12 +662,8 @@ class F110Simulator:
     def _refresh_derived_from_pose(self, agent_idx: int) -> None:
         """Re-derive the Frenet frame and collision vertices after a pose rewind.
 
-        ``step`` computes the Frenet frame before the collision pass, and
-        ``_update_scans`` snapshots every agent's vertices before the per-agent
-        loop, so both describe the pose the halt has just undone. Without this,
-        ``obs['frenet_pose']`` disagrees with the ``pose_x``/``pose_y`` beside
-        it, and a later agent's ``ray_cast`` (and the ``BOUNDING_BOX`` GJK pass)
-        occludes against a body the simulator has already moved back.
+        Both are computed before the collision pass, so they describe the pose
+        the halt has just undone.
         """
         if self.config.simulation_config.compute_frenet_frame and self.track is not None:
             std = self.state.standard_state[agent_idx]
@@ -794,9 +736,8 @@ class F110Simulator:
             scan_clean = simulator.scan(scan_pose, rng=None)
             cache = self.scan_cache[agent_idx]
 
-            # The spawn sweep records contact instead of adjudicating it, so
-            # reset() can warn about a pose that starts inside the margin. This
-            # branch only runs at reset, never on the stepping path.
+            # Reset-only: record contact instead of adjudicating it, so reset()
+            # can warn about a pose that starts inside the margin.
             if spawn_sweep and check_collision(
                 scan_clean, cache.side_distances, self.collision_margin
             ):
@@ -809,10 +750,8 @@ class F110Simulator:
                 self.collision_margin,
             ):
                 self._halt_on_collision(agent_idx)
-                # The halt rewound the pose, so `scan_clean` describes a place
-                # the car no longer is. Re-trace from the restored pose: this is
-                # both what gets published and what the opponent ray_cast below
-                # shortens, and it costs one extra sweep on contact steps only.
+                # The halt rewound the pose, so re-trace: `scan_clean` is what
+                # gets published and what the opponent ray_cast below shortens.
                 scan_pose = self._lidar_pose_from_base(self.state.poses[agent_idx])
                 scan_clean = simulator.scan(scan_pose, rng=None)
             elif wall_collision_enabled:
@@ -850,9 +789,8 @@ class F110Simulator:
             self.contact = None
             return
         if self.track is None:
-            # A simulator built before its map has no walls to extract; set_map
-            # builds the kernels as soon as there is a track. Raising here instead
-            # would make the default mode unusable in that order.
+            # No map yet, so no walls to extract; set_map builds the kernels as
+            # soon as there is a track.
             self.contact = None
             return
         from .contact.adapter import build
@@ -1019,9 +957,8 @@ class F110Simulator:
         if mode is CollisionCheckMode.NONE:
             return
         if mode is CollisionCheckMode.LIDAR_SCAN:
-            # Agent-vs-agent via TTC on opponent-shortened scans. This needs the
-            # LiDAR scan; with the LiDAR disabled there is no signal, so skip
-            # (rather than indexing the empty scan cache).
+            # Agent-vs-agent on opponent-shortened scans. With the LiDAR off
+            # there is no signal, so skip rather than index an empty cache.
             if not self.scan_enabled:
                 return
             for agent_idx in range(self.num_agents):

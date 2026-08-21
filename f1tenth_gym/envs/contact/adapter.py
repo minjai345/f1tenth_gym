@@ -1,15 +1,8 @@
 """The numpy-to-JAX boundary for wall contact.
 
-The only file here that knows the gym is currently numpy. Marshalling and dtype
-handling only: anything resembling physics belongs in ``kernels`` or ``solver``, or
-the migration seam stops being a deletion.
-
-Two costs here dwarf the arithmetic while the caller is still numpy, because each
-step is one launch of a one-body solve rather than a batch of many. Building the
-arguments with ``jnp.asarray`` costs 0.216 ms against 0.002 ms for ``np``, so the
-kernels are fed numpy directly. And a one-body launch costs 0.10 ms on the CPU
-against 1.38 ms on an RTX 3080, so they are pinned to a device rather than left to
-whatever JAX picked. See ``ContactConfig.device`` for why that pin is CPU.
+Marshalling and dtype handling only: physics belongs in ``kernels`` or ``solver``.
+Launch cost dwarfs the arithmetic for a one-body solve (``jnp.asarray`` 0.216 ms
+against 0.002 ms for ``np``), hence numpy inputs and an explicit device pin.
 """
 
 import jax

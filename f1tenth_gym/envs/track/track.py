@@ -48,10 +48,8 @@ def _occupancy_from_image(image: Image.Image, spec: TrackSpec) -> np.ndarray:
     """Binarise a map image following ROS map_server semantics.
 
     Occupancy probability is ``(255 - pixel) / 255``, or ``pixel / 255`` when
-    ``spec.negate``; a cell is an obstacle (0.0) iff that probability exceeds
-    ``spec.occupied_thresh``, else free (255.0). The ROS "unknown" band
-    (between ``free_thresh`` and ``occupied_thresh``) maps to free: the EDT
-    and the ray tracer need a binary world.
+    ``spec.negate``; a cell is an obstacle (0.0) iff it exceeds
+    ``spec.occupied_thresh``. The ROS "unknown" band maps to free.
     """
     gray = np.array(image.convert("L"), dtype=np.float32)
     occ_prob = gray / 255.0 if spec.negate else (255.0 - gray) / 255.0
@@ -497,17 +495,16 @@ class Track:
                 )
 
     def frenet_to_cartesian(self, s, ey, ephi, use_raceline=False):
-        """
-        Convert Frenet coordinates to Cartesian coordinates.
+        """Convert Frenet coordinates to Cartesian coordinates.
 
-        s: distance along the raceline
-        ey: lateral deviation
-        ephi: heading deviation
+        Args:
+            s: Distance along the reference line (the centerline by default).
+            ey: Lateral deviation, positive left of the direction of travel.
+            ephi: Heading deviation in radians.
+            use_raceline: Measure against the raceline instead of the centerline.
 
-        returns:
-            x: x-coordinate
-            y: y-coordinate
-            psi: yaw angle
+        Returns:
+            ``(x, y, psi)`` in world metres and radians, yaw wrapped to [-pi, pi).
         """
         line = self.raceline if use_raceline else self.centerline
         s = s % line.s_frame_max
@@ -524,17 +521,18 @@ class Track:
         return x, y, (psi + np.pi) % (2 * np.pi) - np.pi  # wrap to [-pi, pi]
 
     def cartesian_to_frenet(self, x, y, psi, use_raceline=False, s_guess=None, use_s_guess=True):
-        """
-        Convert Cartesian coordinates to Frenet coordinates.
+        """Convert Cartesian coordinates to Frenet coordinates.
 
-        x: x-coordinate
-        y: y-coordinate
-        psi: yaw angle
+        Args:
+            x: World x-coordinate in metres.
+            y: World y-coordinate in metres.
+            psi: Yaw angle in radians.
+            use_raceline: Measure against the raceline instead of the centerline.
+            s_guess: Arclength to window the local search around.
+            use_s_guess: False searches the whole line instead.
 
-        returns:
-            s: distance along the centerline
-            ey: lateral deviation
-            ephi: heading deviation
+        Returns:
+            ``(s, ey, ephi)``; ``ey`` is positive left of the direction of travel.
         """
         line = self.raceline if use_raceline else self.centerline
         if s_guess is None:

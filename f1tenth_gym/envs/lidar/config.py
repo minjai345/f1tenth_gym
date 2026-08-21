@@ -10,10 +10,9 @@ __all__ = ["LiDARConfig", "ScanBackend"]
 class ScanBackend(IntEnum):
     """How a range is produced.
 
-    RASTER sphere-traces the occupancy grid's distance transform, which measures to
-    the nearest occupied cell *centre* and so reads long by up to half a cell
-    diagonal. SEGMENT intersects the extracted wall segments analytically: exact,
-    and differentiable with respect to the pose.
+    RASTER sphere-traces the distance transform, which measures to the nearest
+    occupied cell *centre* and so reads long by up to half a cell diagonal.
+    SEGMENT intersects the wall segments analytically: exact and differentiable.
     """
 
     RASTER = 1
@@ -29,13 +28,9 @@ _DEFAULT_HALF_FOV = 2.3561945
 class LiDARConfig:
     """Configuration for the simulated LiDAR sensor.
 
-    ``angle_min``/``angle_max`` are the sensor's real extent and the only stored
-    geometry; :attr:`field_of_view` is a read-only property derived from them, so
-    the two can never disagree. Build from a sweep with :meth:`from_fov` — it was
-    previously a constructor argument, which meant the same number was an input,
-    validated, and then overwritten from the angles, so
-    ``LiDARConfig(field_of_view=5.0, angle_min=-0.5, angle_max=0.5)`` silently
-    stored 1.0.
+    ``angle_min``/``angle_max`` are the only stored geometry; :attr:`field_of_view`
+    is a read-only property derived from them, so the two cannot disagree. Build
+    from a sweep with :meth:`from_fov`.
 
     Attributes:
         enabled: Whether LiDAR scanning is enabled.
@@ -116,17 +111,14 @@ class LiDARConfig:
     def from_fov(cls, field_of_view: float, **kwargs: object) -> "LiDARConfig":
         """Build a config with a symmetric sweep of ``field_of_view`` radians.
 
-        The shorthand for the common case, replacing the old
-        ``LiDARConfig(field_of_view=...)`` constructor argument. Angles are the
-        stored geometry, so this simply computes ``∓field_of_view/2``::
+        Angles are the stored geometry, so this computes ``∓field_of_view/2``::
 
             LiDARConfig.from_fov(np.deg2rad(270))     # the default sweep
-            LiDARConfig.from_fov(np.pi, num_beams=540)
 
         Raises:
             ValueError: if ``field_of_view`` is not positive, or if an explicit
                 ``angle_min``/``angle_max`` is also given — that combination is
-                over-determined, and the old code silently discarded the fov.
+                over-determined.
         """
         if field_of_view <= 0:
             raise ValueError(f"field_of_view must be > 0, got {field_of_view}")
@@ -162,9 +154,7 @@ class LiDARConfig:
     def with_updates(self, **changes: object) -> "LiDARConfig":
         """Return a re-validated copy with ``changes`` applied.
 
-        A plain ``replace()``: with the angles as the only stored geometry there
-        is nothing to special-case. This used to carry a bespoke rule for
-        ``field_of_view``, which still silently discarded it when an angle was
-        passed in the same call.
+        A plain ``replace()``: the angles are the only stored geometry, so there
+        is nothing to special-case.
         """
         return replace(self, **changes)

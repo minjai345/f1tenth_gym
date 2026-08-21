@@ -58,13 +58,8 @@ class VehicleParameters:
     collision_body_center_x: float = 0.0
     collision_body_center_y: float = 0.0
 
-    # Additional parameters for the multi-body model (defaulted to NaN)
-    #
-    # RESERVED, DO NOT DELETE: the four steering-rate and jerk constraints below
-    # are carried for parity with the CommonRoad model this port comes from, and
-    # for planned stronger multi-body support. No kernel reads them today -- that
-    # is deliberate, not dead code. Removing them would shift every later slot of
-    # the positional wire format and have to be undone when the constraints land.
+    # Multi-body parameters, NaN by default. The steering-rate and jerk constraints
+    # are unread: DO NOT DELETE, removing one shifts every later wire-format slot.
     kappa_dot_max: float = math.nan
     kappa_dot_dot_max: float = math.nan
     j_max: float = math.nan
@@ -140,11 +135,9 @@ class VehicleParameters:
     def missing_mb_parameters(self) -> tuple[str, ...]:
         """Names of parameters that are not finite, and so cannot reach a kernel.
 
-        ``F1TENTH_VEHICLE_PARAMETERS`` and ``F1FIFTH_VEHICLE_PARAMETERS`` leave the
-        entire multi-body block at ``nan``, so selecting ``DynamicModel.MB`` with
-        either of them yields a NaN state rather than a trajectory. Only
-        ``FULLSCALE_VEHICLE_PARAMETERS`` populates it. ``KS``/``ST`` never read
-        those slots, which is why the gate is specific to ``MB``.
+        Only ``FULLSCALE_VEHICLE_PARAMETERS`` populates the multi-body block; the
+        small-scale presets leave it at ``nan``, so ``DynamicModel.MB`` with either
+        yields a NaN state. ``KS``/``ST`` never read those slots.
 
         Returns:
             The unusable field names, empty if the parameters support MB.
@@ -156,10 +149,9 @@ class VehicleParameters:
     def to_array(self) -> np.ndarray:
         """Marshal the parameters into the flat float32 array the njit kernels index.
 
-        One array for every model: the parameters describe the *vehicle*, not the
-        model chosen to simulate it, so there is no per-model slicing. ``KS``/``ST``
-        read indices 0-17 and simply ignore the rest, which on the small-scale
-        presets are ``nan``.
+        One array for every model: the parameters describe the vehicle, not the
+        model simulating it, so there is no per-model slicing. ``KS``/``ST`` read
+        indices 0-17 and ignore the rest.
 
         Returns:
             A contiguous ``float32`` array of ``len(PARAMETER_ORDER)`` values, in
@@ -170,17 +162,8 @@ class VehicleParameters:
         )
 
 
-# THE WIRE FORMAT. Every kernel indexes the flat array from `to_array` POSITIONALLY
-# (`mu = params[0]` ... `v_max = params[15]`, `width = params[16]`, `length =
-# params[17]`, then the multi-body block from 20), so this order IS the ABI.
-#
-# It is simply the dataclass declaration order -- there is no separate hand-kept
-# tuple to drift out of sync -- but that means REORDERING OR INSERTING A FIELD
-# ABOVE SILENTLY REWIRES EVERY KERNEL. Exactly that broke the MB model once, when
-# collision_body_center_x/y were inserted at positions 18/19 and shifted the whole
-# multi-body block by +2. Append new fields at the END, and if you must reorder,
-# `tests/test_vehicle_params_abi.py` pins the full order against a literal list and
-# will fail naming the field that moved.
+# THE WIRE FORMAT: kernels index `to_array` POSITIONALLY, so inserting or reordering
+# a field above rewires every one. Append at the END; test_vehicle_params_abi.py pins it.
 PARAMETER_ORDER: tuple[str, ...] = tuple(f.name for f in fields(VehicleParameters))
 
 F1TENTH_VEHICLE_PARAMETERS = VehicleParameters(
@@ -350,9 +333,8 @@ class DynamicModel(IntEnum):
     def velocity_indices(self) -> tuple[int, ...]:
         """State indices holding velocities/rates — what a collision halt zeroes.
 
-        Pose-like states (positions, angles, ride heights, tire deflections)
-        are deliberately absent: zeroing MB's z-heights breaks the suspension
-        math with a divide-by-zero on the next step.
+        Pose-like states (positions, angles, ride heights, tire deflections) are
+        absent: zeroing MB's z-heights divides by zero in the suspension math.
         """
         if self is DynamicModel.KS:
             return (3,)
@@ -368,10 +350,9 @@ class DynamicModel(IntEnum):
     def pose_indices(self) -> tuple[int, ...]:
         """State indices ``(x, y, yaw)`` — what a collision halt restores.
 
-        All three shipped models happen to agree on ``(0, 1, 4)``, but the
-        mapping is declared per model rather than assumed: a new model that
-        laid its state out differently would otherwise have its position
-        silently rewritten from the wrong columns.
+        All three shipped models agree on ``(0, 1, 4)``, but the mapping is
+        declared per model: one laying its state out differently would otherwise
+        have its position rewritten from the wrong columns.
         """
         if self in (DynamicModel.KS, DynamicModel.ST, DynamicModel.MB):
             return (0, 1, 4)

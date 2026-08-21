@@ -1,8 +1,7 @@
 """Gymnasium wrappers offering clean interfaces onto the multi-agent F110Env.
 
-These are deliberately thin adapters -- the native env keeps its multi-agent
-``dict[agent -> dict[field -> value]]`` observation (load-bearing for numba
-consumers). Use these to consume it from single-agent RL code.
+Thin adapters: the native env keeps its multi-agent
+``dict[agent -> dict[field -> value]]`` observation.
 """
 from __future__ import annotations
 
@@ -18,13 +17,9 @@ __all__ = ["SingleAgentWrapper", "ObservationDelayWrapper"]
 class SingleAgentWrapper(gym.Wrapper, gym.utils.RecordConstructorArgs):
     """Flat single-agent interface over a 1-agent F110Env.
 
-    Unwraps ``obs["agent_0"]`` to the observation and reshapes the action from
-    ``(1, 2)`` to ``(2,)``, so the env is directly consumable by single-agent RL
-    libraries (SB3, CleanRL, ...). Compose with
-    ``gymnasium.wrappers.FlattenObservation`` for a flat ``Box`` observation.
-
-    Requires ``num_agents == 1``. Reward is already a scalar; ``info`` is passed
-    through unchanged (its per-agent arrays have length 1).
+    Unwraps ``obs["agent_0"]`` and reshapes the action from ``(1, 2)`` to ``(2,)``.
+    Compose with ``gymnasium.wrappers.FlattenObservation`` for a flat ``Box``.
+    Requires ``num_agents == 1``; ``info`` passes through unchanged.
     """
 
     def __init__(self, env: gym.Env):
@@ -55,15 +50,9 @@ class SingleAgentWrapper(gym.Wrapper, gym.utils.RecordConstructorArgs):
 class ObservationDelayWrapper(gym.Wrapper, gym.utils.RecordConstructorArgs):
     """Delay the observation by a fixed number of steps (sensor/perception lag).
 
-    ``step`` returns the observation as it was ``delay_steps`` steps ago; reward,
-    termination, and ``info`` still reflect the true current state (only the
-    sensing the agent acts on is stale). During the initial ``delay_steps`` steps
-    -- before that much history exists -- the reset observation is repeated.
-
-    Works on any observation the env exposes (the native nested dict, or a flat
-    ``Box`` when composed after :class:`SingleAgentWrapper` /
-    ``FlattenObservation``); the observation space is unchanged. ``delay_steps=0``
-    is a passthrough.
+    ``step`` returns the observation from ``delay_steps`` steps ago while reward,
+    termination and ``info`` stay current; the reset observation is repeated until
+    enough history exists. Works on any observation shape, space unchanged.
     """
 
     def __init__(self, env: gym.Env, delay_steps: int = 1):

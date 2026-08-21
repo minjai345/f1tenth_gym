@@ -19,9 +19,8 @@ def _scalar_box(low: float, high: float) -> gym.Space:
 
 
 _PI = float(np.pi)
-# Finite fallbacks for quantities without a tight physical cap. Chosen generous
-# enough not to be violated in practice, but finite so gymnasium normalization
-# and check_env work (they can't with the old +/-1e30).
+# Finite fallbacks for quantities with no tight physical cap: generous enough not
+# to be violated, but finite so gymnasium normalization and check_env work.
 _TIME_LIMIT = 1.0e6  # seconds / lap count
 _EY_LIMIT = 20.0     # metres of lateral Frenet deviation
 _BETA_LIMIT = _PI    # slip angle (physically < pi/2; pi is a safe cap)
@@ -35,21 +34,13 @@ def physical_bounds(env) -> dict:
     throwaway FullObservation just to reach a private method.
     """
     env = env.unwrapped
-    # Widest params across the DR bounds, so randomized episodes stay inside
-    # the fixed space. Read directly: `space_vehicle_params` is assigned in
-    # _initialize_components before the first space() call and again in
-    # update_params, so there is no env without it -- and a truthiness
-    # fallback here would silently substitute the NOMINAL params, undoing
-    # the widening with no error.
+    # Widest params across the DR bounds, so randomized episodes stay inside the
+    # fixed space. No fallback: it would substitute the nominal params silently.
     p = env.space_vehicle_params
     v_min, v_max = float(p.v_min), float(p.v_max)
     s_min, s_max = float(p.s_min), float(p.s_max)
-    # One-integrator-step actuator overshoot: the steering/accel constraints
-    # zero the actuator RATE only AFTER the angle/speed has crossed its limit,
-    # so a single step can exceed it by up to rate * integrator_dt. Pad the
-    # bounds by that worst case (|d delta/dt| <= sv_max, |dv/dt| <= a_max),
-    # else a hard-steer / hard-accel rollout lands just outside the declared
-    # space and breaks check_env / normalized-Box RL pipelines.
+    # The constraints zero the actuator RATE only after the limit is crossed, so
+    # one step can overshoot by rate * integrator_dt. Pad by that worst case.
     idt = float(getattr(env.sim, "integrator_dt", env.timestep))
     s_min -= float(p.sv_max) * idt
     s_max += float(p.sv_max) * idt

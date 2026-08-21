@@ -1,9 +1,7 @@
 """The observation field vocabulary.
 
 Single source of truth: both the factory (``observation/__init__.py``) and
-``FullObservation`` validate against THESE tuples. They used to carry
-duplicate copies, and a field added to one but not the other worked through
-``FullObservation(fields=...)`` while being rejected by the factory.
+``FullObservation`` validate against THESE tuples.
 """
 
 BASE_FIELDS: tuple[str, ...] = (

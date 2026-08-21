@@ -35,20 +35,9 @@ _INF = float("inf")
 class RenderClock:
     """Decouples rendering from stepping.
 
-    The user owns the step loop and calls ``env.render()`` explicitly, so all
-    pacing/frame-emission decisions live here and are driven from
-    ``F110Env.render()``. There are two independent clocks:
-
-    * A **sim-time frame accumulator** (advanced by ``timestep`` once per
-      ``step()``) that decides which steps emit a *distinct* rgb_array frame,
-      so recorded video stays smooth regardless of how fast the sim runs.
-    * A **wall-clock display gate** that, in human modes, caps redraws to at
-      most ``render_fps`` per wall-second -- so stepping the dynamics faster
-      than real time never forces more frames.
-
-    Human-mode pacing holds ``sim_time / wall_time == real_time_factor`` using
-    an absolute anchor so it self-corrects and never accumulates drift.
-    ``real_time_factor == inf`` disables pacing (free-run).
+    Two clocks driven from ``F110Env.render()``: a sim-time accumulator deciding
+    which steps emit a distinct rgb_array frame, and a wall-clock gate capping
+    render fps. Pacing matches rtf ``sim_time / wall_time == real_time_factor``.
     """
 
     def __init__(self, render_fps: float, real_time_factor: float, timestep: float):
@@ -286,10 +275,8 @@ class F110Env(gym.Env):
             self._winding_point = None
             self._winding_direction = 1.0
 
-        # Spaces are fixed for the env's lifetime (gymnasium contract), while
-        # domain randomization redraws params per episode -- so build them from
-        # the WIDEST params across the randomization ranges. With DR disabled
-        # this is exactly self.vehicle_params.
+        # Spaces are fixed for the env's lifetime but DR redraws params each
+        # episode, so build them from the widest params across the DR ranges.
         self.space_vehicle_params = self.dr_cfg.widest_params(self.vehicle_params)
 
         obs_kwargs: dict[str, Any] = {"type": self.observation_cfg.type}
@@ -297,10 +284,8 @@ class F110Env(gym.Env):
             obs_kwargs["features"] = self.observation_cfg.features
         self.observation_type = observation_factory(env=self, **obs_kwargs)
         self.observation_space = self.observation_type.space()
-        # Built on first use, not here: render callbacks always see the DEFAULT
-        # vocabulary, so this second observation object is only ever read when
-        # the configured type is NOT DEFAULT and a renderer exists. Reset to None
-        # so configure() rebuilds it against the new config.
+        # Built on first use: render callbacks always see the DEFAULT vocabulary,
+        # so this is only read when the configured type is not DEFAULT.
         self._render_obs_type = None
         self.render_obs = None
 
@@ -320,10 +305,8 @@ class F110Env(gym.Env):
             **self.reset_cfg.reset_kwargs(),
         )
 
-        # metadata["render_fps"] is the RecordVideo *container* framerate. Frames are
-        # captured once per env.render() call (== once per step), so this must be
-        # round(1/timestep) for real-time video playback. It is deliberately NOT
-        # render_config.render_fps, which is the (separate) display/emit cadence.
+        # RecordVideo *container* framerate. One frame is captured per step, so
+        # real-time playback needs round(1/timestep), not render_config.render_fps.
         base_fps = int(round(1.0 / self.timestep)) if self.timestep > 0 else 0
         self.metadata["render_fps"] = base_fps
 
@@ -419,10 +402,8 @@ class F110Env(gym.Env):
         """Draw a randomized VehicleParameters between the DR bounds (env RNG).
 
         One vectorized draw over every finite field, so the RNG stream does not
-        depend on *which* fields vary. A field with ``low == high`` comes back
-        exactly equal (``low + 0 * r``); the non-finite fields (the multi-body
-        block on the small-scale presets) are passed through untouched, since
-        ``uniform`` rejects NaN bounds outright.
+        depend on which fields vary. Non-finite fields (the multi-body block on
+        the small-scale presets) pass through untouched: ``uniform`` rejects NaN.
         """
         low, high = self.dr_cfg.bounds_arrays()
         drawn = low.copy()
@@ -546,9 +527,8 @@ class F110Env(gym.Env):
             ``sim_time`` — note ``collisions``/``progress`` appear only in
             ``step()``'s info.
         """
-        # EnvConfig.seed covers the FIRST unseeded reset, so a whole run is a
-        # deterministic function of the config; later unseeded resets continue
-        # the stream (episodes still differ). An explicit seed always wins.
+        # EnvConfig.seed covers the FIRST unseeded reset; later ones continue the
+        # stream. An explicit seed always wins.
         if seed is None and self.seed is not None and not self._config_seed_used:
             seed = int(self.seed)
         self._config_seed_used = True
@@ -727,11 +707,9 @@ class F110Env(gym.Env):
     def set_real_time_factor(self, real_time_factor: float) -> None:
         """Change the real-time factor at runtime (mid-episode is fine).
 
-        The real-time factor is sim-seconds simulated per wall-clock second in
-        the human render modes: ``1.0`` = real time, ``5.0`` = 5x faster,
-        ``float("inf")`` = no pacing (free-run). It has no effect on the
-        physics or on rgb_array output. The pacer re-anchors on change so there
-        is no catch-up sleep or fast-forward spike.
+        Sim-seconds per wall-second in the human render modes (``inf`` = free-run);
+        no effect on physics or rgb_array output. The pacer re-anchors on change,
+        so there is no catch-up sleep or fast-forward spike.
 
         Args:
             real_time_factor: positive float, or ``float("inf")`` for free-run.
@@ -796,9 +774,8 @@ class F110Env(gym.Env):
             clk.pace(self.sim_time)
             return None
 
-        # rgb_array / rgb_array_list: never sleep, always return a frame. Grab a
-        # fresh one only on the sim-time cadence; return the cached frame in
-        # between so RecordVideo (one capture per step) yields smooth video.
+        # rgb_array: never sleep, always return a frame. Grab a fresh one only on
+        # the sim-time cadence and cache it between, so RecordVideo stays smooth.
         if clk.frame_is_new or self._last_frame is None:
             self.renderer.update(obs=self.render_obs)
             self._last_frame = self.renderer.render()

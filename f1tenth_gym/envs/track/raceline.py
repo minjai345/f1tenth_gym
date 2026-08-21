@@ -11,9 +11,8 @@ from .cubic_spline import CubicSplineND
 def _read_labeled_csv(filepath, delimiter: str, header_row: int = 0) -> dict:
     """Read a numeric CSV whose column names are on line ``header_row``.
 
-    Column names are cleaned like the old pandas path (``#`` removed, whitespace
-    stripped); returns ``{clean_name: float32 column}``. Replaces
-    ``pandas.read_csv`` for the small, fixed-schema raceline/centerline files.
+    Column names are cleaned (``#`` removed, whitespace stripped); returns
+    ``{clean_name: float32 column}``.
     """
     with open(filepath, "r") as f:
         header = f.readlines()[header_row]

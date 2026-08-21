@@ -42,10 +42,8 @@ def make_renderer(
 ) -> tuple[EnvRenderer, "RenderConfig"]:
     """Return a GL renderer and the RenderConfig it was built from.
 
-    All rendering uses the OpenGL backend (``PyQtEnvRendererGL``), which needs
-    an X display -- real or virtual (``xvfb``). If a display render mode is
-    requested with no ``$DISPLAY``, raise a clear error with setup guidance
-    rather than failing cryptically deep in Qt.
+    The OpenGL backend needs an X display, real or virtual (``xvfb``). A display
+    mode with no ``$DISPLAY`` raises setup guidance rather than failing deep in Qt.
     """
     needs_display = render_mode in _DISPLAY_RENDER_MODES
     if needs_display and not os.environ.get("DISPLAY"):
@@ -56,19 +54,8 @@ def make_renderer(
         render_config = RenderConfig()
 
     if render_mode in ["human", "rgb_array", "unlimited", "human_fast"]:
-        # Qt and PyOpenGL must agree on the windowing API: Qt forced onto xcb
-        # (GLX) with PyOpenGL auto-detecting EGL (its choice on a Wayland
-        # session) leaves PyOpenGL unable to see the current context -- every
-        # GLMeshItem.paint raises "no valid context", pyqtgraph swallows it, and
-        # the cars silently vanish from otherwise-valid rgb_array frames. Both
-        # pins must land BEFORE the first GL import in the process, which is the
-        # line below; later renderers inherit whatever platform resolved then.
-        # setdefault, so an explicit user choice always wins.
-        #
-        # Scoped to this branch on purpose: render_mode=None builds no renderer,
-        # and `render_enabled` defaults True, so a headless training script that
-        # never renders used to pay a 114 ms / 416-module GL import and have its
-        # process environment mutated for every other Qt consumer.
+        # Qt and PyOpenGL must agree on the windowing API, else the cars vanish
+        # from rgb_array frames. Both pins must precede the first GL import below.
         os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
         os.environ.setdefault("PYOPENGL_PLATFORM", "x11")
         # NVIDIA ignores the backend's swap interval 0 and holds swapBuffers to the

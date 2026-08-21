@@ -162,19 +162,9 @@ def _soft_min(values, softness):
 def deepest_depth(verts, seg_a, seg_b, normal, valid=True, softness=0.0):
     """Penetration of the deepest body vertex: the differentiable surrogate.
 
-    Not a substitute for :func:`segment_contact`. **Use the manifold for physics and
-    this for learning.** A manifold carries two points so a resting body cannot spin,
-    but their summed depth is a worse thing to differentiate: over 417 poses on
-    Spielberg in float32 its gradient sits 9.7% from central differences on d/dx
-    against 1.4% here, and it goes numerically dead -- no finite-difference signal on
-    any axis -- at 12 of those poses where this goes dead at none.
-
-    Everything is projected in a frame centred on the body, which is algebraically a
-    no-op: the depth is a difference of two projections that are O(100) at real track
-    coordinates, and cancelling the centre before subtracting keeps significant bits
-    that would otherwise be lost. Measured against the same maths in world axes, that
-    is a 3.8x accuracy gain on d/dx (0.86% against 3.25%), not a correctness fix --
-    both variants produce a usable gradient.
+    Use the manifold for physics and this for learning: its summed depth
+    differentiates worse (9.7% from central differences on d/dx against 1.4%).
+    Projection is body-centred, a no-op that keeps bits at track coordinates.
 
     Args:
         verts: (4, 2) body corners, counter-clockwise.
@@ -196,8 +186,8 @@ def deepest_depth(verts, seg_a, seg_b, normal, valid=True, softness=0.0):
         face's, so it can be positive on an overlap the manifold's face clip
         declines; on a continuous wall an adjacent segment covers that case.
     """
-    # Centring cancels exactly out of every difference below, so this changes no
-    # value -- only how many significant bits survive to reach the difference.
+    # Centring cancels out of every difference below: it changes no value, only how
+    # many significant bits survive to reach the difference.
     centre = verts.mean(axis=0)
     local = verts - centre
     local_a = seg_a - centre
