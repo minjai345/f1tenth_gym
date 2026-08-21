@@ -24,7 +24,10 @@ jobs:
       run: sudo apt update
 
     - name: Install openGL and xvfb
+      # Qt 6.5+ refuses to load its xcb platform plugin without libxcb-cursor0
+      # and aborts the process; libgl1-mesa-dri is the software GL xvfb needs.
       run: sudo apt install -y freeglut3-dev libglib2.0-0 libsm6 libxrender1 libxext6 libxkbcommon-x11-0 libdbus-1-dev xvfb
+           libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 libxcb-randr0 libxcb-render-util0 libxcb-xinerama0 libgl1-mesa-dri
 
     - uses: actions/checkout@v4
 
