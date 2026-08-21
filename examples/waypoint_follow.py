@@ -40,6 +40,7 @@ from f1tenth_gym.envs.env_config import (
     TerminationConfig,
 )
 from f1tenth_gym.envs.lidar import LiDARConfig
+from f1tenth_gym.envs.lidar.config import ScanBackend
 from f1tenth_gym.envs.rendering import make_lidar_scan_callback
 
 """
@@ -419,6 +420,11 @@ def build_config() -> EnvConfig:
             dropout_prob=0.0,               # per-beam no-return probability (sim2real)
             range_bias_std=0.0,             # per-beam systematic bias, drawn once/episode
             base_link_to_lidar_tf=(0.275, 0.0, 0.0),  # (x, y, yaw) sensor offset
+            # RASTER sphere-traces the occupancy grid's distance transform, which
+            # measures to the nearest cell centre and so reads long by half a pixel.
+            # SEGMENT casts the wall segments: exact, and differentiable in the pose.
+            backend=ScanBackend.SEGMENT,     # RASTER | SEGMENT
+            scan_device="cpu",              # SEGMENT only; "gpu" wins from ~4 agents up
         ),
 
         # ---- contact response (used by SEGMENT_CONTACT only) ---------------
