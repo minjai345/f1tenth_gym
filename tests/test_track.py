@@ -199,11 +199,13 @@ class TestTrack(unittest.TestCase):
                 trackdirname[0].isupper(), f"trackdir {trackdirname} is not capitalized"
             )
 
-            # check map spec file exists (new convention: {track}.yaml)
-            file_spec = trackdir / f"{trackdirname}.yaml"
-            self.assertTrue(
-                file_spec.exists(),
-                f"map spec file {file_spec} does not exist in {trackdir}",
+            # Both conventions ship from api.f1tenth.org and both loaders accept
+            # them, so a freshly downloaded {track}_map.yaml is not a layout error.
+            candidates = [trackdir / f"{trackdirname}.yaml", trackdir / f"{trackdirname}_map.yaml"]
+            file_spec = next((c for c in candidates if c.exists()), None)
+            self.assertIsNotNone(
+                file_spec,
+                f"no map spec ({' or '.join(c.name for c in candidates)}) in {trackdir}",
             )
 
             # read map image file from spec
