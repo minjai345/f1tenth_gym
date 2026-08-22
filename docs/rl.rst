@@ -230,12 +230,20 @@ Both wrappers record their constructor arguments
 workers. ``gym.make_vec`` rebuilds the whole stack once per worker —
 continuing with the ``cfg`` from the doctest above:
 
+.. warning::
+
+   ``vectorization_mode="async"`` forks by default, and the ``SEGMENT`` scan
+   backend initialises JAX, which is multithreaded. Forking that deadlocks the
+   workers. Pass ``vector_kwargs={"context": "spawn"}`` and call it from a script
+   guarded by ``if __name__ == "__main__":`` — spawn re-imports the parent module
+   in each worker. The example below uses ``"sync"``, which needs neither.
+
 >>> import numpy as np
 >>> from gymnasium.wrappers import FlattenObservation
 >>> vec = gym.make_vec(
 ...     "f1tenth_gym:f1tenth-v0",
 ...     num_envs=4,
-...     vectorization_mode="async",
+...     vectorization_mode="sync",
 ...     wrappers=[SingleAgentWrapper, FlattenObservation],
 ...     config=cfg,
 ... )

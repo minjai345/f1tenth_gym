@@ -229,8 +229,8 @@ class TestBackendWiring(unittest.TestCase):
             lidar_config=LiDARConfig(backend=backend, **kwargs),
             render_enabled=False))
 
-    def test_the_default_is_still_the_raster_backend(self):
-        self.assertIs(LiDARConfig().backend, ScanBackend.RASTER)
+    def test_the_default_is_the_segment_backend(self):
+        self.assertIs(LiDARConfig().backend, ScanBackend.SEGMENT)
 
     def test_selecting_segment_builds_the_segment_simulator(self):
         env = self._env(ScanBackend.SEGMENT)

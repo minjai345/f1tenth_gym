@@ -296,6 +296,7 @@ class ScanEDTSharingTests(unittest.TestCase):
 
     def test_edt_shared_across_agents(self):
         from f1tenth_gym.envs.env_config import SimulationConfig
+        from f1tenth_gym.envs.lidar.config import ScanBackend
         from f1tenth_gym.envs.lidar.laser_models import get_dt
 
         env = gym.make(
@@ -303,6 +304,7 @@ class ScanEDTSharingTests(unittest.TestCase):
             config=EnvConfig(
                 num_agents=4,
                 simulation_config=SimulationConfig(max_laps=None),
+                lidar_config=LiDARConfig(backend=ScanBackend.RASTER),
                 render_enabled=False,
             ),
         )
