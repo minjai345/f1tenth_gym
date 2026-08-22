@@ -10,9 +10,9 @@ __all__ = ["LiDARConfig", "ScanBackend"]
 class ScanBackend(IntEnum):
     """How a range is produced.
 
-    RASTER sphere-traces the distance transform, which measures to the nearest
-    occupied cell *centre* and so reads long by up to half a cell diagonal.
-    SEGMENT intersects the wall segments analytically: exact and differentiable.
+    RASTER sphere-traces the distance transform, so it reads long by up to half a
+    cell diagonal. SEGMENT intersects the wall segments analytically: exact and
+    differentiable, but JAX-backed, so vector envs need ``context="spawn"``.
     """
 
     RASTER = 1
@@ -62,7 +62,7 @@ class LiDARConfig:
     range_bias_std: float = 0.0
     # (x, y, yaw) offset from base_link in meters/radians.
     base_link_to_lidar_tf: tuple[float, float, float] = (0.275, 0.0, 0.0)
-    backend: ScanBackend = ScanBackend.RASTER
+    backend: ScanBackend = ScanBackend.SEGMENT
     # SEGMENT only. Per agent per launch it trails RASTER by 10%, and batching is
     # what pays: at 12 agents "gpu" is 7x faster per agent, "cpu" 0.86x.
     scan_device: str = "cpu"

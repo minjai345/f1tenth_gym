@@ -111,9 +111,9 @@ class SegmentScanSimulator2D:
         if self.track is None:
             raise ValueError("Map is not set for scan simulator.")
         if self._scan is None:
-            out = np.full(self.num_beams, self.max_range, dtype=np.float32)
+            out = np.full(self.num_beams, self.max_range, dtype=np.float64)
         else:
-            out = np.asarray(self._scan(np.asarray(pose, np.float32)), dtype=np.float32)
+            out = np.array(self._scan(np.asarray(pose, np.float32)), dtype=np.float64)
         if rng is not None and self.std_dev > 0.0:
             out = out + rng.normal(0.0, self.std_dev, self.num_beams).astype(np.float32)
         return out
