@@ -26,7 +26,7 @@ constant command and stops only when the environment says to:
 ...     obs, reward, terminated, truncated, info = env.step(action)
 ...     steps += 1
 >>> print(steps, round(info["sim_time"], 2))
-1792 17.92
+1787 17.87
 
 The ``f1tenth_gym:`` prefix on the id is an instruction to import the package,
 whose side effect registers ``f1tenth-v0``; after an explicit
@@ -49,7 +49,7 @@ each:
 >>> info["collisions"], info["lap_counts"]
 (array([1.], dtype=float32), array([0.]))
 
-The car hit a wall after 17.92 simulated seconds without completing a lap, so
+The car hit a wall after 17.87 simulated seconds without completing a lap, so
 the default ``max_laps=1`` was never in play. That figure is also the episode
 return: the default reward mode pays the physics timestep once per step, making
 the return pure survival time (:doc:`rl`). ``info`` from ``reset`` is smaller
@@ -111,7 +111,7 @@ at the spawn pose.
 
 >>> scan = obs["agent_0"]["scan"]
 >>> print(scan.shape, round(float(scan.min()), 3), float(scan.max()))
-(1080,) 0.295 30.0
+(1080,) 0.284 30.0
 >>> env.close()
 
 ``pose_x``, ``pose_y`` and ``pose_theta`` are derived fields the default preset

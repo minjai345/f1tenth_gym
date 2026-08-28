@@ -340,10 +340,9 @@ def build_config() -> EnvConfig:
         map_scale=1.0,              # >1 enlarges the track
         num_agents=1,               # rows in the sim; >1 is multi-agent
         ego_index=0,                # which agent is "ego" (0 <= ego_index < num_agents)
-        # SEGMENT_CONTACT resolves contact with impulses; the other three only
-        # detect it. SEGMENT_CONTACT needs no LiDAR and refuses DynamicModel.MB.
+        # Contact is geometric and independent of LiDAR. NONE disables it.
         collision_check=CollisionCheckMode.SEGMENT_CONTACT,
-        #   SEGMENT_CONTACT | LIDAR_SCAN | BOUNDING_BOX | NONE
+        #   SEGMENT_CONTACT | NONE
         render_enabled=True,        # False -> no renderer built, runs fully headless
 
         # Vehicle physical parameters. F1TENTH_VEHICLE_PARAMETERS is the default

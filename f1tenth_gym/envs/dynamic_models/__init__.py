@@ -10,7 +10,7 @@ from enum import IntEnum
 
 import numpy as np
 
-from .kinematic import vehicle_dynamics_ks, get_standardized_state_ks
+from .kinematic import vehicle_dynamics_ks_cog, get_standardized_state_ks
 from .single_track import vehicle_dynamics_st, get_standardized_state_st
 from .multi_body import init_mb, vehicle_dynamics_mb, get_standardized_state_mb
 from .utils import pid_steer, pid_accl
@@ -302,62 +302,10 @@ FULLSCALE_VEHICLE_PARAMETERS = VehicleParameters(
 
 
 
-class PoseReference(IntEnum):
-    """Where a model's native x/y state (and ``state.poses``) is anchored.
-
-    ``standard_state`` and every derived observation are normalised to the COG
-    whatever the model; this enum describes the RAW ``state`` only.
-    """
-
-    REAR_AXLE = 1
-    COG = 2
-
-
 class DynamicModel(IntEnum):
     KS = 1  # Kinematic Single Track
     ST = 2  # Single Track
     MB = 3  # Multi-body Model
-
-    @property
-    def pose_reference(self) -> PoseReference:
-        """The frame of the model's native x/y state. Key conversions off THIS,
-        never off ``model != DynamicModel.KS`` — that test silently shifts any
-        future rear-axle model by ``lr``."""
-        if self is DynamicModel.KS:
-            return PoseReference.REAR_AXLE
-        elif self in (DynamicModel.ST, DynamicModel.MB):
-            return PoseReference.COG
-        else:
-            raise ValueError(f"no pose reference for model {self!r}")
-
-    def velocity_indices(self) -> tuple[int, ...]:
-        """State indices holding velocities/rates — what a collision halt zeroes.
-
-        Pose-like states (positions, angles, ride heights, tire deflections) are
-        absent: zeroing MB's z-heights divides by zero in the suspension math.
-        """
-        if self is DynamicModel.KS:
-            return (3,)
-        elif self is DynamicModel.ST:
-            return (3, 5, 6)
-        elif self is DynamicModel.MB:
-            # vx, yaw/roll/pitch rates, vy, vz, front/rear rates and vy/vz,
-            # four wheel speeds
-            return (3, 5, 7, 9, 10, 12, 14, 15, 17, 19, 20, 22, 23, 24, 25, 26)
-        else:
-            raise ValueError(f"no velocity indices for model {self!r}")
-
-    def pose_indices(self) -> tuple[int, ...]:
-        """State indices ``(x, y, yaw)`` — what a collision halt restores.
-
-        All three shipped models agree on ``(0, 1, 4)``, but the mapping is
-        declared per model: one laying its state out differently would otherwise
-        have its position rewritten from the wrong columns.
-        """
-        if self in (DynamicModel.KS, DynamicModel.ST, DynamicModel.MB):
-            return (0, 1, 4)
-        else:
-            raise ValueError(f"no pose indices for model {self!r}")
 
     def get_initial_state(self, pose=None, params=None):
         if self == DynamicModel.MB and params is None:
@@ -386,7 +334,7 @@ class DynamicModel(IntEnum):
     @property
     def f_dynamics(self):
         if self == DynamicModel.KS:
-            return vehicle_dynamics_ks
+            return vehicle_dynamics_ks_cog
         elif self == DynamicModel.ST:
             return vehicle_dynamics_st
         elif self == DynamicModel.MB:

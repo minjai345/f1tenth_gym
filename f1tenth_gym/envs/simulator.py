@@ -4,7 +4,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 from typing import Callable, Optional
-import warnings
 
 import numpy as np
 
@@ -14,10 +13,10 @@ from .action import (
     longitudinal_action_from_type,
     steer_action_from_type,
 )
-from .collision_models import CollisionCheckMode, collision_multiple, get_vertices
-from .dynamic_models import DynamicModel, PoseReference, VehicleParameters
+from .collision_models import CollisionCheckMode, get_vertices
+from .dynamic_models import DynamicModel, VehicleParameters
 from .env_config import EnvConfig
-from .lidar import ScanSimulator2D, check_collision, ray_cast
+from .lidar import ScanSimulator2D, ray_cast
 from .lidar.config import ScanBackend
 from .state import SimulationState
 from .track import Track
@@ -29,16 +28,13 @@ SteeringFn = Callable[[float, np.ndarray, VehicleParameters], float]
 
 @dataclass
 class ScanCache:
-    """Precomputed LiDAR geometry for collision detection.
+    """Precomputed beam angles used for opponent occlusion.
 
     Attributes:
         angles: Beam angles relative to vehicle heading (used by ray_cast).
-        side_distances: Distance from the LiDAR to the vehicle body edge per
-            beam (used by the collision check).
     """
 
     angles: np.ndarray
-    side_distances: np.ndarray
 
 
 def _make_scan_simulator(lidar_cfg):
@@ -71,8 +67,6 @@ class F110Simulator:
         vehicle_params: Physical parameters of the vehicle.
         num_agents: Number of agents in the simulation.
     """
-
-    collision_margin: float = 0.005  # metres; a beam collides when scan - side_distance <= this
 
     def __init__(
         self,
@@ -169,44 +163,20 @@ class F110Simulator:
                 simulator = _make_scan_simulator(lidar_cfg)
                 if self.track is not None:
                     simulator.set_map(self.track, env_config.map_scale)
-                cache = self._build_scan_cache(simulator, self.vehicle_params)
+                cache = self._build_scan_cache(simulator)
                 self.scan_sims.append(simulator)
                 self.scan_rngs.append(rng)
                 self.scan_cache.append(cache)
 
-        # Geometry buffers for collision checks
-        self.agent_vertices = np.zeros((self.num_agents, 4, 2), dtype=np.float64)
-        self._adjusted_scans = np.zeros((self.num_agents, scan_size), dtype=np.float32)
-
         self._collision_body_dx, self._collision_body_dy = self._compute_collision_body_offset(
-            self.vehicle_params, self.model
+            self.vehicle_params
         )
-        self._cog_offset = self._compute_cog_offset(self.vehicle_params, self.model)
         self.contact = None
         self._build_contact()
-        # pose at the top of the current step, used to undo a move that ends in
-        # contact (see _halt_on_collision). None => nothing to restore yet.
-        self._pre_pose: np.ndarray | None = None
-
-    @staticmethod
-    def _compute_cog_offset(vehicle_params: VehicleParameters, model: DynamicModel) -> float:
-        """Forward shift from the model's native x/y anchor to the CoG.
-
-        ``standard_state`` (and every observation derived from it) is
-        CoG-anchored for all models; rear-axle models need +lr along the yaw.
-        """
-        if model.pose_reference is PoseReference.REAR_AXLE:
-            lr = float(vehicle_params.lr)
-            return lr if math.isfinite(lr) else 0.0
-        return 0.0
 
     def _standardize(self, state: np.ndarray) -> np.ndarray:
-        """A ``standard_state`` row from a native state row, CoG-normalised."""
-        std = self.standard_state_fn(state).astype(np.float32)
-        if self._cog_offset != 0.0:
-            std[0] += self._cog_offset * math.cos(std[4])
-            std[1] += self._cog_offset * math.sin(std[4])
-        return std
+        """Return the common CoG-referenced seven-column state."""
+        return self.standard_state_fn(state).astype(np.float32)
 
     # --- Public API ---
     def set_map(self, track: Track, map_scale: float = 1.0) -> None:
@@ -236,12 +206,8 @@ class F110Simulator:
         self.vehicle_params = vehicle_params
         self.params_array = vehicle_params.to_array()
         self._collision_body_dx, self._collision_body_dy = self._compute_collision_body_offset(
-            self.vehicle_params, self.model
+            self.vehicle_params
         )
-        self._cog_offset = self._compute_cog_offset(self.vehicle_params, self.model)
-        if self.scan_enabled:
-            for i, simulator in enumerate(self.scan_sims):
-                self.scan_cache[i] = self._build_scan_cache(simulator, vehicle_params)
         self._build_contact()
 
     def reset(self, poses: np.ndarray, *, option: str = "pose", noise_seed: int | None = None) -> None:
@@ -313,22 +279,9 @@ class F110Simulator:
                     dtype=np.float32,
                 )
 
-        # A restore must never reach back into the previous episode.
-        self._pre_pose = None
-
         # One LiDAR sweep so the first observation is not all zeros (#15).
         if self.scan_enabled:
-            self._spawned_in_contact = []
-            self._update_scans(flag_collisions=False)
-            if self._spawned_in_contact:
-                # A spawn already inside the margin breaks the halt's base case:
-                # every later move is rejected too, so the car cannot drive out.
-                warnings.warn(
-                    f"agents {self._spawned_in_contact} spawned inside the collision, margin ({self.collision_margin} m). "
-                    f"These agents cannot move until they are reset to a clear pose.",
-                    RuntimeWarning,
-                    stacklevel=3,
-                )
+            self._update_scans()
 
     def step(self, control_inputs: np.ndarray) -> None:
         """Advance simulation by one timestep.
@@ -339,10 +292,6 @@ class F110Simulator:
         """
         if control_inputs.shape != (self.num_agents, self.control_dim):
             raise ValueError("Control input has incorrect shape")
-
-        # Snapshot before the dynamics move anything: _halt_on_collision
-        # restores from this to reject a move that ends inside geometry.
-        self._pre_pose = self.state.state.copy()
 
         steer_commands = control_inputs[:, 0].astype(np.float32)
         accel_commands = control_inputs[:, 1].astype(np.float32)
@@ -389,6 +338,7 @@ class F110Simulator:
                 [state[0], state[1], state[4]], dtype=np.float32
             )
 
+        self.state.collisions.fill(0.0)
         # Before the Frenet block, so the corrected pose is what the Frenet frame,
         # the scan and the observation all see, with nothing to re-derive.
         if self.contact is not None:
@@ -413,12 +363,6 @@ class F110Simulator:
             self._update_scans()
         else:
             self.state.scans.fill(0.0)
-            # SEGMENT_CONTACT already wrote the flag and needs no scan; the other
-            # modes detect walls inside _update_scans, so they genuinely have none.
-            if self.contact is None:
-                self.state.collisions.fill(0.0)
-
-        self._update_agent_collisions()
         self.state.sim_time += self.time_step
 
     # --- Convenience accessors ---
@@ -436,53 +380,15 @@ class F110Simulator:
 
     # --- Internal helpers ---
 
-    def _build_scan_cache(self, simulator: ScanSimulator2D, vehicle_params: VehicleParameters) -> ScanCache:
-        """Build precomputed scan geometry for collision detection: per-beam
-        distance from the LiDAR to the body edge, offsets included.
-        """
+    def _build_scan_cache(self, simulator: ScanSimulator2D) -> ScanCache:
+        """Build beam angles used by opponent-body ray casting."""
         num_beams = simulator.num_beams
-
-        half_length = float(vehicle_params.length) / 2.0
-        half_width = float(vehicle_params.width) / 2.0
-        if not np.isfinite(half_length) or not np.isfinite(half_width):
-            raise ValueError("Vehicle length and width must be finite to build LiDAR cache")
-
-        # Get LiDAR offset from base_link
-        lidar_tf = self.config.lidar_config.base_link_to_lidar_tf
-        lidar_dx, lidar_dy, lidar_dtheta = lidar_tf
-
-        # Get collision body center offset from base_link
-        body_dx = vehicle_params.collision_body_center_x
-        body_dy = vehicle_params.collision_body_center_y
-
-        # If state is referenced at the center of gravity, base_link is behind it by lr.
-        # Leave LiDAR in the state frame to avoid shifting the scan origin.
-        base_dx = 0.0
-        if self.model.pose_reference is PoseReference.COG:
-            base_dx = -float(vehicle_params.lr)
-            if not math.isfinite(base_dx):
-                base_dx = 0.0
-
-        # Compute LiDAR position relative to collision body center
-        # (the collision body is centered at (body_dx, body_dy) from base_link)
-        body_x = base_dx + body_dx
-        lidar_x_in_body = lidar_dx - body_x
-        lidar_y_in_body = lidar_dy - body_dy
-
         increment = simulator.get_increment()
         angle_min = simulator.angle_min
-
-        beam_angles = (angle_min + np.arange(num_beams, dtype=np.float64) * increment).astype(np.float32)
-        ray_angles = beam_angles + lidar_dtheta
-        dir_cos = np.cos(ray_angles)
-        dir_sin = np.sin(ray_angles)
-        side_distances = self._ray_to_rect_distance_vec(
-            lidar_x_in_body, lidar_y_in_body,
-            dir_cos, dir_sin,
-            half_length, half_width,
+        beam_angles = (
+            angle_min + np.arange(num_beams, dtype=np.float64) * increment
         ).astype(np.float32)
-
-        return ScanCache(angles=beam_angles, side_distances=side_distances)
+        return ScanCache(angles=beam_angles)
 
 
     def _lidar_pose_from_base(self, pose: np.ndarray) -> np.ndarray:
@@ -499,13 +405,11 @@ class F110Simulator:
 
     @staticmethod
     def _compute_collision_body_offset(
-        vehicle_params: VehicleParameters, model: DynamicModel
+        vehicle_params: VehicleParameters,
     ) -> tuple[float, float]:
-        base_dx = 0.0
-        if model.pose_reference is PoseReference.COG:
-            base_dx = -float(vehicle_params.lr)
-            if not math.isfinite(base_dx):
-                base_dx = 0.0
+        base_dx = -float(vehicle_params.lr)
+        if not math.isfinite(base_dx):
+            base_dx = 0.0
         dx = base_dx + float(vehicle_params.collision_body_center_x)
         dy = float(vehicle_params.collision_body_center_y)
         return dx, dy
@@ -519,172 +423,6 @@ class F110Simulator:
         body_x = pose[0] + dx * cos_yaw - dy * sin_yaw
         body_y = pose[1] + dx * sin_yaw + dy * cos_yaw
         return np.array([body_x, body_y, pose[2]], dtype=pose.dtype)
-
-    @staticmethod
-    def _ray_to_rect_distance(
-        origin_x: float,
-        origin_y: float,
-        dir_cos: float,
-        dir_sin: float,
-        half_length: float,
-        half_width: float,
-    ) -> float:
-        """Compute distance from a point to the rectangle boundary along a ray.
-
-        Args:
-            origin_x, origin_y: Ray origin point (e.g., LiDAR position in body frame).
-            dir_cos, dir_sin: Ray direction as (cos(angle), sin(angle)).
-            half_length: Half of vehicle length (x extent from center).
-            half_width: Half of vehicle width (y extent from center).
-
-        Returns:
-            Distance from origin to rectangle edge along the ray direction.
-            Returns 0.0 if origin is outside the rectangle.
-        """
-        x_min, x_max = -half_length, half_length
-        y_min, y_max = -half_width, half_width
-
-        eps = 1e-9
-        if not (x_min - eps <= origin_x <= x_max + eps and
-                y_min - eps <= origin_y <= y_max + eps):
-            return 0.0
-
-        min_t = float('inf')
-
-        if abs(dir_cos) > eps:
-            t = (x_max - origin_x) / dir_cos
-            if t > eps:
-                y_intersect = origin_y + t * dir_sin
-                if y_min - eps <= y_intersect <= y_max + eps:
-                    min_t = min(min_t, t)
-
-            t = (x_min - origin_x) / dir_cos
-            if t > eps:
-                y_intersect = origin_y + t * dir_sin
-                if y_min - eps <= y_intersect <= y_max + eps:
-                    min_t = min(min_t, t)
-
-        if abs(dir_sin) > eps:
-            t = (y_max - origin_y) / dir_sin
-            if t > eps:
-                x_intersect = origin_x + t * dir_cos
-                if x_min - eps <= x_intersect <= x_max + eps:
-                    min_t = min(min_t, t)
-
-            t = (y_min - origin_y) / dir_sin
-            if t > eps:
-                x_intersect = origin_x + t * dir_cos
-                if x_min - eps <= x_intersect <= x_max + eps:
-                    min_t = min(min_t, t)
-
-        if min_t == float('inf'):
-            return 0.0
-
-        return float(min_t)
-
-    @staticmethod
-    def _ray_to_rect_distance_vec(
-        origin_x: float,
-        origin_y: float,
-        dir_cos: np.ndarray,
-        dir_sin: np.ndarray,
-        half_length: float,
-        half_width: float,
-    ) -> np.ndarray:
-        """Vectorised version of _ray_to_rect_distance for all beams at once."""
-        eps = 1e-9
-        inside = (
-            (-half_length - eps) <= origin_x <= (half_length + eps)
-            and (-half_width - eps) <= origin_y <= (half_width + eps)
-        )
-        if not inside:
-            return np.zeros(len(dir_cos), dtype=np.float64)
-
-        min_t = np.full(len(dir_cos), np.inf, dtype=np.float64)
-
-        mask_cx = np.abs(dir_cos) > eps
-        safe_dc = np.where(mask_cx, dir_cos, 1.0)
-
-        t = np.where(mask_cx, (half_length - origin_x) / safe_dc, np.inf)
-        yi = origin_y + t * dir_sin
-        valid = mask_cx & (t > eps) & (yi >= -half_width - eps) & (yi <= half_width + eps)
-        min_t = np.where(valid, np.minimum(min_t, t), min_t)
-
-        t = np.where(mask_cx, (-half_length - origin_x) / safe_dc, np.inf)
-        yi = origin_y + t * dir_sin
-        valid = mask_cx & (t > eps) & (yi >= -half_width - eps) & (yi <= half_width + eps)
-        min_t = np.where(valid, np.minimum(min_t, t), min_t)
-
-        mask_sy = np.abs(dir_sin) > eps
-        safe_ds = np.where(mask_sy, dir_sin, 1.0)
-
-        t = np.where(mask_sy, (half_width - origin_y) / safe_ds, np.inf)
-        xi = origin_x + t * dir_cos
-        valid = mask_sy & (t > eps) & (xi >= -half_length - eps) & (xi <= half_length + eps)
-        min_t = np.where(valid, np.minimum(min_t, t), min_t)
-
-        t = np.where(mask_sy, (-half_width - origin_y) / safe_ds, np.inf)
-        xi = origin_x + t * dir_cos
-        valid = mask_sy & (t > eps) & (xi >= -half_length - eps) & (xi <= half_length + eps)
-        min_t = np.where(valid, np.minimum(min_t, t), min_t)
-
-        return np.where(min_t == np.inf, 0.0, min_t)
-
-    def _halt_on_collision(self, agent_idx: int) -> None:
-        """Zero the velocities, rewind the pose that caused the contact, flag it.
-
-        Zero via ``model.velocity_indices()``, not ``[5:] = 0``, which wipes MB's
-        ride heights. The dynamics integrate before this check, so without the
-        rewind a car held against a wall creeps monotonically through it.
-        """
-        for i in self.model.velocity_indices():
-            self.state.state[agent_idx, i] = 0.0
-
-        if self._pre_pose is not None:
-            pose_indices = self.model.pose_indices()
-            for i in pose_indices:
-                self.state.state[agent_idx, i] = self._pre_pose[agent_idx, i]
-            # Re-derive the mirrors from pose_indices(), not hardcoded columns,
-            # so state / standard_state / poses stay in agreement.
-            self.state.standard_state[agent_idx] = self._standardize(
-                self.state.state[agent_idx]
-            )
-            self.state.poses[agent_idx] = np.array(
-                [self.state.state[agent_idx, i] for i in pose_indices],
-                dtype=np.float32,
-            )
-            self._refresh_derived_from_pose(agent_idx)
-
-        self.state.standard_state[agent_idx, 3] = 0.0
-        self.state.standard_state[agent_idx, 5:] = 0.0
-        self.state.collisions[agent_idx] = 1.0
-
-    def _refresh_derived_from_pose(self, agent_idx: int) -> None:
-        """Re-derive the Frenet frame and collision vertices after a pose rewind.
-
-        Both are computed before the collision pass, so they describe the pose
-        the halt has just undone.
-        """
-        if self.config.simulation_config.compute_frenet_frame and self.track is not None:
-            std = self.state.standard_state[agent_idx]
-            prev_s = float(self.state.frenet[agent_idx, 0])
-            self.state.frenet[agent_idx] = np.array(
-                self.track.cartesian_to_frenet(
-                    float(std[0]), float(std[1]), float(std[4]),
-                    s_guess=prev_s, use_s_guess=True,
-                ),
-                dtype=np.float32,
-            )
-
-        # _update_agent_collisions can reach the halt before any vertex snapshot
-        # exists, so this is guarded rather than assumed.
-        if getattr(self, "_all_vertices", None) is not None:
-            cp = self._collision_pose_from_base(self.state.poses[agent_idx])
-            self._all_vertices[agent_idx] = get_vertices(
-                np.array([cp[0], cp[1], cp[2]], dtype=np.float64),
-                self.vehicle_params.length,
-                self.vehicle_params.width,
-            )
 
     def _push_throttle_delay(self, values: np.ndarray) -> np.ndarray:
         """Ring-buffer delay for the longitudinal command (mirrors the steering
@@ -701,11 +439,7 @@ class F110Simulator:
         return delayed
 
     def _compute_all_vertices(self) -> list:
-        """Bounding-box corner vertices for every agent from their current poses.
-
-        Independent of the LiDAR scan, so BOUNDING_BOX collision checking works
-        even when the LiDAR is disabled.
-        """
+        """Body vertices used to occlude each agent's LiDAR scan."""
         verts = []
         for i in range(self.num_agents):
             cp = self._collision_pose_from_base(self.state.poses[i])
@@ -716,48 +450,19 @@ class F110Simulator:
             ))
         return verts
 
-    def _update_scans(self, *, flag_collisions: bool = True) -> None:
-        # Precompute collision vertices once (reused by the ray_cast loop and _update_agent_collisions)
+    def _update_scans(self) -> None:
+        # LiDAR is a sensor only. Contact flags come exclusively from the
+        # geometric contact solver and never rewind or freeze an agent.
         self._all_vertices = self._compute_all_vertices()
         all_vertices = self._all_vertices
-        # flag_collisions=False fills scans without adjudicating: a spawn is not a
-        # crash. Enumerated so SEGMENT_CONTACT, which owns walls, is not halted here.
-        wall_collision_enabled = flag_collisions and self.collision_check_mode in (
-            CollisionCheckMode.LIDAR_SCAN,
-            CollisionCheckMode.BOUNDING_BOX,
-        )
-        spawn_sweep = not flag_collisions and getattr(self, "_spawned_in_contact", None) is not None
 
         for agent_idx, simulator in enumerate(self.scan_sims):
             pose = self.state.poses[agent_idx]
             scan_pose = self._lidar_pose_from_base(pose)
 
-            # Get noise-free scan for collision detection
+            # Clean wall scan, then opponent occlusion.
             scan_clean = simulator.scan(scan_pose, rng=None)
             cache = self.scan_cache[agent_idx]
-
-            # Reset-only: record contact instead of adjudicating it, so reset()
-            # can warn about a pose that starts inside the margin.
-            if spawn_sweep and check_collision(
-                scan_clean, cache.side_distances, self.collision_margin
-            ):
-                self._spawned_in_contact.append(agent_idx)
-
-            # Wall collision: contact check on the wall-only scan (skipped when collisions disabled)
-            if wall_collision_enabled and check_collision(
-                scan_clean,
-                cache.side_distances,
-                self.collision_margin,
-            ):
-                self._halt_on_collision(agent_idx)
-                # The halt rewound the pose, so re-trace: `scan_clean` is what
-                # gets published and what the opponent ray_cast below shortens.
-                scan_pose = self._lidar_pose_from_base(self.state.poses[agent_idx])
-                scan_clean = simulator.scan(scan_pose, rng=None)
-            elif wall_collision_enabled:
-                # Only clear the flag this branch owns: SEGMENT_CONTACT has already
-                # written it, and clearing here would erase it.
-                self.state.collisions[agent_idx] = 0.0
 
             # Ray cast against other agents (also noise-free)
             origin = scan_pose.astype(np.float64)
@@ -766,11 +471,10 @@ class F110Simulator:
                 if opp_idx == agent_idx:
                     continue
                 adjusted_scan = ray_cast(origin, adjusted_scan, cache.angles, all_vertices[opp_idx])
-            self._adjusted_scans[agent_idx] = adjusted_scan
 
-            # Sensor noise, applied to the OBSERVED scan only (collisions use the
-            # clean scan): Gaussian range noise + per-beam systematic bias, then
-            # random per-beam dropout (no-return -> max_range).
+            # Sensor noise is applied to the observed scan only: Gaussian range
+            # noise + per-beam systematic bias, then random per-beam dropout
+            # (no-return -> max_range).
             rng = self.scan_rngs[agent_idx]
             lidar_cfg = self.config.lidar_config
             noisy_scan = adjusted_scan + rng.normal(0.0, simulator.std_dev, size=simulator.num_beams)
@@ -828,15 +532,19 @@ class F110Simulator:
             return np.array([speed * math.cos(course), speed * math.sin(course)]), omega
         speed = float(state[3])
         wheelbase = float(self.vehicle_params.lf) + float(self.vehicle_params.lr)
-        omega = speed * math.tan(float(state[2])) / wheelbase
-        return np.array([speed * math.cos(yaw), speed * math.sin(yaw)]), omega
+        beta = math.atan(
+            math.tan(float(state[2])) * float(self.vehicle_params.lr) / wheelbase
+        )
+        course = yaw + beta
+        omega = speed * math.cos(beta) * math.tan(float(state[2])) / wheelbase
+        return np.array([speed * math.cos(course), speed * math.sin(course)]), omega
 
     def _apply_contact(self, state, velocity, omega, correction):
         """Write a corrected world velocity back into the model's native state.
 
-        ST carries slip and yaw rate, so the projection is exact. KS carries neither:
-        it can only absorb the longitudinal component at the rear axle, and any
-        lateral or angular impulse is discarded.
+        ST carries slip and yaw rate, so the projection is exact. KS carries
+        neither, so lateral and angular impulse components are projected onto
+        its steering-defined kinematic course.
         """
         state[0] += correction[0]
         state[1] += correction[1]
@@ -854,15 +562,16 @@ class F110Simulator:
             state[5] = omega
             state[6] = beta
             return state
-        # Transporting to the rear axle adds omega x (-lr * heading), which is
-        # purely lateral, so the longitudinal projection is the same at either point.
-        state[3] = velocity[0] * math.cos(yaw) + velocity[1] * math.sin(yaw)
+        wheelbase = float(self.vehicle_params.lf) + float(self.vehicle_params.lr)
+        beta = math.atan(
+            math.tan(float(state[2])) * float(self.vehicle_params.lr) / wheelbase
+        )
+        course = yaw + beta
+        state[3] = velocity[0] * math.cos(course) + velocity[1] * math.sin(course)
         return state
 
     def _resolve_contacts(self) -> None:
         """Resolve wall contact for every agent and refresh the SoA mirrors."""
-        lr = float(self.vehicle_params.lr)
-        rear_axle = self.model.pose_reference is not PoseReference.COG
         for agent_idx in range(self.num_agents):
             state = self.state.state[agent_idx].astype(np.float64)
             pose = self.state.poses[agent_idx]
@@ -873,8 +582,6 @@ class F110Simulator:
             )
             yaw = float(state[4])
             centre = np.array([float(state[0]), float(state[1])])
-            if rear_axle:
-                centre = centre + lr * np.array([math.cos(yaw), math.sin(yaw)])
 
             velocity, omega = self._world_velocity(state)
             velocity, omega, correction, hit = self.contact(
@@ -898,17 +605,11 @@ class F110Simulator:
         verts = self._compute_all_vertices()
         lows = [v.min(axis=0) for v in verts]
         highs = [v.max(axis=0) for v in verts]
-        lr = float(self.vehicle_params.lr)
-        rear_axle = self.model.pose_reference is not PoseReference.COG
         mass = float(self.vehicle_params.m)
         inertia = float(self.vehicle_params.I)
 
-        def centre_of(idx, state):
-            centre = np.array([float(state[0]), float(state[1])])
-            if rear_axle:
-                yaw = float(state[4])
-                centre = centre + lr * np.array([math.cos(yaw), math.sin(yaw)])
-            return centre
+        def centre_of(state):
+            return np.array([float(state[0]), float(state[1])])
 
         for i in range(self.num_agents):
             for j in range(i + 1, self.num_agents):
@@ -916,7 +617,7 @@ class F110Simulator:
                     continue
                 state_i = self.state.state[i].astype(np.float64)
                 state_j = self.state.state[j].astype(np.float64)
-                c_i, c_j = centre_of(i, state_i), centre_of(j, state_j)
+                c_i, c_j = centre_of(state_i), centre_of(state_j)
                 v_i, w_i = self._world_velocity(state_i)
                 v_j, w_j = self._world_velocity(state_j)
                 v_i, w_i, v_j, w_j, sep, hit = self.pair_contact(
@@ -950,38 +651,3 @@ class F110Simulator:
         self.state.poses[agent_idx] = np.array(
             [state[0], state[1], state[4]], dtype=np.float32
         )
-
-    def _update_agent_collisions(self) -> None:
-        """Detect agent-vs-agent collisions using the configured mode."""
-        mode = self.collision_check_mode
-        if mode is CollisionCheckMode.NONE:
-            return
-        if mode is CollisionCheckMode.LIDAR_SCAN:
-            # Agent-vs-agent on opponent-shortened scans. With the LiDAR off
-            # there is no signal, so skip rather than index an empty cache.
-            if not self.scan_enabled:
-                return
-            for agent_idx in range(self.num_agents):
-                if self.state.collisions[agent_idx]:
-                    continue  # already in wall collision
-                cache = self.scan_cache[agent_idx]
-                if check_collision(
-                    self._adjusted_scans[agent_idx],
-                    cache.side_distances,
-                    self.collision_margin,
-                ):
-                    self._halt_on_collision(agent_idx)
-        elif mode is CollisionCheckMode.SEGMENT_CONTACT:
-            return  # resolved with the walls, before the Frenet block
-        elif mode is CollisionCheckMode.BOUNDING_BOX:
-            # Agent-vs-agent via GJK on pose-derived vertices, so it works with the
-            # LiDAR off. Detection only -- SEGMENT_CONTACT resolves its own pairs above.
-            vertices = self._all_vertices if self.scan_enabled else self._compute_all_vertices()
-            for agent_idx in range(self.num_agents):
-                self.agent_vertices[agent_idx] = vertices[agent_idx]
-            collisions, _ = collision_multiple(self.agent_vertices)
-            # in place: rebinding self.state.collisions would leave any handle
-            # captured from sim.state.collisions stale (LIDAR_SCAN writes in place).
-            self.state.collisions[:] = np.maximum(self.state.collisions, collisions.astype(np.float32))
-        else:
-            raise ValueError(f"unhandled collision check mode: {mode!r}")

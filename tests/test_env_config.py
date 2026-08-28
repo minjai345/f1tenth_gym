@@ -424,30 +424,22 @@ class TestSubstepValidation(unittest.TestCase):
             self._substeps(0.025, 0.01)
 
 
-class TestMultiBodyParameterGate(unittest.TestCase):
-    """`DynamicModel.MB` is only usable with a preset that populates its ABI.
-
-    The two small-scale presets leave every multi-body field at ``nan``. The gate
-    fires at config construction, before the map download and the numba JIT.
-    """
+class TestMultiBodyUnsupported(unittest.TestCase):
+    """The transitional MB enum fails before any simulator is constructed."""
 
     def _cfg(self, params):
-        from f1tenth_gym.envs.collision_models import CollisionCheckMode
         from f1tenth_gym.envs.dynamic_models import DynamicModel
 
         return EnvConfig(
             params=params,
             simulation_config=SimulationConfig(dynamics_model=DynamicModel.MB),
-            # MB predates SEGMENT_CONTACT and is refused by it, so an MB config has
-            # to name the detection-only mode now that contact is the default.
-            collision_check=CollisionCheckMode.LIDAR_SCAN,
             render_enabled=False,
         )
 
     def test_f1tenth_params_are_rejected(self):
         with self.assertRaises(ValueError) as ctx:
             self._cfg(F1TENTH_VEHICLE_PARAMETERS)
-        self.assertIn("multi-body", str(ctx.exception))
+        self.assertIn("unsupported", str(ctx.exception))
 
     def test_f1fifth_params_are_rejected(self):
         from f1tenth_gym.envs.dynamic_models import F1FIFTH_VEHICLE_PARAMETERS
@@ -455,11 +447,11 @@ class TestMultiBodyParameterGate(unittest.TestCase):
         with self.assertRaises(ValueError):
             self._cfg(F1FIFTH_VEHICLE_PARAMETERS)
 
-    def test_fullscale_params_are_accepted(self):
+    def test_fullscale_params_are_also_rejected(self):
         from f1tenth_gym.envs.dynamic_models import FULLSCALE_VEHICLE_PARAMETERS
 
-        cfg = self._cfg(FULLSCALE_VEHICLE_PARAMETERS)
-        self.assertIs(cfg.simulation_config.dynamics_model.name, "MB")
+        with self.assertRaisesRegex(ValueError, "DynamicModel.MB is unsupported"):
+            self._cfg(FULLSCALE_VEHICLE_PARAMETERS)
 
     def test_the_gate_does_not_fire_for_ks_or_st(self):
         """Only MB reads the multi-body block; KS/ST must stay unaffected."""
@@ -472,44 +464,3 @@ class TestMultiBodyParameterGate(unittest.TestCase):
                     simulation_config=SimulationConfig(dynamics_model=model),
                     render_enabled=False,
                 )
-
-    def test_missing_mb_parameters_reports_the_whole_block(self):
-        self.assertEqual(len(F1TENTH_VEHICLE_PARAMETERS.missing_mb_parameters()), 68)
-        from f1tenth_gym.envs.dynamic_models import FULLSCALE_VEHICLE_PARAMETERS
-
-        self.assertEqual(FULLSCALE_VEHICLE_PARAMETERS.missing_mb_parameters(), ())
-
-
-class TestUpdateParamsIsAllOrNothing(unittest.TestCase):
-    """A rejected params set must leave the env exactly as it was.
-
-``with_updates`` re-runs ``EnvConfig.__post_init__`` and can raise, so assigning
-    ``self.vehicle_params`` first leaves it disagreeing with the sim, the spaces
-    and the renderer, and DR then rebuilds NaNs from it on the next ``reset()``.
-    """
-
-    def test_a_rejected_params_set_changes_nothing(self):
-        import gymnasium as gym
-        from f1tenth_gym.envs.dynamic_models import (
-            DynamicModel, FULLSCALE_VEHICLE_PARAMETERS,
-        )
-
-        from f1tenth_gym.envs.collision_models import CollisionCheckMode
-
-        cfg = EnvConfig(
-            map_name="Spielberg", map_scale=10.0,
-            params=FULLSCALE_VEHICLE_PARAMETERS, render_enabled=False,
-            collision_check=CollisionCheckMode.LIDAR_SCAN,
-            simulation_config=SimulationConfig(
-                dynamics_model=DynamicModel.MB, max_laps=None),
-        )
-        env = gym.make("f1tenth_gym:f1tenth-v0", config=cfg)
-        u = env.unwrapped
-        before = u.vehicle_params
-        with self.assertRaises(ValueError):
-            u.update_params(F1TENTH_VEHICLE_PARAMETERS)   # 68 non-finite MB fields
-        self.assertIs(u.vehicle_params, before)
-        self.assertIs(u.env_config.params, before)
-        self.assertIs(u.sim.vehicle_params, before)
-        self.assertIs(u.space_vehicle_params, before)
-        env.close()

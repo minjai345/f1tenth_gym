@@ -3,7 +3,8 @@ import time
 import unittest
 
 import numpy as np
-from f1tenth_gym.envs.collision_models import get_vertices, collision
+from f1tenth_gym.envs.collision_models import get_vertices
+from tests.gjk_oracle import collision
 
 
 # Copyright (c) 2020 Joseph Auckley, Matthew O'Kelly, Aman Sinha, Hongrui Zheng

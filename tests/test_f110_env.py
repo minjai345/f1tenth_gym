@@ -357,8 +357,7 @@ class TestScanOnReset(unittest.TestCase):
         env.close()
 
     def test_states_reset_keeps_velocity_and_no_collision(self):
-        # A spawn pose is a given, not a crash: the reset sweep must not run the
-        # wall check, or a full-state reset would get _halt_on_collision'ed.
+        # A reset publishes a sensor sweep but contact response begins on step.
         env = gym.make("f1tenth_gym:f1tenth-v0", config=EnvConfig(render_enabled=False))
         state = np.zeros((1, 7), dtype=np.float32)
         state[0, :2] = [-0.044, -0.849]

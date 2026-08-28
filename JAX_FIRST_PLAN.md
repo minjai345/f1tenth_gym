@@ -333,6 +333,16 @@ reimplemented against current code and tests.
 *Done when:* both parents are in the DAG, original signatures remain reachable,
 the project builds on the chosen JAX version, and all enabled tests pass.
 
+#### Phase 1 implementation record — 2026-08-28
+
+- Merge commit `a9cc351c0f25b4dcaf73aa92c57732c67f7a3d12` has parents
+  `d73b2379f81c94357f630a9b8d717b93b8885e5d` and the original
+  `jax/main` tip `1b4eb3f5161756bb925987753b965b549097742f`.
+- No `jax-backend` commit was merged, cherry-picked or replayed.
+- Current packaging, dependencies, docs and shared runtime files won merge
+  resolution. The standalone JAX tree was retained only long enough to perform
+  history-preserving Phase 2 moves.
+
 ### Phase 2 — one package and one supported surface
 
 - Move useful JAX implementation into `f1tenth_gym.jax` using history-preserving
@@ -361,6 +371,22 @@ the project builds on the chosen JAX version, and all enabled tests pass.
 
 *Done when:* there is one package, supported models are KS-CoG/ST, production
 collision is SEGMENT_CONTACT/NONE, and all public frame changes are documented.
+
+#### Phase 2 implementation record — 2026-08-28
+
+- Applicable dynamics and integration history moved into `f1tenth_gym.jax` and
+  was rewritten for JAX 0.11.1. The old package, vendored JaxMARL surface,
+  incoming examples and stale policy artifacts were removed.
+- The functional seam now provides traced `DynamicsParams`, KS-CoG, ST, Euler,
+  RK4 and fixed integration substeps. Tests cover NumPy parity, `jit`, `vmap`,
+  parameter gradients, reverse motion and finite zero-speed derivatives.
+- Production collision modes are now exactly `NONE` and `SEGMENT_CONTACT`.
+  GJK is a test-only SAT oracle; LiDAR no longer adjudicates or freezes contact.
+- KS raw and standardized states are CoG-referenced. `PoseReference`, CoG-offset
+  conversion and collision rewind/halt scaffolding were removed.
+- `DynamicModel.MB` remains only as a transitional enum and retained research
+  implementation; `EnvConfig` rejects it unconditionally, and rejects DR over
+  its inactive parameter block. `LoopCounterMode.TOGGLE` was removed.
 
 ### Phase 3 — functional dynamics, state, parameters and tracks
 
@@ -571,20 +597,20 @@ Required numerical gates include:
 These changes are intentional API corrections for the JAX-first v1 surface,
 not opportunistic cleanup:
 
-- [ ] Remove `LoopCounterMode.TOGGLE`.
-- [ ] Move GJK into a test-only reference and remove `BOUNDING_BOX` production
+- [x] Remove `LoopCounterMode.TOGGLE`.
+- [x] Move GJK into a test-only reference and remove `BOUNDING_BOX` production
       dispatch without renumbering existing serialized enum values.
-- [ ] Remove freeze-on-collision `LIDAR_SCAN`; keep `NONE` as explicit disablement.
-- [ ] Make `SEGMENT_CONTACT` the sole production response and separate response
+- [x] Remove freeze-on-collision `LIDAR_SCAN`; keep `NONE` as explicit disablement.
+- [x] Make `SEGMENT_CONTACT` the sole production response and separate response
       from termination policy.
-- [ ] Remove/retire `DynamicModel.MB` and its production dispatch, tests and docs.
-- [ ] Preserve full-scale parameter data needed by KS/ST or possible future MB
+- [x] Remove/retire `DynamicModel.MB` and its production dispatch, tests and docs.
+- [x] Preserve full-scale parameter data needed by KS/ST or possible future MB
       research, but reject MB-only runtime/DR knobs rather than silently ignoring them.
-- [ ] Promote KS-CoG, migrate the raw state contract, then delete frame-conversion
+- [x] Promote KS-CoG, migrate the raw state contract, then delete frame-conversion
       scaffolding once no supported model uses a rear-axle native state.
 - [ ] Remove RASTER and `jax-pf` together only after the segment scan gate passes.
-- [ ] Correct the stale `collision_check` documentation.
-- [ ] Reconcile the documented 20,000 SAT/GJK cases with the 4,000-case executable
+- [x] Correct the stale `collision_check` documentation.
+- [x] Reconcile the documented 20,000 SAT/GJK cases with the 4,000-case executable
       regression before moving GJK out of production.
 
 Unrelated dead helpers, rendering knobs and generated `__pycache__` directories

@@ -5,15 +5,17 @@ work, then read the named source and tests before changing a subsystem. The
 published Sphinx pages are the user-facing source of truth for behavior and
 examples; this file focuses on architecture, invariants, and change seams.
 
-Baseline reviewed: `dev-features` at `f3ff709` on 2026-08-26. Treat counts and
-the known-rough-edges section as a snapshot and re-check them against `HEAD`.
+Baseline reviewed: Phase 2 after merge `a9cc351` on 2026-08-28. Treat counts
+and the known-rough-edges section as a snapshot and re-check them against
+`HEAD`.
 
 ## What this repository is
 
 `f1tenth_gym` is a Python 3.12+ Gymnasium environment for simulating one or
 more 1/10-scale race cars. It combines:
 
-- kinematic, single-track, and multi-body vehicle models;
+- CoG-referenced kinematic and single-track vehicle models; the transitional
+  MB enum is rejected as unsupported;
 - Euler or RK4 integration with optional integration substeps;
 - raster or exact segment-based 2D LiDAR;
 - wall and car-to-car collision detection, plus JAX impulse-based contact;
@@ -164,9 +166,8 @@ validate `(N, 2)` action
      setpoint conversion -> integration substeps -> yaw wrap -> state mirrors
 -> resolve SEGMENT_CONTACT walls and body pairs, if selected
 -> update each agent's Frenet state from its corrected CoG pose
--> compute clean wall scan, scan-based wall collisions, opponent occlusion,
-   then observed LiDAR noise/dropout/bias
--> perform remaining agent collision mode
+-> compute the wall scan and opponent occlusion, then observed LiDAR
+   noise/dropout/bias
 -> increment simulation time
 ```
 
@@ -192,13 +193,12 @@ Buffers are mutated in place, so observations and `info` arrays must be
 copies. Never return a live view that can corrupt replay buffers or stored
 logs.
 
-Model-native pose frames differ:
+Supported model-native poses share one frame:
 
-- `KS` native `x/y` is rear-axle referenced and has state dimension 5.
+- `KS` native `x/y` is CoG referenced and has state dimension 5.
 - `ST` native `x/y` is CoG referenced and has state dimension 7.
-- `MB` native `x/y` is CoG referenced and has state dimension 29.
-- `standard_state`, derived observations, and Frenet coordinates are CoG
-  referenced for every model.
+- `standard_state`, derived observations, and Frenet coordinates are also CoG
+  referenced. The rear-axle KS equation remains a test oracle only.
 
 `DynamicModel.get_initial_state()` currently attaches `state_dim` and
 `control_dim` to the enum member as a side effect. The simulator calls it
@@ -221,10 +221,10 @@ rather than equality.
 | `envs/state.py` | array allocation/reset and steering-delay ring buffer |
 | `envs/action.py` | action enums, setpoint conversion, action spaces |
 | `envs/integrators.py` | plain-Python Euler and RK4 |
-| `envs/dynamic_models/` | KS/ST/MB kernels, standardizers, vehicle parameters |
+| `envs/dynamic_models/` | KS/ST kernels, standardizers, vehicle parameters; legacy MB data/code pending removal |
 | `envs/observation/` | field vocabulary, providers, spaces, presets |
 | `envs/lidar/` | LiDAR config, raster scanner, exact segment scanner, JAX kernels |
-| `envs/collision_models.py` | collision enum, GJK, body vertices |
+| `envs/collision_models.py` | collision enum and collision-body vertices |
 | `envs/contact/` | JAX manifolds/solvers and the NumPy/JAX adapter |
 | `envs/track/track.py` | map/reference-line loading and Frenet transforms |
 | `envs/track/walls.py` | oriented wall extraction from occupancy maps |
@@ -235,7 +235,7 @@ rather than equality.
 | `envs/rendering/` | PyQt6/OpenGL renderer, objects, callbacks |
 | `envs/wrappers.py` | single-agent and observation-delay wrappers |
 | `examples/` | waypoint following, video, telemetry, synthetic tracks |
-| `tests/` | 516 collected tests at the reviewed baseline |
+| `tests/` | 507 collected tests across 37 `test_*.py` files |
 | `docs/` | Sphinx user documentation plus behavioral measurements |
 
 ## Configuration model
@@ -271,7 +271,8 @@ configured parameter extrema.
 
 `VehicleParameters` has a positional float32 wire format consumed by numba
 dynamics kernels. `PARAMETER_ORDER` is exactly dataclass declaration order and
-currently has 89 entries. KS/ST hard-code indices 0-17; MB reads later slots.
+currently has 88 entries. KS/ST hard-code indices 0-17; the retained legacy MB
+kernel reads later slots but is not selectable by `EnvConfig`.
 
 This is an ABI:
 
@@ -283,7 +284,8 @@ This is an ABI:
 - never add a per-model slice unless the whole API is deliberately redesigned.
 
 `tests/test_vehicle_params_abi.py` is the gate. Small-scale presets leave the
-MB-only block as NaN; only `FULLSCALE_VEHICLE_PARAMETERS` supports `MB`.
+MB-only block as NaN; `FULLSCALE_VEHICLE_PARAMETERS` preserves the measured
+values as data but does not make MB selectable.
 
 ## LiDAR and collision/contact architecture
 
@@ -294,8 +296,8 @@ beam/range geometry, `set_map(track, scale)`, `scan(pose, rng)`, and
 - `RASTER` sphere-traces a distance transform and has cell-center range bias.
 - `SEGMENT` intersects oriented wall segments analytically through a JAX
   kernel and is the default.
-- Clean scans drive collision detection. Gaussian noise, systematic per-beam
-  bias, dropout, and range clipping affect observed scans only.
+- Gaussian noise, systematic per-beam bias, dropout, and range clipping affect
+  observed scans only. LiDAR is not a collision response mechanism.
 - Other vehicles shorten scans through opponent body ray casting after the
   wall scan.
 
@@ -304,19 +306,19 @@ Collision modes are behaviorally different:
 | Mode | Walls | Other cars | Response |
 |---|---|---|---|
 | `NONE` | off | off | no flags |
-| `LIDAR_SCAN` | clean scan; needs LiDAR | shortened scan | rewind and halt detected agent |
-| `BOUNDING_BOX` | clean scan when LiDAR is on | GJK boxes | detection flag only for body pairs |
 | `SEGMENT_CONTACT` | wall segments | SAT/JAX pair manifold | impulse and position correction |
 
-Adding a collision mode requires auditing all three simulator seams:
-`_update_scans()` wall gating, `_build_contact()`, and
-`_update_agent_collisions()`. Do not rely on a catch-all branch.
+`SEGMENT_CONTACT` is the sole production collision response; `NONE` explicitly
+disables detection and response. GJK exists only as a test oracle for SAT.
 
-The portable JAX migration seam is intentionally narrow:
+The established portable JAX geometry seam is intentionally narrow:
 
 - `envs/contact/kernels.py`
 - `envs/contact/solver.py`
 - `envs/lidar/kernels.py`
+
+The first functional dynamics seam lives under `f1tenth_gym/jax/`; keep it
+subject to the same pure-array constraints as it grows into the complete core.
 
 Keep these pure JAX/array math, fixed-shape, jittable/vmappable, free of Gym
 and package-local imports, and free of NumPy marshalling. Host conversion,
@@ -353,8 +355,7 @@ Frenet projection uses a local search centered on each agent's previous `s`
 during stepping. Teleport/reset uses a global search. A one-step translation
 larger than the search window can select the wrong nearby part of a track.
 
-Lap modes are Frenet crossing and winding angle. The `TOGGLE` enum member is
-declared but unimplemented and counts no laps. The default
+Lap modes are Frenet crossing and winding angle. The default
 `count_partial_first_lap=True` counts the first finish-line crossing; setting
 it false treats the spawn-to-line segment as an out lap.
 
@@ -426,7 +427,7 @@ constraint spans subsystems.
 
 ## Tests and validation
 
-The baseline collects 516 tests across 38 `test_*.py` files. Most tests use
+The baseline collects 507 tests across 37 `test_*.py` files. Most tests use
 `unittest.TestCase` but run through pytest. Tests cover public behavior and
 low-level numerical contracts, including JIT/vmap/gradient properties,
 allocation guards, cache invalidation, observation aliasing, vector envs,
@@ -500,12 +501,10 @@ page rather than duplicating the same full explanation across pages.
 These are current-code observations, not permission to fix them as part of an
 unrelated feature:
 
-- `LoopCounterMode.TOGGLE` is exposed but does not count laps.
 - Per-agent vehicle parameter updates are not supported; all agents share one
   `VehicleParameters` instance.
-- `SEGMENT_CONTACT` rejects `MB`; MB also requires the full-scale parameter
-  preset. KS contact cannot represent diagonal sliding faithfully because KS
-  has no slip angle or yaw-rate state.
+- `MB` is unsupported. KS contact cannot represent diagonal sliding faithfully
+  because KS has no slip angle or yaw-rate state.
 - `MAP_RANDOM_STATIC` samples `np.where(mask)` as `(x, y)`, although NumPy
   returns `(row_y, col_x)`. It is unreliable on non-square maps and samples
   general map free space rather than track-valid poses.

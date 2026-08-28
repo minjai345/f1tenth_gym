@@ -5,13 +5,14 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from f1tenth_gym.envs.collision_models import collision, get_vertices
+from f1tenth_gym.envs.collision_models import get_vertices
 from f1tenth_gym.envs.contact import (
     ContactParams,
     body_contact,
     contact_velocity,
     resolve_pair,
 )
+from tests.gjk_oracle import collision
 
 CAR_L, CAR_W, MASS, INERTIA = 0.58, 0.31, 3.74, 0.04712
 
@@ -30,7 +31,7 @@ def angular_momentum(v, w, centre):
 
 
 class TestSeparatingAxis(unittest.TestCase):
-    def test_it_agrees_with_the_existing_gjk(self):
+    def test_it_agrees_with_the_test_only_gjk_oracle(self):
         rng = np.random.default_rng(0)
         count = 4000
         poses_a = np.stack([rng.uniform(-0.8, 0.8, count), rng.uniform(-0.8, 0.8, count),
@@ -159,7 +160,7 @@ class TestTwoBodySolver(unittest.TestCase):
 
 
 class TestInTheGym(unittest.TestCase):
-    """Two cars, head-on. The GJK boolean flags and lets them pass through."""
+    """Two cars meet head-on through the production contact response."""
 
     @staticmethod
     def _run(mode, restitution=0.0):
@@ -205,14 +206,6 @@ class TestInTheGym(unittest.TestCase):
             return hit_at, speeds
         finally:
             env.close()
-
-    def test_the_boolean_mode_lets_them_pass_through(self):
-        from f1tenth_gym.envs.collision_models import CollisionCheckMode
-
-        hit_at, speeds = self._run(CollisionCheckMode.BOUNDING_BOX)
-        self.assertIsNotNone(hit_at)
-        self.assertAlmostEqual(speeds[0], 3.0, places=2)
-        self.assertAlmostEqual(speeds[1], 3.0, places=2)
 
     def test_segment_contact_stops_them(self):
         from f1tenth_gym.envs.collision_models import CollisionCheckMode

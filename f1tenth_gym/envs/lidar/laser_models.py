@@ -249,26 +249,6 @@ def get_scan(
     return scan
 
 
-@njit(cache=True, error_model="numpy")
-def check_collision(scan, side_distances, margin):
-    """Contact/distance collision check against a wall-only LiDAR scan.
-
-    A beam registers a collision when the obstacle it hits is within ``margin``
-    metres of the bounding-box edge along that beam. This is a distance margin,
-    not a time-to-collision, so it is velocity-independent.
-
-    Args:
-        scan (np.ndarray(num_beams, )): current (noise-free) scan to check.
-        side_distances (np.ndarray(num_beams, )): per-beam distance from the
-            laser to the side of the car.
-        margin (float): collision distance margin in metres.
-
-    Returns:
-        bool: whether the vehicle is in contact with the environment.
-    """
-    return np.any(scan - side_distances <= margin)
-
-
 @njit(cache=True)
 def cross(v1, v2):
     """

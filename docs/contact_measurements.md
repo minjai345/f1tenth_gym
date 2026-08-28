@@ -236,10 +236,10 @@ worse: replacing an 8-space-indented line matched it as a *substring* of a
 12-space-indented one inside `reset()`, silently de-indenting the Frenet block out of
 its per-agent loop. `tests/test_frenet_multiagent.py` caught it.
 
-**Config guards.** `collision_check` is now coerced through `CollisionCheckMode(...)`,
-closing the raw-int footgun where `0` did not disable collisions and `1` did not
-select `LIDAR_SCAN`. `SEGMENT_CONTACT` + `DynamicModel.MB` raises at config build, one
-guard, before any map download or JIT.
+**Historical config guards.** The work first coerced `collision_check` through
+`CollisionCheckMode(...)`, closing raw-integer dispatch ambiguity. The current
+surface has since narrowed to `NONE` and `SEGMENT_CONTACT`, and rejects
+`DynamicModel.MB` at config construction before any map download or JIT.
 
 ---
 
@@ -254,14 +254,16 @@ normals; the minimum-overlap axis is the MTV, and the manifold comes from the sa
 reference-face clip the wall path uses. `resolve_pair` is the two-body solver, where
 the effective mass carries both translational and both rotational terms.
 
-**The plan's claim reproduces exactly: SAT and the existing GJK agree on
-20,000/20,000 random pose pairs.** So this is a strict extension, not a replacement.
+The design-time measurement compared 20,000 random pose pairs, with SAT and GJK
+agreeing on all 20,000. The executable regression keeps a deterministic 4,000-pair
+sample for routine test cost. GJK now lives only in that test as an independent SAT
+oracle; it is not a production collision mode.
 
-Two cars closing head-on at 3 m/s each, in the gym:
+During the collision-mode comparison, two cars closed head-on at 3 m/s each:
 
 | mode | restitution | car 0 after | car 1 after |
 |---|---|---|---|
-| `BOUNDING_BOX` (GJK boolean) | — | 3.00 m/s | 3.00 m/s — **passes through** |
+| retired `BOUNDING_BOX` (GJK boolean) | — | 3.00 m/s | 3.00 m/s — **passes through** |
 | `SEGMENT_CONTACT` | 0.0 | 0.00 m/s | 0.00 m/s |
 | `SEGMENT_CONTACT` | 0.5 | −1.50 m/s | +1.50 m/s |
 

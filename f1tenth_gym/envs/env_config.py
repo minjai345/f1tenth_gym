@@ -37,12 +37,10 @@ IntegratorFn = Callable[[DynamicsFn, np.ndarray, np.ndarray, float, np.ndarray],
 class LoopCounterMode(IntEnum):
     """Mode for counting completed laps.
 
-    TOGGLE: UNIMPLEMENTED — counts zero laps, so ``max_laps`` never fires.
     FRENET_BASED: Frenet progress along the centerline (the default).
     WINDING_ANGLE: Cumulative angle around the centroid; convex tracks only.
     """
 
-    TOGGLE = 1
     FRENET_BASED = 2
     WINDING_ANGLE = 3
 
@@ -513,8 +511,8 @@ class EnvConfig:
         reward_config: Per-step reward configuration.
         domain_randomization_config: Per-episode vehicle-param randomization.
         collision_check: Collision detection mode. Defaults to
-            ``SEGMENT_CONTACT``, which resolves contact rather than only
-            reporting it; ``LIDAR_SCAN`` is the detection-only predecessor.
+            ``SEGMENT_CONTACT``, which detects and resolves contact. ``NONE``
+            disables collision detection and response.
         render_enabled: Whether rendering is enabled.
     """
 
@@ -584,22 +582,16 @@ class EnvConfig:
         if not isinstance(contact_cfg, ContactConfig):
             raise TypeError("contact must be a ContactConfig instance")
 
-        # Coerce: dispatch is `is`-based, so a raw int silently picks the wrong
-        # branch -- 0 would not disable collisions, 1 would not select LIDAR_SCAN.
+        # Coerce before the identity-based simulator dispatch.
         try:
             collision_check = CollisionCheckMode(self.collision_check)
         except ValueError as exc:
             raise ValueError(f"collision_check must be a CollisionCheckMode: {exc}") from exc
         object.__setattr__(self, "collision_check", collision_check)
-        if (
-            collision_check is CollisionCheckMode.SEGMENT_CONTACT
-            and simulation_cfg.dynamics_model is DynamicModel.MB
-        ):
+        if simulation_cfg.dynamics_model is DynamicModel.MB:
             raise ValueError(
-                "CollisionCheckMode.SEGMENT_CONTACT does not support the multi-body "
-                "model DynamicModel.MB in this version of the gym. Use ST, or KS for a "
-                "cheaper approximation. SEGMENT_CONTACT is now the default, so an MB "
-                "run must ask for collision_check=CollisionCheckMode.LIDAR_SCAN."
+                "DynamicModel.MB is unsupported in this version of the gym. "
+                "Use DynamicModel.ST, or DynamicModel.KS for a cheaper approximation."
             )
         if (
             collision_check is CollisionCheckMode.SEGMENT_CONTACT
@@ -608,9 +600,8 @@ class EnvConfig:
             warnings.warn(
                 "CollisionCheckMode.SEGMENT_CONTACT is not accurate on diagonal "
                 "contact under DynamicModel.KS: KS carries no slip angle or yaw "
-                "rate, so an angled hit halts the vehicle instead of sliding it "
-                "along the wall. Head-on contact is faithful. Use ST for angled "
-                "contact.",
+                "rate, so the corrected velocity is projected onto its kinematic "
+                "course. Use ST when accurate angled contact matters.",
                 UserWarning,
                 stacklevel=2,
             )
@@ -635,18 +626,14 @@ class EnvConfig:
         dr_cfg = self.domain_randomization_config
         if not isinstance(dr_cfg, DomainRandomizationConfig):
             raise TypeError("domain_randomization must be a DomainRandomizationConfig instance")
-
-        # MB needs the full parameter ABI; the small-scale presets leave the 69
-        # multi-body fields at nan. Fail before the map download and the JIT.
-        if simulation_cfg.dynamics_model is DynamicModel.MB:
-            missing = self.params.missing_mb_parameters()
-            if missing:
-                raise ValueError(
-                    f"DynamicModel.MB needs the multi-body parameters, but "
-                    f"{len(missing)} are not finite (e.g. {', '.join(missing[:4])}). "
-                    f"Use FULLSCALE_VEHICLE_PARAMETERS, which is the only preset that "
-                    f"populates them, or supply your own values."
-                )
+        inactive_dr_fields = set(dr_cfg.randomized_fields()).intersection(
+            PARAMETER_ORDER[20:]
+        )
+        if inactive_dr_fields:
+            names = ", ".join(sorted(inactive_dr_fields))
+            raise ValueError(
+                "Domain randomization includes unsupported MB-only fields: " + names
+            )
 
         if (
             simulation_cfg.loop_counter is LoopCounterMode.FRENET_BASED

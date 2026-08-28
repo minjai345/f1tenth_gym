@@ -98,8 +98,9 @@ noisy values but exactly ``range_max`` — at ``dropout_prob=0.05`` about 64 of
 .. warning::
 
    Every LiDAR knob perturbs the **observed** scan only. Collision detection
-   runs on the clean, noise-free scan, so no amount of sensor noise changes
-   when a crash fires — a policy cannot dodge a wall by hallucinating range.
+   and response use wall/body contact geometry independently of LiDAR, so no
+   amount of sensor noise changes when a crash fires — a policy cannot dodge a
+   wall by hallucinating range.
 
 Randomizing the vehicle
 -----------------------
@@ -147,9 +148,8 @@ stays inside, rather than a point estimate that randomized episodes escape.
 
 Names are the real ``VehicleParameters`` fields — ``m`` for mass, ``h`` for CoG
 height, not ``mass``/``h_cg``. :doc:`configuration` lists them, and
-:doc:`dynamics` explains which ones the kernels actually read: under the
-kinematic and single-track models only the first 18 reach the njit boundary, so
-randomizing a multi-body-only parameter is a silent no-op.
+:doc:`dynamics` explains which ones the kernels actually read. MB-only ranges
+are rejected at ``EnvConfig`` construction instead of becoming silent no-ops.
 
 What one seed pins
 ------------------

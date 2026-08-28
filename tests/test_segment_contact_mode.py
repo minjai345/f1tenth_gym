@@ -8,10 +8,7 @@ import numpy as np
 from f1tenth_gym.envs.action import LongitudinalActionType, SteerActionType
 from f1tenth_gym.envs.collision_models import CollisionCheckMode
 from f1tenth_gym.envs.contact import ContactConfig
-from f1tenth_gym.envs.dynamic_models import (
-    FULLSCALE_VEHICLE_PARAMETERS,
-    DynamicModel,
-)
+from f1tenth_gym.envs.dynamic_models import DynamicModel
 from f1tenth_gym.envs.env_config import (
     ControlConfig,
     EnvConfig,
@@ -81,17 +78,7 @@ def drive_into_wall(env, degrees, speed=8.0, standoff=1.2, limit=200):
 
 
 class TestGlancingContact(unittest.TestCase):
-    """The defect SEGMENT_CONTACT exists to fix: the halt discards tangential speed."""
-
-    def test_the_halt_keeps_nothing(self):
-        env = make_env(CollisionCheckMode.LIDAR_SCAN, friction=0.6)
-        try:
-            for degrees in (30, 60, 75):
-                v_in, v_out = drive_into_wall(env, degrees)
-                self.assertIsNotNone(v_in, f"{degrees} deg never made contact")
-                self.assertAlmostEqual(v_out, 0.0, places=4)
-        finally:
-            env.close()
+    """Geometric contact preserves the tangential component of motion."""
 
     def test_segment_contact_keeps_the_tangential_component(self):
         env = make_env(CollisionCheckMode.SEGMENT_CONTACT, friction=0.0)
@@ -105,8 +92,28 @@ class TestGlancingContact(unittest.TestCase):
 
 
 class TestModeWiring(unittest.TestCase):
+    def test_none_disables_detection_and_response(self):
+        env = make_env(CollisionCheckMode.NONE, terminate=True)
+        try:
+            normal, mid = longest_wall(env)
+            state = np.zeros((1, 7))
+            state[0] = [
+                mid[0],
+                mid[1],
+                0.0,
+                0.0,
+                math.atan2(-normal[1], -normal[0]),
+                0.0,
+                0.0,
+            ]
+            env.reset(seed=7, options={"states": state})
+            _obs, _reward, terminated, _truncated, info = env.step(COAST)
+            self.assertFalse(terminated)
+            self.assertEqual(float(info["collisions"][0]), 0.0)
+        finally:
+            env.close()
+
     def test_walls_are_detected_with_the_lidar_off(self):
-        # The halt lives inside _update_scans, so with the LiDAR off it has nothing.
         env = make_env(CollisionCheckMode.SEGMENT_CONTACT, lidar=False)
         try:
             v_in, _v_out = drive_into_wall(env, 0, speed=5.0, standoff=1.0, limit=150)
@@ -188,7 +195,7 @@ class TestConfigGuards(unittest.TestCase):
         self.assertIn("MB", str(caught.exception))
 
     def test_kinematic_contact_warns_about_diagonals(self):
-        """KS halts on an angled hit instead of sliding; say so, do not refuse."""
+        """KS projects an angled response onto its course; say so, do not refuse."""
         for config in (
             dict(collision_check=CollisionCheckMode.SEGMENT_CONTACT),
             dict(),  # SEGMENT_CONTACT is the default, so plain KS warns too
@@ -210,7 +217,7 @@ class TestConfigGuards(unittest.TestCase):
             ),
             dict(
                 simulation_config=SimulationConfig(dynamics_model=DynamicModel.KS),
-                collision_check=CollisionCheckMode.LIDAR_SCAN,
+                collision_check=CollisionCheckMode.NONE,
             ),
         ):
             with warnings.catch_warnings(record=True) as caught:
@@ -219,33 +226,29 @@ class TestConfigGuards(unittest.TestCase):
             self.assertEqual([str(w.message) for w in caught], [])
 
     def test_a_raw_int_is_coerced_not_silently_mishandled(self):
-        # `is`-based dispatch means a bare int would pick the wrong branch entirely.
         for value, expected in (
             (0, CollisionCheckMode.NONE),
-            (1, CollisionCheckMode.LIDAR_SCAN),
             (3, CollisionCheckMode.SEGMENT_CONTACT),
         ):
             self.assertIs(EnvConfig(collision_check=value).collision_check, expected)
-        with self.assertRaises(ValueError):
-            EnvConfig(collision_check=99)
+        for invalid in (1, 2, 99):
+            with self.assertRaises(ValueError):
+                EnvConfig(collision_check=invalid)
 
     def test_contact_is_the_default_mode(self):
         self.assertIs(EnvConfig().collision_check, CollisionCheckMode.SEGMENT_CONTACT)
 
-    def test_multi_body_names_the_mode_to_ask_for(self):
-        """MB is refused by the default now, so the message has to say what to pass."""
+    def test_multi_body_is_named_as_unsupported(self):
         with self.assertRaises(ValueError) as caught:
             EnvConfig(
-                params=FULLSCALE_VEHICLE_PARAMETERS,
                 simulation_config=SimulationConfig(dynamics_model=DynamicModel.MB),
             )
         message = str(caught.exception)
-        self.assertIn("multi-body", message)
-        self.assertIn("LIDAR_SCAN", message)
+        self.assertIn("unsupported", message)
+        self.assertIn("DynamicModel.ST", message)
 
-    def test_the_detection_only_modes_are_still_reachable(self):
-        for mode in (CollisionCheckMode.NONE, CollisionCheckMode.LIDAR_SCAN,
-                     CollisionCheckMode.BOUNDING_BOX):
+    def test_the_supported_modes_are_reachable(self):
+        for mode in (CollisionCheckMode.NONE, CollisionCheckMode.SEGMENT_CONTACT):
             self.assertIs(EnvConfig(collision_check=mode).collision_check, mode)
 
     def test_the_section_round_trips(self):

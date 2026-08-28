@@ -126,6 +126,15 @@ class TestDomainRandomization(unittest.TestCase):
         with self.assertRaises(TypeError):
             BASE.with_updates(mass=3.0)
 
+    def test_mb_only_randomization_is_rejected_by_the_environment(self):
+        dr = DomainRandomizationConfig(
+            enabled=True,
+            low=BASE.with_updates(K_zt=1000.0),
+            high=BASE.with_updates(K_zt=1200.0),
+        )
+        with self.assertRaisesRegex(ValueError, "unsupported MB-only fields: K_zt"):
+            EnvConfig(domain_randomization_config=dr)
+
 
 class TestWidestParamSpaces(unittest.TestCase):
     """#6: spaces are a fixed superset of every DR episode."""

@@ -55,10 +55,30 @@ Vehicle dynamics
 .. autosummary::
 
    f1tenth_gym.envs.dynamic_models.DynamicModel
-   f1tenth_gym.envs.dynamic_models.PoseReference
    f1tenth_gym.envs.dynamic_models.VehicleParameters
 
 .. automodule:: f1tenth_gym.envs.dynamic_models
+
+Functional JAX kernels
+----------------------
+
+These are the device-compatible building blocks under active migration. They
+are pure functions, not yet a complete Gymnasium environment.
+
+.. autosummary::
+
+   f1tenth_gym.jax.DynamicsParams
+   f1tenth_gym.jax.kinematic_single_track
+   f1tenth_gym.jax.single_track
+   f1tenth_gym.jax.euler_step
+   f1tenth_gym.jax.rk4_step
+   f1tenth_gym.jax.integrate_substeps
+
+.. automodule:: f1tenth_gym.jax
+
+.. automodule:: f1tenth_gym.jax.dynamics
+
+.. automodule:: f1tenth_gym.jax.integrators
 
 Actions
 -------
@@ -97,7 +117,6 @@ Sensing & collision
 
    f1tenth_gym.envs.lidar.LiDARConfig
    f1tenth_gym.envs.lidar.ScanSimulator2D
-   f1tenth_gym.envs.lidar.check_collision
    f1tenth_gym.envs.lidar.ray_cast
    f1tenth_gym.envs.collision_models.CollisionCheckMode
 

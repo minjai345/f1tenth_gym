@@ -70,7 +70,7 @@ class TestParameterOrder(unittest.TestCase):
         # Compared as lists so a mismatch names the field that moved.
         self.assertEqual(list(PARAMETER_ORDER), list(EXPECTED_PARAMETER_ORDER))
 
-    def test_order_has_89_entries(self):
+    def test_order_has_88_entries(self):
         self.assertEqual(len(PARAMETER_ORDER), 88)
         self.assertEqual(len(EXPECTED_PARAMETER_ORDER), 88)
 

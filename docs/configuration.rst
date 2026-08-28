@@ -46,9 +46,8 @@ section of their own further down.
        here; a bad value fails at ``gym.make``. See :doc:`tracks`.
    * - ``map_scale``
      - ``1.0``
-     - Coerced to ``float``; must be ``> 0``. The shipped maps are 1/10
-       scale; the full-size MB vehicle needs ``map_scale=10.0``
-       (:doc:`dynamics`).
+     - Coerced to ``float``; must be ``> 0``. See :doc:`tracks` for map/world
+       scaling.
    * - ``params``
      - ``F1TENTH_VEHICLE_PARAMETERS``
      - Must be a ``VehicleParameters`` instance — the first check to run.
@@ -87,11 +86,10 @@ section of their own further down.
      - ``DomainRandomizationConfig()``
      - Per-episode vehicle-parameter randomization.
    * - ``collision_check``
-     - ``CollisionCheckMode.LIDAR_SCAN``
-     - ``LIDAR_SCAN`` / ``BOUNDING_BOX`` (O(n²) GJK, symmetric) / ``NONE``.
-       The one field with no isinstance guard, and dispatch compares enum
-       identity: a raw ``1`` selects ``BOUNDING_BOX`` and ``0`` disables
-       nothing — always pass the enum member, imported from
+     - ``CollisionCheckMode.SEGMENT_CONTACT``
+     - ``SEGMENT_CONTACT`` applies geometric wall/body contact response;
+       ``NONE`` disables collision detection and response. Raw integer values
+       are coerced through the enum. Import it from
        ``f1tenth_gym.envs.collision_models``.
    * - ``render_enabled``
      - ``True``
@@ -240,18 +238,12 @@ from ``f1tenth_gym.envs.dynamic_models``, ``LoopCounterMode`` from
      - ``RK4`` or ``EULER``.
    * - ``dynamics_model``
      - ``DynamicModel.ST``
-     - ``KS`` (kinematic single-track, 5-state), ``ST`` (single-track,
-       7-state), or ``MB`` (multi-body, 29-state). ``MB`` needs every
-       multi-body parameter finite — ``EnvConfig`` raises otherwise, and
-       ``FULLSCALE_VEHICLE_PARAMETERS`` is the only preset that qualifies —
-       plus ``map_scale=10.0`` on the shipped maps. See :doc:`dynamics`.
+     - ``KS`` (kinematic single-track, 5-state) or ``ST`` (single-track,
+       7-state). ``MB`` is unsupported in this version. See :doc:`dynamics`.
    * - ``loop_counter``
      - ``LoopCounterMode.FRENET_BASED``
      - ``FRENET_BASED``, or ``WINDING_ANGLE`` (cumulative angle around the
-       track centroid; reliable on convex tracks only). ``TOGGLE`` is
-       declared but not implemented: it counts zero laps, and because the
-       lap-target exit reads the lap count, a ``TOGGLE`` env with the
-       default ``max_laps=1`` never terminates.
+       track centroid; reliable on convex tracks only).
    * - ``compute_frenet_frame``
      - ``True``
      - Whether per-agent Frenet ``(s, ey, ephi)`` coordinates are computed
@@ -384,10 +376,8 @@ did-you-pass-degrees hint.
      - Allowed values / notes
    * - ``enabled``
      - ``True``
-     - When ``False`` the ``scan`` key disappears from observations — and,
-       under the default ``LIDAR_SCAN`` collision mode, so does all
-       collision detection, walls included (``BOUNDING_BOX`` keeps
-       agent-vs-agent).
+     - When ``False`` the ``scan`` key disappears from observations. Geometric
+       contact remains active and is independent of LiDAR.
    * - ``num_beams``
      - ``1080``
      - ``>= 1``. Angular resolution is capped by a 2000-entry internal
@@ -420,11 +410,11 @@ did-you-pass-degrees hint.
      - ``(x, y, yaw)`` sensor offset from ``base_link`` in metres/radians.
        Unvalidated.
 
-The three noise fields shape only the *observed* scan — collision detection
-always uses the clean scan (:doc:`sim2real`). ``reset()`` ends with one
-sweep, so the first observation's ``scan`` is already real and noise-bearing,
-and that spawn sweep never flags a collision. Convenience read-only
-properties: ``angle_increment`` and ``maximum_range``.
+The three noise fields shape only the *observed* scan. Collision and response
+come from segment contact geometry independently of LiDAR (:doc:`sim2real`).
+``reset()`` ends with one sweep, so the first observation's ``scan`` is already
+real and noise-bearing; reset does not run the contact solver. Convenience
+read-only properties: ``angle_increment`` and ``maximum_range``.
 
 ``angle_min`` and ``angle_max`` are the sensor's true extent and the only stored
 geometry. ``field_of_view`` is a read-only property equal to
@@ -635,11 +625,10 @@ values.
 .. note::
 
    Names are the raw ``VehicleParameters`` fields — ``m`` (mass) and ``h``
-   (CoG height), not ``mass``/``h_cg``. Under KS and ST only the 18 base
-   parameters reach the physics kernels, so a range over a multi-body field
-   (``K_zt``, …) validates but changes nothing, while ``width``, ``length``,
-   ``lr`` and the collision-body offsets do take effect through the scan and
-   collision caches.
+   (CoG height), not ``mass``/``h_cg``. A range over an unsupported MB-only
+   field (``K_zt``, …) raises at ``EnvConfig`` construction. ``width``,
+   ``length``, ``lr`` and the collision-body offsets take effect through
+   opponent occlusion and contact geometry.
 
 Reconfiguring a live environment
 --------------------------------
