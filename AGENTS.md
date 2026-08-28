@@ -226,6 +226,7 @@ rather than equality.
 | `envs/lidar/` | LiDAR config, raster scanner, exact segment scanner, JAX kernels |
 | `envs/collision_models.py` | collision enum and collision-body vertices |
 | `envs/contact/` | JAX manifolds/solvers and the NumPy/JAX adapter |
+| `f1tenth_gym/jax/` | pure dynamics, controls, fixed-shape state and free-flight rollouts |
 | `envs/track/track.py` | map/reference-line loading and Frenet transforms |
 | `envs/track/walls.py` | oriented wall extraction from occupancy maps |
 | `envs/track/budget.py` | exact allocation budgets and guards |
@@ -235,7 +236,7 @@ rather than equality.
 | `envs/rendering/` | PyQt6/OpenGL renderer, objects, callbacks |
 | `envs/wrappers.py` | single-agent and observation-delay wrappers |
 | `examples/` | waypoint following, video, telemetry, synthetic tracks |
-| `tests/` | 507 collected tests across 37 `test_*.py` files |
+| `tests/` | 525 collected tests across 39 `test_*.py` files |
 | `docs/` | Sphinx user documentation plus behavioral measurements |
 
 ## Configuration model
@@ -317,8 +318,14 @@ The established portable JAX geometry seam is intentionally narrow:
 - `envs/contact/solver.py`
 - `envs/lidar/kernels.py`
 
-The first functional dynamics seam lives under `f1tenth_gym/jax/`; keep it
-subject to the same pure-array constraints as it grows into the complete core.
+The functional seam under `f1tenth_gym/jax/` currently owns traced vehicle and
+episode parameters, KS/ST dynamics, controllers, actuator noise/FIFOs and
+free-flight `lax.scan` rollouts. Host preprocessing produces fixed-shape spline,
+wall, tile and RL-reset tables; exact-shape buckets are the default for
+heterogeneous maps, with shared `Track` objects stored once and referenced by
+index. `DynamicsConfig` contains structural choices; `EpisodeParams` contains
+values that vary under environment-level `vmap` without recompilation. The
+functional step does not yet own sensing, contact or episode semantics.
 
 Keep these pure JAX/array math, fixed-shape, jittable/vmappable, free of Gym
 and package-local imports, and free of NumPy marshalling. Host conversion,
@@ -413,7 +420,7 @@ caches frames between configured render instants.
 | Dynamics model | model enum/frame/state init/standardizer, kernel, params | `test_dynamics.py`, ABI tests, `dynamics.rst` |
 | Integrator behavior | `integrators.py`, simulator substep validation | `test_integrators.py`, `test_env_config.py` |
 | LiDAR backend | config enum, `_make_scan_simulator`, backend adapter | scan tests, migration seam, observations/config docs |
-| Collision mode | enum and all three simulator collision seams | collision/contact behavior tests, config docs |
+| Collision mode | collision enum, `_build_contact()`, contact step dispatch | collision/contact behavior tests, config docs |
 | Contact physics | pure kernels/solver, adapter, indexes/budgets | kernel, solver, body/mode, migration tests |
 | Track format/geometry | loader, `TrackSpec`, walls/index caches | track/wall/index tests, `tracks.rst` |
 | Reset strategy | enum, `_RESET_BUILDERS`, sampler, config applicability | `test_reset.py`, `test_env_config.py` |
@@ -427,7 +434,7 @@ constraint spans subsystems.
 
 ## Tests and validation
 
-The baseline collects 507 tests across 37 `test_*.py` files. Most tests use
+The baseline collects 525 tests across 39 `test_*.py` files. Most tests use
 `unittest.TestCase` but run through pytest. Tests cover public behavior and
 low-level numerical contracts, including JIT/vmap/gradient properties,
 allocation guards, cache invalidation, observation aliasing, vector envs,

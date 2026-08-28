@@ -408,12 +408,33 @@ collision is SEGMENT_CONTACT/NONE, and all public frame changes are documented.
 tolerances; `jit`, `vmap`, `lax.scan`, `jax.eval_shape` and DR-over-parameters
 tests pass without recompilation per episode.
 
+#### Phase 3 implementation record — 2026-08-28
+
+- `DynamicsConfig` separates hashable structural choices from traced
+  `EpisodeParams`; immutable `DynamicsState` carries native model state,
+  delayed commands, fixed-shape FIFO buffers/heads and simulation time.
+- Pure action adapters match the current target-speed controller, steering P
+  controller/relay hatch, direct modes and `[steering, longitudinal]` ordering.
+- `step_dynamics` applies explicit-key command noise, steering/throttle delays,
+  controller conversion and vmapped integration. `rollout_dynamics` composes it
+  through `lax.scan` without auto-reset or host conversion.
+- Differential tests cover KS/ST host-simulator rollouts, FIFO order, key
+  replay, `jit`, per-environment-parameter `vmap`, `eval_shape` and gradients.
+- Host preprocessing now emits fixed-shape spline, wall, contact-tile, ray-tile
+  and reset-candidate pytrees with explicit masks. Pure global Frenet transforms
+  and key-driven grid/all-track reset sampling run under `jit`/`vmap`.
+- Reused `Track` objects are stored once and referenced by map index. Different
+  shapes default to exact-shape buckets; a layout report quantifies global
+  padding overhead. `MAP_RANDOM_STATIC` remains explicitly outside the device
+  surface pending a decision on its known host row/column bug.
+
 ### Phase 4 — exact LiDAR and contact
 
 - Replace `jax-pf`/raster ray marching with the current segment kernels and
   fixed-shape ray-tile candidates.
-- Port LiDAR mounting transforms and opponent occlusion; clean wall ranges drive
-  collision, while noise/bias/dropout affect observed ranges only.
+- Port LiDAR mounting transforms and opponent occlusion. Scans remain sensors;
+  segment wall/body geometry drives collision independently, while
+  noise/bias/dropout affect observed ranges only.
 - Remove RASTER, EDT, theta LUT and `jax-pf` only after differential tests pass.
 - Port wall contact manifolds and Jacobi impulse/position solver without host
   marshalling in the compiled path.

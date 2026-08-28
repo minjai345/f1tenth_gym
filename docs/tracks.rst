@@ -270,3 +270,25 @@ Fifty points along a 10 m segment come back as 51 points over a 20 m loop:
 by re-running ``configure`` with the new ``map_name``, which rebuilds the
 simulator, the spaces and the renderer around it — so any render callbacks have
 to be registered again afterwards (:doc:`rendering`).
+
+Device tables during the JAX migration
+---------------------------------------
+
+The functional JAX layer never loads a map inside a compiled function.
+``f1tenth_gym.jax.preprocess.build_track_table`` runs on the host and converts
+an existing ``Track`` into fixed-shape spline coefficients, reference points,
+oriented walls, contact/ray tile candidates and explicit masks. The returned
+``TrackTable`` is a JAX pytree; pure transforms in ``f1tenth_gym.jax`` evaluate
+its splines and convert global Cartesian/Frenet poses without NumPy conversion.
+
+Heterogeneous tracks default to exact-shape buckets rather than padding every
+map to the largest spline, wall and tile dimensions. ``build_track_table_set``
+stores repeated references to the same ``Track`` once and returns integer map
+indexes for their environments. ``compare_batch_layout`` reports the exact
+versus global-padding bytes so a caller can make a measured alternative choice.
+
+``build_reset_table`` similarly preprocesses current grid/all-track waypoint
+and spacing choices. ``sample_reset_poses`` consumes only an explicit JAX key
+and fixed arrays. ``MAP_RANDOM_STATIC`` is not yet part of this device surface;
+its current host sampler has a known row/column bug that must be resolved as an
+explicit behavior decision rather than copied into the new backend.

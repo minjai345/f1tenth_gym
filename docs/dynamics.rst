@@ -43,11 +43,15 @@ Pure JAX kernels
 ----------------
 
 The migration-in-progress functional layer is importable from
-:mod:`f1tenth_gym.jax`. It currently exposes CoG KS and ST derivatives, traced
-``DynamicsParams``, Euler, RK4 and fixed integration substeps. These functions
-support ``jax.jit``, ``jax.vmap`` and differentiation, but do not yet form a
-complete environment; use the Gymnasium API for training until its state,
-track, sensing and contact layers land.
+:mod:`f1tenth_gym.jax`. It exposes CoG KS and ST derivatives, traced vehicle and
+episode parameters, controllers, actuator noise/FIFO delays, immutable
+fixed-shape state, Euler/RK4 substeps and ``lax.scan`` free-flight rollouts.
+Structural choices live in ``DynamicsConfig`` while values such as physical
+parameters and noise scales remain traced in ``EpisodeParams``. The layer
+supports ``jax.jit``, environment-level ``jax.vmap`` and differentiation, but
+its transition does not yet include sensing, contact or episode semantics.
+Host-preprocessed reference-line/reset tables are described in :doc:`tracks`;
+use the Gymnasium API for training until the remaining layers and adapters land.
 
 ``delta`` is the steering angle, ``v`` the longitudinal speed, ``yaw`` the
 heading, and ``beta`` the body slip angle. Under ``KS`` there is nothing for a

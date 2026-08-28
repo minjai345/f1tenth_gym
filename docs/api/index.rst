@@ -68,17 +68,50 @@ are pure functions, not yet a complete Gymnasium environment.
 .. autosummary::
 
    f1tenth_gym.jax.DynamicsParams
+   f1tenth_gym.jax.DynamicsConfig
+   f1tenth_gym.jax.DynamicsState
+   f1tenth_gym.jax.EpisodeParams
+   f1tenth_gym.jax.SplineTable
+   f1tenth_gym.jax.TrackTable
+   f1tenth_gym.jax.ResetTable
+   f1tenth_gym.jax.ResetConfig
+   f1tenth_gym.jax.LongitudinalControlMode
+   f1tenth_gym.jax.SteeringControlMode
    f1tenth_gym.jax.kinematic_single_track
    f1tenth_gym.jax.single_track
+   f1tenth_gym.jax.adapt_actions
    f1tenth_gym.jax.euler_step
    f1tenth_gym.jax.rk4_step
    f1tenth_gym.jax.integrate_substeps
+   f1tenth_gym.jax.make_dynamics_state
+   f1tenth_gym.jax.step_dynamics
+   f1tenth_gym.jax.rollout_dynamics
+   f1tenth_gym.jax.evaluate_spline
+   f1tenth_gym.jax.cartesian_to_frenet
+   f1tenth_gym.jax.frenet_to_cartesian
+   f1tenth_gym.jax.sample_reset_poses
+   f1tenth_gym.jax.reset_dynamics_state
+   f1tenth_gym.jax.preprocess.build_track_table
+   f1tenth_gym.jax.preprocess.build_track_table_set
+   f1tenth_gym.jax.preprocess.build_reset_table
+   f1tenth_gym.jax.preprocess.bucket_track_tables
+   f1tenth_gym.jax.preprocess.compare_batch_layout
 
 .. automodule:: f1tenth_gym.jax
 
 .. automodule:: f1tenth_gym.jax.dynamics
 
+.. automodule:: f1tenth_gym.jax.controls
+
+.. automodule:: f1tenth_gym.jax.core
+
 .. automodule:: f1tenth_gym.jax.integrators
+
+.. automodule:: f1tenth_gym.jax.track
+
+.. automodule:: f1tenth_gym.jax.reset
+
+.. automodule:: f1tenth_gym.jax.preprocess
 
 Actions
 -------
