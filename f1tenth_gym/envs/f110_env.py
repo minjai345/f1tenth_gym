@@ -14,6 +14,7 @@ from .dynamic_models import (
 )
 from .simulator import F110Simulator
 from .env_config import (
+    AgentTerminationMode,
     EnvConfig,
     LoopCounterMode,
     RewardMode,
@@ -185,7 +186,7 @@ class F110Env(gym.Env):
 
         self.max_episode_steps = self.termination_cfg.max_episode_steps
         self.terminate_on_collision = self.termination_cfg.terminate_on_collision
-        self.collision_agents = self.termination_cfg.collision_agents
+        self.agent_termination_mode = self.termination_cfg.agent_mode
 
         self.longitudinal_action_type = self.control_cfg.longitudinal_mode
         self.steer_action_type = self.control_cfg.steering_mode
@@ -247,6 +248,9 @@ class F110Env(gym.Env):
         self.lap_times = np.zeros((self.num_agents,))
         self.lap_times_finish = np.zeros((self.num_agents,))
         self.lap_counts = np.zeros((self.num_agents,))
+        # Per-agent terminal status is episode bookkeeping, not simulator
+        # state. It latches for ALL semantics but never freezes a vehicle.
+        self.terminated_agents = np.zeros((self.num_agents,), dtype=np.bool_)
         # Finish-line crossings, which lead lap_counts by one under the out-lap rule.
         self._line_crossings = np.zeros((self.num_agents,))
         # per-agent previous Frenet s for the progress reward (independent of the
@@ -403,15 +407,22 @@ class F110Env(gym.Env):
                 # a crossing of that ray rather than a loop back to the spawn.
                 self._record_crossing(ind, int(self.cumulative_angle[ind] / (2.0 * np.pi)))
 
-        terminated = False
+        terminal_now = np.zeros((self.num_agents,), dtype=np.bool_)
         if self.terminate_on_collision:
-            if self.collision_agents == "any":
-                terminated = bool(np.any(self.sim.collisions))
-            else:  # "ego"
-                terminated = bool(self.sim.collisions[self.ego_idx])
+            terminal_now |= np.asarray(self.sim.collisions, dtype=np.bool_)
         if self.max_laps is not None:
-            terminated = terminated or (self.lap_counts[self.ego_idx] >= self.max_laps)
-        return terminated
+            terminal_now |= self.lap_counts >= self.max_laps
+        self.terminated_agents |= terminal_now
+
+        if self.agent_termination_mode is AgentTerminationMode.EGO:
+            return bool(self.terminated_agents[self.ego_idx])
+        if self.agent_termination_mode is AgentTerminationMode.ANY:
+            return bool(np.any(self.terminated_agents))
+        if self.agent_termination_mode is AgentTerminationMode.ALL:
+            return bool(np.all(self.terminated_agents))
+        raise RuntimeError(
+            f"Unsupported agent termination mode: {self.agent_termination_mode!r}"
+        )
 
     def _sample_vehicle_params(self):
         """Draw a randomized VehicleParameters between the DR bounds (env RNG).
@@ -478,7 +489,7 @@ class F110Env(gym.Env):
             progress; CUSTOM: your ``reward_fn``); ``terminated`` on collision
             or ``max_laps``; ``truncated`` when ``max_episode_steps`` is
             reached; ``info`` with ``lap_times``, ``lap_counts``, ``sim_time``,
-            ``collisions`` and ``progress`` (all copies).
+            ``collisions``, ``terminated_agents`` and ``progress`` (all copies).
         """
 
         # call simulation step
@@ -514,6 +525,7 @@ class F110Env(gym.Env):
             "lap_counts": self.lap_counts.copy(),
             "sim_time": self.sim_time,
             "collisions": self.sim.collisions.copy(),  # per-agent collision flags
+            "terminated_agents": self.terminated_agents.copy(),
             "progress": progress,  # per-agent forward arclength this step (m)
         }
         # reward is computed last so a CUSTOM reward_fn sees the final info
@@ -537,9 +549,9 @@ class F110Env(gym.Env):
 
         Returns:
             ``(obs, info)``: the first observation (with a real LiDAR sweep)
-            and an info dict with ``lap_times``, ``lap_counts`` and
-            ``sim_time`` — note ``collisions``/``progress`` appear only in
-            ``step()``'s info.
+            and an info dict with ``lap_times``, ``lap_counts``, ``sim_time``
+            and ``terminated_agents`` — note ``collisions``/``progress``
+            appear only in ``step()``'s info.
         """
         # EnvConfig.seed covers the FIRST unseeded reset; later ones continue the
         # stream. An explicit seed always wins.
@@ -559,6 +571,7 @@ class F110Env(gym.Env):
             self.cumulative_angle.fill(0.0)
             self.agents_prev_angle.fill(0.0)
         self.lap_counts.fill(0.0)
+        self.terminated_agents.fill(False)
         self.lap_times.fill(0.0)
         self.lap_times_finish.fill(0.0)
         self._line_crossings.fill(0.0)
@@ -640,7 +653,12 @@ class F110Env(gym.Env):
 
         # copy: these are the env's live arrays, mutated every step; without a
         # copy a stored info dict would change retroactively (breaks logging).
-        info = {"lap_times": self.lap_times.copy(), "lap_counts": self.lap_counts.copy(), "sim_time": self.sim_time}
+        info = {
+            "lap_times": self.lap_times.copy(),
+            "lap_counts": self.lap_counts.copy(),
+            "sim_time": self.sim_time,
+            "terminated_agents": self.terminated_agents.copy(),
+        }
 
         return obs, info
 

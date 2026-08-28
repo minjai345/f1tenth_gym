@@ -520,20 +520,23 @@ When an episode ends, and on whose account.
    * - ``terminate_on_collision``
      - ``True``
      - Whether a collision sets ``terminated=True``.
-   * - ``collision_agents``
-     - ``"ego"``
-     - Whose collision counts: ``"ego"`` or ``"any"``.
+   * - ``agent_mode``
+     - ``AgentTerminationMode.EGO``
+     - Reduce per-agent collision and lap-completion status with ``EGO``,
+       ``ANY`` or ``ALL``.
 
 >>> from f1tenth_gym.envs.env_config import TerminationConfig
->>> TerminationConfig(collision_agents="all")
+>>> TerminationConfig(agent_mode="all")
 Traceback (most recent call last):
     ...
-ValueError: collision_agents must be 'ego' or 'any', got 'all'
+TypeError: agent_mode must be an AgentTerminationMode
 
 Per-agent collision flags arrive in ``info["collisions"]`` on every ``step``
-(the ``reset`` info dict has no such key). The lap-target exit —
-``SimulationConfig.max_laps`` — is a separate rule and always watches the
-ego, whatever ``collision_agents`` says.
+(the ``reset`` info dict has no such key). ``info["terminated_agents"]`` is a
+copied Boolean array available on reset and step. It latches collision and lap
+completion status for the episode without stopping or freezing individual
+vehicles. The configured reduction always returns one environment-wide
+``terminated`` value.
 
 ``RewardConfig``
 ----------------

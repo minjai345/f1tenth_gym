@@ -23,6 +23,7 @@ from .reset import ReferenceLine, ResetStrategy
 from .contact import ContactConfig
 from .lidar import LiDARConfig
 from .collision_models import CollisionCheckMode
+from .termination import AgentTerminationMode
 
 if TYPE_CHECKING:
     from .track import Track
@@ -333,23 +334,21 @@ class TerminationConfig:
             once this many steps have elapsed since reset. ``None`` = no limit.
         terminate_on_collision: Whether a collision ends the episode
             (``terminated=True``).
-        collision_agents: Whose collisions count when ``terminate_on_collision``
-            is set: ``"ego"`` (only the ego agent) or ``"any"`` (any agent).
+        agent_mode: How per-agent collision and lap-completion status is reduced
+            to the scalar ``terminated`` result.
     """
 
     max_episode_steps: Optional[int] = None
     terminate_on_collision: bool = True
-    collision_agents: str = "ego"
+    agent_mode: AgentTerminationMode = AgentTerminationMode.EGO
 
     def __post_init__(self) -> None:
         if self.max_episode_steps is not None and self.max_episode_steps < 1:
             raise ValueError(
                 f"max_episode_steps must be >= 1 or None, got {self.max_episode_steps}"
             )
-        if self.collision_agents not in ("ego", "any"):
-            raise ValueError(
-                f"collision_agents must be 'ego' or 'any', got {self.collision_agents!r}"
-            )
+        if not isinstance(self.agent_mode, AgentTerminationMode):
+            raise TypeError("agent_mode must be an AgentTerminationMode")
 
     def with_updates(self, **changes: Any) -> "TerminationConfig":
         return replace(self, **changes)

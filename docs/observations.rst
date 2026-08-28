@@ -277,17 +277,17 @@ the observation's, because ``observe()`` is called before the env refreshes
 >>> env = gym.make("f1tenth_gym:f1tenth-v0", config=EnvConfig(render_enabled=False))
 >>> obs, info = env.reset(seed=42)
 >>> sorted(info)
-['lap_counts', 'lap_times', 'sim_time']
+['lap_counts', 'lap_times', 'sim_time', 'terminated_agents']
 >>> obs, reward, terminated, truncated, info = env.step(
 ...     np.array([[0.0, 2.0]], dtype=np.float32))
 >>> sorted(info)
-['collisions', 'lap_counts', 'lap_times', 'progress', 'sim_time']
+['collisions', 'lap_counts', 'lap_times', 'progress', 'sim_time', 'terminated_agents']
 >>> float(obs["agent_0"]["sim_time"]), info["sim_time"]
 (0.0, 0.01)
 >>> env.close()
 
-``lap_times``, ``lap_counts``, ``collisions`` and ``progress`` are per-agent
-arrays of length ``num_agents``, and each is a copy of the env's live buffer —
-a stored info dict does not change retroactively. ``progress`` is the forward
-Frenet arclength each agent gained this step, in metres, and it is computed on
-every step whatever the reward mode (:doc:`rl`).
+``lap_times``, ``lap_counts``, ``collisions``, ``terminated_agents`` and
+``progress`` are per-agent arrays of length ``num_agents``, and each is a copy
+of the env's live buffer — a stored info dict does not change retroactively.
+``progress`` is the forward Frenet arclength each agent gained this step, in
+metres, and it is computed on every step whatever the reward mode (:doc:`rl`).

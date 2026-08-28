@@ -21,6 +21,7 @@ Environment & configuration
    f1tenth_gym.envs.env_config.TerminationConfig
    f1tenth_gym.envs.env_config.RewardConfig
    f1tenth_gym.envs.env_config.DomainRandomizationConfig
+   f1tenth_gym.envs.env_config.AgentTerminationMode
    f1tenth_gym.envs.env_config.LoopCounterMode
    f1tenth_gym.envs.env_config.RewardMode
    f1tenth_gym.envs.f110_env.F110Env

@@ -26,6 +26,7 @@ from f1tenth_gym.envs.env_config import (
     DomainRandomizationConfig,
     EnvConfig,
     LoopCounterMode,
+    AgentTerminationMode,
     ObservationConfig,
     RenderConfig,
     ResetConfig,
@@ -451,7 +452,7 @@ def build_config() -> EnvConfig:
         termination_config=TerminationConfig(
             max_episode_steps=None,      # None -> no step-based truncation
             terminate_on_collision=True,
-            collision_agents="ego",      # "ego" | "any"
+            agent_mode=AgentTerminationMode.EGO,  # EGO | ANY | ALL
         ),
 
         # ---- reward --------------------------------------------------------

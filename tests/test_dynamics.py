@@ -27,6 +27,7 @@ from f1tenth_gym.envs.dynamic_models import (
     vehicle_dynamics_ks,
     vehicle_dynamics_st,
 )
+from f1tenth_gym.envs.dynamic_models.kinematic import vehicle_dynamics_ks_cog
 
 
 def func_KS(
@@ -146,6 +147,81 @@ class DynamicsTest(unittest.TestCase):
         self.v_max = 50.8  # minimum velocity [m/s]
         self.v_switch = 7.319  # switching velocity [m/s]
         self.a_max = 11.5  # maximum absolute acceleration [m/s^2]
+
+    def _params(self):
+        return np.array(
+            [
+                self.mu,
+                self.C_Sf,
+                self.C_Sr,
+                self.lf,
+                self.lr,
+                self.h,
+                self.m,
+                self.I,
+                self.s_min,
+                self.s_max,
+                self.sv_min,
+                self.sv_max,
+                self.v_switch,
+                self.a_max,
+                self.v_min,
+                self.v_max,
+            ]
+        )
+
+    def test_ks_rear_axle_and_cog_free_flight_are_equivalent(self):
+        """Pin the frame transform before KS moves to a CoG-native state."""
+        delta = 0.3
+        yaw = 0.7
+        cog_speed = 4.0
+        wheelbase = self.lf + self.lr
+        beta = np.arctan(np.tan(delta) * self.lr / wheelbase)
+        rear_speed = cog_speed * np.cos(beta)
+        rear_state = np.array([1.0, 2.0, delta, rear_speed, yaw])
+        cog_state = np.array(
+            [
+                rear_state[0] + self.lr * np.cos(yaw),
+                rear_state[1] + self.lr * np.sin(yaw),
+                delta,
+                cog_speed,
+                yaw,
+            ]
+        )
+
+        rear_dot = vehicle_dynamics_ks(rear_state, np.zeros(2), self._params())
+        transformed_dot = np.array(
+            [
+                rear_dot[0] - self.lr * np.sin(yaw) * rear_dot[4],
+                rear_dot[1] + self.lr * np.cos(yaw) * rear_dot[4],
+                rear_dot[2],
+                rear_dot[3],
+                rear_dot[4],
+            ]
+        )
+        cog_dot = np.asarray(
+            vehicle_dynamics_ks_cog(cog_state, np.zeros(2), self._params())
+        )
+        np.testing.assert_allclose(cog_dot, transformed_dot, rtol=1e-12, atol=1e-12)
+
+    def test_st_reverse_motion_and_zero_speed_finite_difference(self):
+        """Reverse uses the safe kinematic branch and stays regular at zero."""
+        state = np.array([1.0, 2.0, 0.2, -2.0, 0.4, 0.0, 0.0])
+        derivative = vehicle_dynamics_st(state, np.zeros(2), self._params())
+        heading = np.array([np.cos(state[4]), np.sin(state[4])])
+        self.assertLess(float(derivative[:2].dot(heading)), 0.0)
+        self.assertTrue(np.all(np.isfinite(derivative)))
+
+        epsilon = 1e-6
+        plus = state.copy()
+        minus = state.copy()
+        plus[3] = epsilon
+        minus[3] = -epsilon
+        finite_difference = (
+            vehicle_dynamics_st(plus, np.zeros(2), self._params())
+            - vehicle_dynamics_st(minus, np.zeros(2), self._params())
+        ) / (2.0 * epsilon)
+        self.assertTrue(np.all(np.isfinite(finite_difference)))
 
     def test_derivatives(self):
         # ground truth derivatives
