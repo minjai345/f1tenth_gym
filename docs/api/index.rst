@@ -80,6 +80,8 @@ are pure functions, not yet a complete Gymnasium environment.
    f1tenth_gym.jax.ScanParams
    f1tenth_gym.jax.ContactParams
    f1tenth_gym.jax.WallContactConfig
+   f1tenth_gym.jax.PairContactConfig
+   f1tenth_gym.jax.PairTable
    f1tenth_gym.jax.LongitudinalControlMode
    f1tenth_gym.jax.SteeringControlMode
    f1tenth_gym.jax.kinematic_single_track
@@ -102,10 +104,16 @@ are pure functions, not yet a complete Gymnasium environment.
    f1tenth_gym.jax.world_velocity
    f1tenth_gym.jax.apply_contact_response
    f1tenth_gym.jax.resolve_wall_contacts
+   f1tenth_gym.jax.make_pair_table
+   f1tenth_gym.jax.solve_pair_impulses
+   f1tenth_gym.jax.resolve_pair_contacts
+   f1tenth_gym.jax.resolve_contacts
    f1tenth_gym.jax.preprocess.build_track_table
    f1tenth_gym.jax.preprocess.build_track_table_set
    f1tenth_gym.jax.preprocess.build_reset_table
    f1tenth_gym.jax.preprocess.build_scan_params
+   f1tenth_gym.jax.preprocess.build_pair_table
+   f1tenth_gym.jax.preprocess.validate_pair_table
    f1tenth_gym.jax.preprocess.bucket_track_tables
    f1tenth_gym.jax.preprocess.compare_batch_layout
 
@@ -118,6 +126,8 @@ are pure functions, not yet a complete Gymnasium environment.
 .. automodule:: f1tenth_gym.jax.core
 
 .. automodule:: f1tenth_gym.jax.contact
+
+.. automodule:: f1tenth_gym.jax.pairs
 
 .. automodule:: f1tenth_gym.jax.integrators
 

@@ -47,17 +47,24 @@ The migration-in-progress functional layer is importable from
 episode parameters, controllers, actuator noise/FIFO delays, immutable
 fixed-shape state, Euler/RK4 substeps and ``lax.scan`` free-flight rollouts.
 Structural choices live in ``DynamicsConfig`` while values such as physical
-parameters and noise scales remain traced in ``EpisodeParams``. The layer
-also exposes shared body geometry, clean exact LiDAR sensing and wall contact
-over fixed track tables. Wall response converts the model-native state to a
-rigid-body velocity, vmaps the manifold/Jacobi solve across agents, projects
-the response back into KS or ST, and returns a new boolean collision event on
-every call. These functions support ``jax.jit``, environment-level ``jax.vmap``
-and differentiation away from geometry switches, but the free-flight
-transition does not yet integrate sensing/contact or episode semantics.
-Simultaneous vehicle-pair response is still pending. Host-preprocessed
-reference-line/reset/ray tables are described in :doc:`tracks`; use the
-Gymnasium API for training until the remaining layers and adapters land.
+parameters and noise scales remain traced in ``EpisodeParams``. The layer also
+exposes shared body geometry, clean exact LiDAR sensing, wall contact and
+simultaneous vehicle-pair contact over fixed tables. Wall response vmaps the
+manifold/Jacobi solve across agents. Pair response builds every manifold from
+one shared state, computes each Jacobi sweep from common body velocities,
+scatter-adds equal-and-opposite impulses/corrections and writes one KS/ST
+response per body. The combined ``resolve_contacts`` function preserves the
+mutable simulator's macro order—walls first, then pairs—and unions fresh
+per-agent events; collisions never latch or freeze a vehicle.
+
+These functions support ``jax.jit``, environment-level ``jax.vmap``,
+``lax.scan`` and differentiation away from geometry switches. The standalone
+wall and pair functions remain available for focused use and testing. The
+free-flight transition does not yet integrate sensing/contact or episode
+semantics. Host-preprocessed reference-line, reset and ray tables are described
+in :doc:`tracks`; pair-table construction is listed in :doc:`api/index`. Use the
+Gymnasium API for training until the remaining core integration and adapters
+land.
 
 ``delta`` is the steering angle, ``v`` the longitudinal speed, ``yaw`` the
 heading, and ``beta`` the body slip angle. Under ``KS`` there is nothing for a

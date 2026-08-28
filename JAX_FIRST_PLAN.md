@@ -482,6 +482,29 @@ tests pass and the compiled batched path contains no NumPy conversion.
   and a speculative clamp without a penetrating manifold is discarded. Pair
   contact remains for Phase 4c's simultaneous global Jacobi redesign.
 
+#### Phase 4c implementation record — 2026-08-28
+
+- Fixed-capacity ``PairTable`` arrays enumerate every canonical unordered
+  vehicle pair and use masks for padding. Host preprocessing validates safe
+  indexes for every slot plus complete live topology, canonical ordering and
+  uniqueness before compilation.
+- Every pair manifold is built from one shared body-state snapshot. Each global
+  Jacobi sweep computes all pair proposals from the same velocities, then
+  scatter-adds equal-and-opposite linear/angular impulses and applies one update
+  per body. A common per-pair relaxation based on the larger endpoint degree
+  preserves momentum while stabilising bodies participating in several pairs.
+- Pair position corrections are accumulated by body and native KS/ST response
+  is written once per agent. ``resolve_contacts`` deliberately preserves the
+  current macro order of wall response followed by simultaneous pair response,
+  and returns the union of fresh per-step wall/pair events without latching.
+- Tests cover isolated-pair and two-car live-simulator parity, disjoint pairs,
+  pair-row order and agent-label invariance, symmetric multi-car contact,
+  momentum, non-increasing zero-restitution energy, masks, event clearing,
+  ``jit``, environment ``vmap``, ``lax.scan`` and finite free-space gradients.
+- Sensing and contact are now complete standalone functional layers. They are
+  not yet wired into the free-flight ``step_dynamics`` state transition; that
+  integration remains part of the complete core/adapters work.
+
 ### Phase 5 — observations, episode semantics and adapters
 
 Port or deliberately exclude every current behavior rather than using a short

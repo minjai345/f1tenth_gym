@@ -226,7 +226,7 @@ rather than equality.
 | `envs/lidar/` | LiDAR config plus mutable raster/exact-segment adapters |
 | `envs/collision_models.py` | collision enum and collision-body vertices |
 | `envs/contact/` | JAX manifolds/solvers and the NumPy/JAX adapter |
-| `f1tenth_gym/jax/` | pure dynamics, state, track/reset tables, clean sensing and wall contact |
+| `f1tenth_gym/jax/` | pure dynamics, state, track/reset tables, clean sensing and wall/pair contact |
 | `envs/track/track.py` | map/reference-line loading and Frenet transforms |
 | `envs/track/walls.py` | oriented wall extraction from occupancy maps |
 | `envs/track/budget.py` | exact allocation budgets and guards |
@@ -236,7 +236,7 @@ rather than equality.
 | `envs/rendering/` | PyQt6/OpenGL renderer, objects, callbacks |
 | `envs/wrappers.py` | single-agent and observation-delay wrappers |
 | `examples/` | waypoint following, video, telemetry, synthetic tracks |
-| `tests/` | 551 collected tests across 41 `test_*.py` files |
+| `tests/` | 568 collected tests across 42 `test_*.py` files |
 | `docs/` | Sphinx user documentation plus behavioral measurements |
 
 ## Configuration model
@@ -330,11 +330,15 @@ wall contact vmaps the existing pure manifolds/Jacobi solver across agents and
 converts KS/ST native state to/from rigid-body velocity without host marshalling.
 It preserves the current host oracle's CoG tile lookup and its discarded
 speculative-only clamp; change either only as an explicit behavior correction.
+Fixed-capacity pair tables enumerate canonical unordered body pairs with masked
+padding. Pair manifolds share one state snapshot, and every global Jacobi sweep
+scatter-adds equal-and-opposite impulses/corrections before one native-state
+write per body. ``resolve_contacts`` preserves wall-then-pair ordering and unions
+fresh per-step events without freezing or latching agents.
 `DynamicsConfig` contains structural choices; `EpisodeParams` contains values
 that vary under environment-level `vmap` without recompilation. The functional
 step is still free-flight-only and does not yet integrate sensing/contact or
-episode semantics. Simultaneous multi-body pair response is not yet part of the
-functional layer.
+episode semantics.
 
 Keep these pure JAX/array math, fixed-shape, jittable/vmappable, free of Gym
 and package-local imports, and free of NumPy marshalling. Host conversion,
@@ -443,7 +447,7 @@ constraint spans subsystems.
 
 ## Tests and validation
 
-The baseline collects 525 tests across 39 `test_*.py` files. Most tests use
+The current tree collects 568 tests across 42 `test_*.py` files. Most tests use
 `unittest.TestCase` but run through pytest. Tests cover public behavior and
 low-level numerical contracts, including JIT/vmap/gradient properties,
 allocation guards, cache invalidation, observation aliasing, vector envs,

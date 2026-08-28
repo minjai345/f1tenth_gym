@@ -23,6 +23,7 @@ from f1tenth_gym.envs.track.ray_tiles import (
 )
 
 from .lidar import ScanParams
+from .pairs import PairTable, make_pair_table
 from .reset import ResetTable
 from .track import SplineTable, TileTable, TrackTable, WallTable
 
@@ -185,6 +186,54 @@ def build_scan_params(lidar_config, track_table: TrackTable) -> ScanParams:
     return ScanParams.from_lidar_config(lidar_config)
 
 
+def validate_pair_table(table: PairTable, num_agents: int) -> PairTable:
+    """Validate one complete pair topology on the host before compilation."""
+    if num_agents < 1:
+        raise ValueError(f"num_agents must be >= 1, got {num_agents}")
+    if table.num_agents != num_agents:
+        raise ValueError(
+            "pair table and requested agent counts must match, got "
+            f"{table.num_agents} and {num_agents}"
+        )
+    indices = np.asarray(table.indices)
+    mask = np.asarray(table.mask)
+    if indices.ndim != 2 or indices.shape[1] != 2:
+        raise ValueError(f"pair indices must have shape (pairs, 2), got {indices.shape}")
+    if mask.shape != (indices.shape[0],):
+        raise ValueError(
+            f"pair mask must have shape ({indices.shape[0]},), got {mask.shape}"
+        )
+    if not np.issubdtype(indices.dtype, np.integer):
+        raise ValueError(f"pair indices must have an integer dtype, got {indices.dtype}")
+    if not np.issubdtype(mask.dtype, np.bool_):
+        raise ValueError(f"pair mask must have a boolean dtype, got {mask.dtype}")
+    if indices.size and (indices.min() < 0 or indices.max() >= num_agents):
+        raise ValueError(f"all pair indexes must be in [0, {num_agents})")
+    live = indices[mask]
+    if live.size and np.any(live[:, 0] >= live[:, 1]):
+        raise ValueError("live pairs must be canonical with first < second")
+    if len({tuple(pair) for pair in live.tolist()}) != len(live):
+        raise ValueError("live pairs must be unique")
+    expected = {
+        (left, right)
+        for left in range(num_agents)
+        for right in range(left + 1, num_agents)
+    }
+    actual = {tuple(pair) for pair in live.tolist()}
+    if actual != expected:
+        raise ValueError("live pairs must contain every unordered agent pair")
+    if indices.shape[0] < max(len(expected), 1):
+        raise ValueError(
+            f"pair table capacity must be >= {max(len(expected), 1)}"
+        )
+    return table
+
+
+def build_pair_table(num_agents: int, capacity: int | None = None) -> PairTable:
+    """Build and host-validate the fixed simultaneous body-pair topology."""
+    return validate_pair_table(make_pair_table(num_agents, capacity), num_agents)
+
+
 def build_reset_table(
     reference_line,
     *,
@@ -325,9 +374,11 @@ __all__ = [
     "TrackTableBucket",
     "TrackTableSet",
     "bucket_track_tables",
+    "build_pair_table",
     "build_scan_params",
     "build_reset_table",
     "build_track_table",
     "build_track_table_set",
     "compare_batch_layout",
+    "validate_pair_table",
 ]
