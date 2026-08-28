@@ -465,6 +465,23 @@ tests pass and the compiled batched path contains no NumPy conversion.
 - Noise, fixed episode bias and dropout remain in Phase 5. The host RASTER
   backend remains until the full scan/contact gate permits its planned removal.
 
+#### Phase 4b implementation record — 2026-08-28
+
+- Functional wall contact gathers masked contact-tile candidates, vmaps the
+  established pure manifold/gap kernels and runs the fixed-sweep Jacobi impulse
+  and position solver without NumPy conversion or device pinning.
+- Shared traced body geometry and KS/ST rigid-body conversions preserve the
+  collision-body offset, torque about CoG, exact ST velocity writeback and the
+  documented KS course projection.
+- Collision outputs are fresh boolean per-step events. A prior event never
+  freezes an agent or latches into the next call.
+- Differential tests cover complete KS/ST dynamics-plus-contact steps against
+  the live simulator, empty/padded candidates, ``jit``, environment ``vmap``,
+  ``eval_shape`` and finite free-space gradients.
+- Two oracle quirks are explicit and tested: broad-phase lookup remains at CoG,
+  and a speculative clamp without a penetrating manifold is discarded. Pair
+  contact remains for Phase 4c's simultaneous global Jacobi redesign.
+
 ### Phase 5 — observations, episode semantics and adapters
 
 Port or deliberately exclude every current behavior rather than using a short

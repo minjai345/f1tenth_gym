@@ -48,13 +48,16 @@ episode parameters, controllers, actuator noise/FIFO delays, immutable
 fixed-shape state, Euler/RK4 substeps and ``lax.scan`` free-flight rollouts.
 Structural choices live in ``DynamicsConfig`` while values such as physical
 parameters and noise scales remain traced in ``EpisodeParams``. The layer
-also exposes shared body geometry and clean exact LiDAR sensing over fixed
-track tables, including the current mounting transform and opponent occlusion.
-These functions support ``jax.jit``, environment-level ``jax.vmap`` and
-differentiation, but the free-flight transition does not yet integrate sensing,
-contact or episode semantics. Host-preprocessed reference-line/reset/ray tables
-are described in :doc:`tracks`; use the Gymnasium API for training until the
-remaining layers and adapters land.
+also exposes shared body geometry, clean exact LiDAR sensing and wall contact
+over fixed track tables. Wall response converts the model-native state to a
+rigid-body velocity, vmaps the manifold/Jacobi solve across agents, projects
+the response back into KS or ST, and returns a new boolean collision event on
+every call. These functions support ``jax.jit``, environment-level ``jax.vmap``
+and differentiation away from geometry switches, but the free-flight
+transition does not yet integrate sensing/contact or episode semantics.
+Simultaneous vehicle-pair response is still pending. Host-preprocessed
+reference-line/reset/ray tables are described in :doc:`tracks`; use the
+Gymnasium API for training until the remaining layers and adapters land.
 
 ``delta`` is the steering angle, ``v`` the longitudinal speed, ``yaw`` the
 heading, and ``beta`` the body slip angle. Under ``KS`` there is nothing for a

@@ -27,6 +27,13 @@ from .core import (
     rollout_dynamics,
     step_dynamics,
 )
+from .contact import (
+    ContactParams,
+    WallContactConfig,
+    apply_contact_response,
+    resolve_wall_contacts,
+    world_velocity,
+)
 from .integrators import euler_step, integrate_substeps, rk4_step
 from .geometry import (
     BodyParams,
@@ -61,6 +68,7 @@ from .track import (
 
 __all__ = [
     "BodyParams",
+    "ContactParams",
     "DynamicsConfig",
     "DynamicsParams",
     "DynamicsState",
@@ -75,7 +83,9 @@ __all__ = [
     "TileTable",
     "TrackTable",
     "WallTable",
+    "WallContactConfig",
     "adapt_actions",
+    "apply_contact_response",
     "beam_angles",
     "body_vertices",
     "cartesian_to_frenet",
@@ -90,6 +100,7 @@ __all__ = [
     "frenet_to_cartesian",
     "opponent_ranges",
     "reset_dynamics_state",
+    "resolve_wall_contacts",
     "rk4_step",
     "rollout_dynamics",
     "single_track",
@@ -99,4 +110,5 @@ __all__ = [
     "step_dynamics",
     "tile_candidates",
     "transform_pose",
+    "world_velocity",
 ]

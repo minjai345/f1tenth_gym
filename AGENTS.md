@@ -226,7 +226,7 @@ rather than equality.
 | `envs/lidar/` | LiDAR config plus mutable raster/exact-segment adapters |
 | `envs/collision_models.py` | collision enum and collision-body vertices |
 | `envs/contact/` | JAX manifolds/solvers and the NumPy/JAX adapter |
-| `f1tenth_gym/jax/` | pure dynamics, controls, state, track/reset tables and exact clean sensing |
+| `f1tenth_gym/jax/` | pure dynamics, state, track/reset tables, clean sensing and wall contact |
 | `envs/track/track.py` | map/reference-line loading and Frenet transforms |
 | `envs/track/walls.py` | oriented wall extraction from occupancy maps |
 | `envs/track/budget.py` | exact allocation budgets and guards |
@@ -236,7 +236,7 @@ rather than equality.
 | `envs/rendering/` | PyQt6/OpenGL renderer, objects, callbacks |
 | `envs/wrappers.py` | single-agent and observation-delay wrappers |
 | `examples/` | waypoint following, video, telemetry, synthetic tracks |
-| `tests/` | 539 collected tests across 40 `test_*.py` files |
+| `tests/` | 551 collected tests across 41 `test_*.py` files |
 | `docs/` | Sphinx user documentation plus behavioral measurements |
 
 ## Configuration model
@@ -325,11 +325,16 @@ wall, tile and RL-reset tables; exact-shape buckets are the default for
 heterogeneous maps, with shared `Track` objects stored once and referenced by
 index. Clean exact scans use masked ray-tile candidates, the current LiDAR
 mounting calculation and simultaneous all-edge opponent occlusion. Runtime
-``range_max`` must not exceed the ray table's preprocessed reach.
+``range_max`` must not exceed the ray table's preprocessed reach. Functional
+wall contact vmaps the existing pure manifolds/Jacobi solver across agents and
+converts KS/ST native state to/from rigid-body velocity without host marshalling.
+It preserves the current host oracle's CoG tile lookup and its discarded
+speculative-only clamp; change either only as an explicit behavior correction.
 `DynamicsConfig` contains structural choices; `EpisodeParams` contains values
 that vary under environment-level `vmap` without recompilation. The functional
-step is still free-flight-only and does not yet integrate sensing, contact or
-episode semantics.
+step is still free-flight-only and does not yet integrate sensing/contact or
+episode semantics. Simultaneous multi-body pair response is not yet part of the
+functional layer.
 
 Keep these pure JAX/array math, fixed-shape, jittable/vmappable, free of Gym
 and package-local imports, and free of NumPy marshalling. Host conversion,

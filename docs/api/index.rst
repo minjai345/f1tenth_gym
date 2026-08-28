@@ -78,6 +78,8 @@ are pure functions, not yet a complete Gymnasium environment.
    f1tenth_gym.jax.BodyParams
    f1tenth_gym.jax.ScanConfig
    f1tenth_gym.jax.ScanParams
+   f1tenth_gym.jax.ContactParams
+   f1tenth_gym.jax.WallContactConfig
    f1tenth_gym.jax.LongitudinalControlMode
    f1tenth_gym.jax.SteeringControlMode
    f1tenth_gym.jax.kinematic_single_track
@@ -97,6 +99,9 @@ are pure functions, not yet a complete Gymnasium environment.
    f1tenth_gym.jax.body_vertices
    f1tenth_gym.jax.lidar_poses
    f1tenth_gym.jax.clean_scan
+   f1tenth_gym.jax.world_velocity
+   f1tenth_gym.jax.apply_contact_response
+   f1tenth_gym.jax.resolve_wall_contacts
    f1tenth_gym.jax.preprocess.build_track_table
    f1tenth_gym.jax.preprocess.build_track_table_set
    f1tenth_gym.jax.preprocess.build_reset_table
@@ -111,6 +116,8 @@ are pure functions, not yet a complete Gymnasium environment.
 .. automodule:: f1tenth_gym.jax.controls
 
 .. automodule:: f1tenth_gym.jax.core
+
+.. automodule:: f1tenth_gym.jax.contact
 
 .. automodule:: f1tenth_gym.jax.integrators
 
