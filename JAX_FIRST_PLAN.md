@@ -435,7 +435,9 @@ tests pass without recompilation per episode.
 - Port LiDAR mounting transforms and opponent occlusion. Scans remain sensors;
   segment wall/body geometry drives collision independently, while
   noise/bias/dropout affect observed ranges only.
-- Remove RASTER, EDT, theta LUT and `jax-pf` only after differential tests pass.
+- Remove RASTER, EDT and the theta LUT only after differential tests pass.
+  There is no live `jax-pf` dependency at the start of this phase; keep it out
+  of the built artifacts.
 - Port wall contact manifolds and Jacobi impulse/position solver without host
   marshalling in the compiled path.
 - Redesign car-to-car contact as a simultaneous fixed-pair Jacobi update:
@@ -446,6 +448,22 @@ tests pass without recompilation per episode.
 *Done when:* scan/contact scenarios match current behavior to tolerance,
 opponent occlusion is covered, pair order does not change the result, momentum
 tests pass and the compiled batched path contains no NumPy conversion.
+
+#### Phase 4a implementation record — 2026-08-28
+
+- The owning ray/segment kernel now lives under ``f1tenth_gym.jax``; the old
+  deep environment module is a compatibility import for the mutable adapter.
+- Clean scans gather masked fixed-shape ray-tile candidates, preserve the
+  current CoG-pose-to-LiDAR mounting calculation, and intersect every beam with
+  all opponent body edges without branch-heavy angular culling.
+- Collision-body geometry is traced separately from dynamics and preserves the
+  configured rear-axle-to-body-centre conversion in the common CoG frame.
+- Host construction rejects a scan range beyond the ray table's reach. Tests
+  cover wall and opponent parity, empty/padded geometry, one-beam sweeps,
+  pair-order invariance, ``jit``, environment ``vmap``, ``eval_shape`` and
+  finite pose gradients.
+- Noise, fixed episode bias and dropout remain in Phase 5. The host RASTER
+  backend remains until the full scan/contact gate permits its planned removal.
 
 ### Phase 5 — observations, episode semantics and adapters
 

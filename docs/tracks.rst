@@ -292,3 +292,20 @@ and spacing choices. ``sample_reset_poses`` consumes only an explicit JAX key
 and fixed arrays. ``MAP_RANDOM_STATIC`` is not yet part of this device surface;
 its current host sampler has a known row/column bug that must be resolved as an
 explicit behavior decision rather than copied into the new backend.
+
+Exact device scans
+------------------
+
+``clean_scan`` gathers the ray-tile candidates for every LiDAR pose, applies
+the candidate and wall masks, and casts analytically against oriented wall
+segments. It then shortens those ranges against every edge of every opponent
+body in one fixed-shape calculation. The result is a noise-free ``(agents,
+beams)`` array; observation noise remains a later layer and collision response
+uses independent contact geometry.
+
+Build the ray table for at least the sensor's longest range. The host helper
+``build_scan_params(lidar_config, track_table)`` rejects a smaller table because
+it could silently omit a reachable wall. A larger preprocessed reach is safe.
+The functional calculation deliberately preserves the current simulator's
+numerical mounting transform: ``base_link_to_lidar_tf`` is applied directly to
+the supported model's CoG-referenced pose.

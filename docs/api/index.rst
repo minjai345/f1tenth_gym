@@ -75,6 +75,9 @@ are pure functions, not yet a complete Gymnasium environment.
    f1tenth_gym.jax.TrackTable
    f1tenth_gym.jax.ResetTable
    f1tenth_gym.jax.ResetConfig
+   f1tenth_gym.jax.BodyParams
+   f1tenth_gym.jax.ScanConfig
+   f1tenth_gym.jax.ScanParams
    f1tenth_gym.jax.LongitudinalControlMode
    f1tenth_gym.jax.SteeringControlMode
    f1tenth_gym.jax.kinematic_single_track
@@ -91,9 +94,13 @@ are pure functions, not yet a complete Gymnasium environment.
    f1tenth_gym.jax.frenet_to_cartesian
    f1tenth_gym.jax.sample_reset_poses
    f1tenth_gym.jax.reset_dynamics_state
+   f1tenth_gym.jax.body_vertices
+   f1tenth_gym.jax.lidar_poses
+   f1tenth_gym.jax.clean_scan
    f1tenth_gym.jax.preprocess.build_track_table
    f1tenth_gym.jax.preprocess.build_track_table_set
    f1tenth_gym.jax.preprocess.build_reset_table
+   f1tenth_gym.jax.preprocess.build_scan_params
    f1tenth_gym.jax.preprocess.bucket_track_tables
    f1tenth_gym.jax.preprocess.compare_batch_layout
 
@@ -106,6 +113,12 @@ are pure functions, not yet a complete Gymnasium environment.
 .. automodule:: f1tenth_gym.jax.core
 
 .. automodule:: f1tenth_gym.jax.integrators
+
+.. automodule:: f1tenth_gym.jax.geometry
+
+.. automodule:: f1tenth_gym.jax.lidar
+
+.. automodule:: f1tenth_gym.jax.lidar_kernels
 
 .. automodule:: f1tenth_gym.jax.track
 

@@ -15,8 +15,13 @@ import jax.numpy as jnp
 import numpy as np
 
 ENVS = pathlib.Path(__file__).resolve().parents[1] / "f1tenth_gym" / "envs"
+JAX = ENVS.parent / "jax"
 CONTACT = ENVS / "contact"
-PORTABLE = (CONTACT / "kernels.py", CONTACT / "solver.py", ENVS / "lidar" / "kernels.py")
+PORTABLE = (
+    CONTACT / "kernels.py",
+    CONTACT / "solver.py",
+    JAX / "lidar_kernels.py",
+)
 ALLOWED_ROOTS = {"jax", "numpy", "typing", "math", "dataclasses", "functools"}
 
 

@@ -223,10 +223,10 @@ rather than equality.
 | `envs/integrators.py` | plain-Python Euler and RK4 |
 | `envs/dynamic_models/` | KS/ST kernels, standardizers, vehicle parameters; legacy MB data/code pending removal |
 | `envs/observation/` | field vocabulary, providers, spaces, presets |
-| `envs/lidar/` | LiDAR config, raster scanner, exact segment scanner, JAX kernels |
+| `envs/lidar/` | LiDAR config plus mutable raster/exact-segment adapters |
 | `envs/collision_models.py` | collision enum and collision-body vertices |
 | `envs/contact/` | JAX manifolds/solvers and the NumPy/JAX adapter |
-| `f1tenth_gym/jax/` | pure dynamics, controls, fixed-shape state and free-flight rollouts |
+| `f1tenth_gym/jax/` | pure dynamics, controls, state, track/reset tables and exact clean sensing |
 | `envs/track/track.py` | map/reference-line loading and Frenet transforms |
 | `envs/track/walls.py` | oriented wall extraction from occupancy maps |
 | `envs/track/budget.py` | exact allocation budgets and guards |
@@ -236,7 +236,7 @@ rather than equality.
 | `envs/rendering/` | PyQt6/OpenGL renderer, objects, callbacks |
 | `envs/wrappers.py` | single-agent and observation-delay wrappers |
 | `examples/` | waypoint following, video, telemetry, synthetic tracks |
-| `tests/` | 525 collected tests across 39 `test_*.py` files |
+| `tests/` | 539 collected tests across 40 `test_*.py` files |
 | `docs/` | Sphinx user documentation plus behavioral measurements |
 
 ## Configuration model
@@ -316,16 +316,20 @@ The established portable JAX geometry seam is intentionally narrow:
 
 - `envs/contact/kernels.py`
 - `envs/contact/solver.py`
-- `envs/lidar/kernels.py`
+- `f1tenth_gym/jax/lidar_kernels.py`
 
 The functional seam under `f1tenth_gym/jax/` currently owns traced vehicle and
 episode parameters, KS/ST dynamics, controllers, actuator noise/FIFOs and
 free-flight `lax.scan` rollouts. Host preprocessing produces fixed-shape spline,
 wall, tile and RL-reset tables; exact-shape buckets are the default for
 heterogeneous maps, with shared `Track` objects stored once and referenced by
-index. `DynamicsConfig` contains structural choices; `EpisodeParams` contains
-values that vary under environment-level `vmap` without recompilation. The
-functional step does not yet own sensing, contact or episode semantics.
+index. Clean exact scans use masked ray-tile candidates, the current LiDAR
+mounting calculation and simultaneous all-edge opponent occlusion. Runtime
+``range_max`` must not exceed the ray table's preprocessed reach.
+`DynamicsConfig` contains structural choices; `EpisodeParams` contains values
+that vary under environment-level `vmap` without recompilation. The functional
+step is still free-flight-only and does not yet integrate sensing, contact or
+episode semantics.
 
 Keep these pure JAX/array math, fixed-shape, jittable/vmappable, free of Gym
 and package-local imports, and free of NumPy marshalling. Host conversion,

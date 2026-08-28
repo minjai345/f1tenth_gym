@@ -22,6 +22,7 @@ from f1tenth_gym.envs.track.ray_tiles import (
     build_for_track as build_ray_tiles,
 )
 
+from .lidar import ScanParams
 from .reset import ResetTable
 from .track import SplineTable, TileTable, TrackTable, WallTable
 
@@ -172,6 +173,18 @@ def build_track_table(
     )
 
 
+def build_scan_params(lidar_config, track_table: TrackTable) -> ScanParams:
+    """Build clean-scan leaves and reject an under-sized ray candidate table."""
+    reach = float(np.asarray(track_table.ray_tiles.reach))
+    requested = float(lidar_config.range_max)
+    if requested > reach + 1.0e-6:
+        raise ValueError(
+            f"LiDAR range_max ({requested}) exceeds the ray-table reach ({reach}); "
+            "rebuild the track table for at least the configured range"
+        )
+    return ScanParams.from_lidar_config(lidar_config)
+
+
 def build_reset_table(
     reference_line,
     *,
@@ -312,6 +325,7 @@ __all__ = [
     "TrackTableBucket",
     "TrackTableSet",
     "bucket_track_tables",
+    "build_scan_params",
     "build_reset_table",
     "build_track_table",
     "build_track_table_set",
