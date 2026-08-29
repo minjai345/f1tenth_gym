@@ -44,10 +44,13 @@ from .geometry import (
 from .lidar import (
     ScanConfig,
     ScanParams,
+    ScanState,
     beam_angles,
     clean_scan,
     lidar_poses,
+    observed_scan,
     opponent_ranges,
+    reset_scan_state,
 )
 from .pairs import (
     PairContactConfig,
@@ -88,6 +91,7 @@ __all__ = [
     "ResetTable",
     "ScanConfig",
     "ScanParams",
+    "ScanState",
     "SplineTable",
     "SteeringControlMode",
     "TileTable",
@@ -110,7 +114,9 @@ __all__ = [
     "evaluate_spline",
     "frenet_to_cartesian",
     "opponent_ranges",
+    "observed_scan",
     "reset_dynamics_state",
+    "reset_scan_state",
     "resolve_wall_contacts",
     "resolve_contacts",
     "resolve_pair_contacts",

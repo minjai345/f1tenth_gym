@@ -556,6 +556,22 @@ Then add:
 Gymnasium backends agree on shared scenarios, and adapter-specific contracts
 pass independently.
 
+#### Phase 5a implementation record — 2026-08-29
+
+- ``ScanParams`` now carries traced range/noise/dropout magnitudes in addition
+  to clean sensor geometry. ``ScanState`` owns the fixed-shape per-agent,
+  per-beam bias sampled from an explicit reset key; a new draw therefore does
+  not alter compiled topology or mutate structural configuration.
+- ``observed_scan`` preserves the mutable environment's sensor order exactly:
+  clean range plus Gaussian noise plus episode bias, clipping to
+  ``[range_min, range_max]``, then dropout to exactly ``range_max``. Clean
+  geometry remains a separately callable, immutable input.
+- Seed replay, reset-dependent bias, zero/one dropout, arithmetic order,
+  validation, ``jit``, environment ``vmap`` and ``lax.scan`` are executable
+  gates. NumPy and JAX random streams are intentionally not byte-paired.
+- This is the first Phase 5 slice. Sensing is not yet composed with dynamics,
+  contact, Frenet state or episode semantics in ``step_core``.
+
 ### Phase 6 — batched training and performance decisions
 
 - Run a complete device-native PPO training job; imported training code is a

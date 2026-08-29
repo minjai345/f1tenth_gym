@@ -37,12 +37,16 @@ class ScanConfig:
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
 class ScanParams:
-    """Traced clean-sensor values that may vary between environments."""
+    """Traced sensor values that may vary between environments."""
 
     range_max: Any
     offset_x: Any
     offset_y: Any
     offset_yaw: Any
+    range_min: Any = 0.0
+    noise_std: Any = 0.0
+    dropout_prob: Any = 0.0
+    range_bias_std: Any = 0.0
 
     @classmethod
     def from_lidar_config(cls, config: Any) -> "ScanParams":
@@ -53,7 +57,75 @@ class ScanParams:
             offset_x=x,
             offset_y=y,
             offset_yaw=yaw,
+            range_min=config.range_min,
+            noise_std=config.noise_std,
+            dropout_prob=config.dropout_prob,
+            range_bias_std=config.range_bias_std,
         )
+
+
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class ScanState:
+    """Episode-fixed sensor state sampled explicitly at reset."""
+
+    range_bias: jax.Array
+
+
+def reset_scan_state(
+    key: jax.Array,
+    config: ScanConfig,
+    params: ScanParams,
+    dtype: Any = jnp.float32,
+) -> ScanState:
+    """Sample one fixed per-agent, per-beam range bias for an episode."""
+    shape = (config.num_agents, config.num_beams)
+    bias = jax.random.normal(key, shape, dtype=dtype) * jnp.asarray(
+        params.range_bias_std, dtype=dtype
+    )
+    return ScanState(range_bias=bias)
+
+
+def observed_scan(
+    key: jax.Array,
+    clean_ranges: jax.Array,
+    state: ScanState,
+    config: ScanConfig,
+    params: ScanParams,
+) -> jax.Array:
+    """Apply the mutable environment's observed-range noise contract.
+
+    Gaussian per-step noise and the episode-fixed bias are added first. Values
+    are then clipped to the configured sensor interval, after which dropout
+    replaces selected beams with exactly ``range_max``.
+    """
+    expected = (config.num_agents, config.num_beams)
+    if clean_ranges.shape != expected:
+        raise ValueError(
+            f"clean_ranges must have shape {expected}, got {clean_ranges.shape}"
+        )
+    if state.range_bias.shape != expected:
+        raise ValueError(
+            "state.range_bias must have shape "
+            f"{expected}, got {state.range_bias.shape}"
+        )
+
+    clean_ranges = jnp.asarray(clean_ranges)
+    dtype = clean_ranges.dtype
+    noise_key, dropout_key = jax.random.split(key)
+    gaussian = jax.random.normal(noise_key, expected, dtype=dtype) * jnp.asarray(
+        params.noise_std, dtype=dtype
+    )
+    observed = clean_ranges + gaussian + jnp.asarray(
+        state.range_bias, dtype=dtype
+    )
+    range_min = jnp.asarray(params.range_min, dtype=dtype)
+    range_max = jnp.asarray(params.range_max, dtype=dtype)
+    observed = jnp.clip(observed, range_min, range_max)
+    dropped = jax.random.uniform(dropout_key, expected, dtype=dtype) < jnp.asarray(
+        params.dropout_prob, dtype=dtype
+    )
+    return jnp.where(dropped, range_max, observed)
 
 
 def beam_angles(config: ScanConfig, dtype: Any = jnp.float32) -> jax.Array:
@@ -158,8 +230,11 @@ def clean_scan(
 __all__ = [
     "ScanConfig",
     "ScanParams",
+    "ScanState",
     "beam_angles",
     "clean_scan",
     "lidar_poses",
+    "observed_scan",
     "opponent_ranges",
+    "reset_scan_state",
 ]

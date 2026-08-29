@@ -175,7 +175,7 @@ def build_track_table(
 
 
 def build_scan_params(lidar_config, track_table: TrackTable) -> ScanParams:
-    """Build clean-scan leaves and reject an under-sized ray candidate table."""
+    """Build traced sensor leaves and reject an under-sized ray candidate table."""
     reach = float(np.asarray(track_table.ray_tiles.reach))
     requested = float(lidar_config.range_max)
     if requested > reach + 1.0e-6:

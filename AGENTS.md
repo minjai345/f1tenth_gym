@@ -5,7 +5,7 @@ work, then read the named source and tests before changing a subsystem. The
 published Sphinx pages are the user-facing source of truth for behavior and
 examples; this file focuses on architecture, invariants, and change seams.
 
-Baseline reviewed: Phase 4d on 2026-08-29, based on `12bea89`. Treat counts
+Baseline reviewed: Phase 5a on 2026-08-29, based on `a664499`. Treat counts
 and the known-rough-edges section as a snapshot and re-check them against
 `HEAD`.
 
@@ -226,7 +226,7 @@ rather than equality.
 | `envs/lidar/` | LiDAR config, mutable exact scanner and opponent occlusion |
 | `envs/collision_models.py` | collision enum and collision-body vertices |
 | `envs/contact/` | JAX manifolds/solvers and the NumPy/JAX adapter |
-| `f1tenth_gym/jax/` | pure dynamics, state, track/reset tables, clean sensing and wall/pair contact |
+| `f1tenth_gym/jax/` | pure dynamics, state, track/reset tables, clean/observed sensing and wall/pair contact |
 | `envs/track/track.py` | map/reference-line loading and Frenet transforms |
 | `envs/track/walls.py` | oriented wall extraction from occupancy maps |
 | `envs/track/budget.py` | exact allocation budgets and guards |
@@ -236,7 +236,7 @@ rather than equality.
 | `envs/rendering/` | PyQt6/OpenGL renderer, objects, callbacks |
 | `envs/wrappers.py` | single-agent and observation-delay wrappers |
 | `examples/` | waypoint following, video, telemetry, synthetic tracks |
-| `tests/` | 559 collected tests across 42 `test_*.py` files |
+| `tests/` | 567 collected tests across 43 `test_*.py` files |
 | `docs/` | Sphinx user documentation plus behavioral measurements |
 
 ## Configuration model
@@ -325,7 +325,10 @@ wall, tile and RL-reset tables; exact-shape buckets are the default for
 heterogeneous maps, with shared `Track` objects stored once and referenced by
 index. Clean exact scans use masked ray-tile candidates, the current LiDAR
 mounting calculation and simultaneous all-edge opponent occlusion. Runtime
-``range_max`` must not exceed the ray table's preprocessed reach. Functional
+``range_max`` must not exceed the ray table's preprocessed reach. Observed
+scans add key-driven Gaussian noise and reset-fixed per-beam bias, clip to the
+sensor interval, then replace dropped beams with ``range_max``; the fixed bias
+lives in ``ScanState`` rather than structural config. Functional
 wall contact vmaps the existing pure manifolds/Jacobi solver across agents and
 converts KS/ST native state to/from rigid-body velocity without host marshalling.
 It preserves the current host oracle's CoG tile lookup and its discarded
@@ -447,7 +450,7 @@ constraint spans subsystems.
 
 ## Tests and validation
 
-The current tree collects 559 tests across 42 `test_*.py` files. Most tests use
+The current tree collects 567 tests across 43 `test_*.py` files. Most tests use
 `unittest.TestCase` but run through pytest. Tests cover public behavior and
 low-level numerical contracts, including JIT/vmap/gradient properties,
 allocation guards, cache invalidation, observation aliasing, vector envs,
