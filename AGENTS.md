@@ -5,7 +5,7 @@ work, then read the named source and tests before changing a subsystem. The
 published Sphinx pages are the user-facing source of truth for behavior and
 examples; this file focuses on architecture, invariants, and change seams.
 
-Baseline reviewed: Phase 2 after merge `a9cc351` on 2026-08-28. Treat counts
+Baseline reviewed: Phase 4d on 2026-08-29, based on `12bea89`. Treat counts
 and the known-rough-edges section as a snapshot and re-check them against
 `HEAD`.
 
@@ -17,7 +17,7 @@ more 1/10-scale race cars. It combines:
 - CoG-referenced kinematic and single-track vehicle models; the transitional
   MB enum is rejected as unsupported;
 - Euler or RK4 integration with optional integration substeps;
-- raster or exact segment-based 2D LiDAR;
+- exact segment-based 2D LiDAR;
 - wall and car-to-car collision detection, plus JAX impulse-based contact;
 - occupancy-grid tracks, centerlines, racelines, and Frenet coordinates;
 - multi-agent reset strategies, rewards, termination, rendering, and wrappers;
@@ -83,7 +83,7 @@ models, observations, wrappers, and tracks from their defining modules.
 | Agents | one, with `agent_0` as ego |
 | Dynamics | single-track (`ST`), RK4, `0.01 s` step/integrator step |
 | Controls | steering-angle and target-speed setpoints |
-| LiDAR | enabled, 1080 beams, 270 degrees, 30 m, exact `SEGMENT` backend |
+| LiDAR | enabled, 1080 beams, 270 degrees, 30 m, exact segment scanning |
 | Collisions | `SEGMENT_CONTACT`, JAX contact on CPU |
 | Observations | per-agent `DEFAULT` dictionary |
 | Reset | static grid near the start of the raceline |
@@ -111,7 +111,7 @@ gym.make(..., config=EnvConfig)
             -> action adapters       setpoint/pass-through control conversion
             -> dynamics + integrator per-agent state transition
             -> contact adapter       host/JAX wall and body contact seam
-            -> LiDAR backend         raster or segment scan
+            -> exact LiDAR scanner   segment scan plus opponent occlusion
        -> Observation provider       observation values and spaces
        -> ResetFn                    seeded initial-pose strategy
        -> RenderClock/renderer       optional pacing and pixels
@@ -223,7 +223,7 @@ rather than equality.
 | `envs/integrators.py` | plain-Python Euler and RK4 |
 | `envs/dynamic_models/` | KS/ST kernels, standardizers, vehicle parameters; legacy MB data/code pending removal |
 | `envs/observation/` | field vocabulary, providers, spaces, presets |
-| `envs/lidar/` | LiDAR config plus mutable raster/exact-segment adapters |
+| `envs/lidar/` | LiDAR config, mutable exact scanner and opponent occlusion |
 | `envs/collision_models.py` | collision enum and collision-body vertices |
 | `envs/contact/` | JAX manifolds/solvers and the NumPy/JAX adapter |
 | `f1tenth_gym/jax/` | pure dynamics, state, track/reset tables, clean sensing and wall/pair contact |
@@ -236,7 +236,7 @@ rather than equality.
 | `envs/rendering/` | PyQt6/OpenGL renderer, objects, callbacks |
 | `envs/wrappers.py` | single-agent and observation-delay wrappers |
 | `examples/` | waypoint following, video, telemetry, synthetic tracks |
-| `tests/` | 568 collected tests across 42 `test_*.py` files |
+| `tests/` | 559 collected tests across 42 `test_*.py` files |
 | `docs/` | Sphinx user documentation plus behavioral measurements |
 
 ## Configuration model
@@ -290,13 +290,13 @@ values as data but does not make MB selectable.
 
 ## LiDAR and collision/contact architecture
 
-LiDAR backends implement a small shared adapter surface: construction with
-beam/range geometry, `set_map(track, scale)`, `scan(pose, rng)`, and
-`get_increment()`.
+The sole LiDAR adapter intersects oriented wall segments analytically through a
+JAX kernel. Its small surface is construction with beam/range geometry,
+`set_map(track, scale)`, `scan(pose, rng)`, and `get_increment()`. The former
+raster/EDT scanner and discretized-angle lookup table were removed after the
+exact scanner passed the differential gate; the measurements remain in
+`docs/scan_measurements.md`.
 
-- `RASTER` sphere-traces a distance transform and has cell-center range bias.
-- `SEGMENT` intersects oriented wall segments analytically through a JAX
-  kernel and is the default.
 - Gaussian noise, systematic per-beam bias, dropout, and range clipping affect
   observed scans only. LiDAR is not a collision response mechanism.
 - Other vehicles shorten scans through opponent body ray casting after the
@@ -346,7 +346,7 @@ device selection, map preprocessing, and caches belong in adapters. The
 contract is enforced by `tests/test_migration_seam.py`.
 
 JAX initializes multithreaded runtime state. Async Gymnasium vector workers
-must use a spawn context with the segment backend; forking after JAX
+must use a spawn context with LiDAR enabled; forking after JAX
 initialization can deadlock.
 
 ## Tracks, resets, and laps
@@ -432,7 +432,7 @@ caches frames between configured render instants.
 | Observation field/preset | field vocabulary, space, provider, optional raw key | `test_observation.py`, `observations.rst` |
 | Dynamics model | model enum/frame/state init/standardizer, kernel, params | `test_dynamics.py`, ABI tests, `dynamics.rst` |
 | Integrator behavior | `integrators.py`, simulator substep validation | `test_integrators.py`, `test_env_config.py` |
-| LiDAR backend | config enum, `_make_scan_simulator`, backend adapter | scan tests, migration seam, observations/config docs |
+| LiDAR behavior | `LiDARConfig`, `_make_scan_simulator`, exact adapter | scan tests, migration seam, observations/config docs |
 | Collision mode | collision enum, `_build_contact()`, contact step dispatch | collision/contact behavior tests, config docs |
 | Contact physics | pure kernels/solver, adapter, indexes/budgets | kernel, solver, body/mode, migration tests |
 | Track format/geometry | loader, `TrackSpec`, walls/index caches | track/wall/index tests, `tracks.rst` |
@@ -447,7 +447,7 @@ constraint spans subsystems.
 
 ## Tests and validation
 
-The current tree collects 568 tests across 42 `test_*.py` files. Most tests use
+The current tree collects 559 tests across 42 `test_*.py` files. Most tests use
 `unittest.TestCase` but run through pytest. Tests cover public behavior and
 low-level numerical contracts, including JIT/vmap/gradient properties,
 allocation guards, cache invalidation, observation aliasing, vector envs,
@@ -540,8 +540,8 @@ unrelated feature:
   implicit guess share the last projection.
 - Named-map download writes into the package source layout and has no checked
   checksum. Consider path/`Track` injection for packaged or offline use.
-- Rendering requires X/GL, and async vectorization with the default JAX scan
-  backend requires process spawning.
+- Rendering requires X/GL, and async vectorization with the JAX scanner
+  requires process spawning.
 
 Reproduce and add a regression test before turning any item into a fix.
 

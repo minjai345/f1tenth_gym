@@ -1,9 +1,4 @@
-"""The analytic scan backend: exactness, differentiability, and wiring.
-
-The raster backend measures to the nearest occupied cell centre, so it reads long by
-up to half a cell diagonal and cannot be differentiated. These pin that the segment
-backend has neither problem, and that switching to it changes nothing else.
-"""
+"""Exact segment LiDAR: numerical behavior, transforms, and environment wiring."""
 
 import math
 import unittest
@@ -14,9 +9,8 @@ import jax.numpy as jnp
 import numpy as np
 
 from f1tenth_gym.envs.env_config import EnvConfig, SimulationConfig
-from f1tenth_gym.envs.lidar.config import LiDARConfig, ScanBackend
+from f1tenth_gym.envs.lidar.config import LiDARConfig
 from f1tenth_gym.envs.lidar.kernels import scan
-from f1tenth_gym.envs.lidar.laser_models import ScanSimulator2D
 from f1tenth_gym.envs.lidar.segment_scan import SegmentScanSimulator2D
 from f1tenth_gym.envs.track import Track
 from f1tenth_gym.envs.track.ray_tiles import build_ray_tiles, build_for_track, candidates
@@ -221,27 +215,25 @@ class TestAgainstBruteForce(unittest.TestCase):
             np.testing.assert_allclose(got, want, atol=2e-3)
 
 
-class TestBackendWiring(unittest.TestCase):
-    def _env(self, backend, **kwargs):
+class TestScannerWiring(unittest.TestCase):
+    def _env(self, **kwargs):
         return gym.make("f1tenth_gym:f1tenth-v0", config=EnvConfig(
             map_name="Spielberg",
             simulation_config=SimulationConfig(max_laps=None),
-            lidar_config=LiDARConfig(backend=backend, **kwargs),
+            lidar_config=LiDARConfig(**kwargs),
             render_enabled=False))
 
-    def test_the_default_is_the_segment_backend(self):
-        self.assertIs(LiDARConfig().backend, ScanBackend.SEGMENT)
+    def test_there_is_no_backend_selector(self):
+        with self.assertRaises(TypeError):
+            LiDARConfig(backend="raster")
 
-    def test_selecting_segment_builds_the_segment_simulator(self):
-        env = self._env(ScanBackend.SEGMENT)
+    def test_the_environment_builds_the_exact_segment_simulator(self):
+        env = self._env()
         self.assertIsInstance(env.unwrapped.sim.scan_sims[0], SegmentScanSimulator2D)
-        env.close()
-        env = self._env(ScanBackend.RASTER)
-        self.assertIsInstance(env.unwrapped.sim.scan_sims[0], ScanSimulator2D)
         env.close()
 
     def test_a_rollout_produces_a_sane_scan(self):
-        env = self._env(ScanBackend.SEGMENT)
+        env = self._env()
         obs, _ = env.reset(seed=1)
         for _ in range(30):
             obs, _r, _t, _tr, _i = env.step(np.array([[0.0, 2.0]], dtype=np.float32))
@@ -252,27 +244,11 @@ class TestBackendWiring(unittest.TestCase):
         self.assertLessEqual(float(scan_values.max()), 30.0 + 1e-3)
         env.close()
 
-    def test_it_reads_shorter_than_the_raster_backend(self):
-        """The raster bias is outward; removing it must not make ranges longer."""
-        track = Track.from_track_name("Spielberg", 1.0)
-        raster = ScanSimulator2D(1080, 4.7123889, **SCAN_KWARGS)
-        raster.set_map(track)
-        segment = SegmentScanSimulator2D(1080, 4.7123889, **SCAN_KWARGS)
-        segment.set_map(track)
-        deltas = []
-        for k in range(0, len(track.raceline.xs), 137):
-            pose = np.array([track.raceline.xs[k], track.raceline.ys[k],
-                             track.raceline.yaws[k]])
-            both = raster.scan(pose, None), segment.scan(pose)
-            live = (both[0] < 29.0) & (both[1] < 29.0)
-            deltas.append(np.median(both[0][live] - both[1][live]))
-        self.assertGreater(float(np.median(deltas)), 0.0)
-
     def test_an_obstacle_free_map_reports_max_range(self):
         env = gym.make("f1tenth_gym:f1tenth-v0", config=EnvConfig(
             map_name="Spielberg_blank",
             simulation_config=SimulationConfig(max_laps=None),
-            lidar_config=LiDARConfig(backend=ScanBackend.SEGMENT, noise_std=0.0),
+            lidar_config=LiDARConfig(noise_std=0.0),
             render_enabled=False))
         obs, _ = env.reset(seed=1)
         np.testing.assert_allclose(obs["agent_0"]["scan"], 30.0, atol=1e-4)
@@ -297,14 +273,6 @@ class TestBackendWiring(unittest.TestCase):
 
 
 class TestConfigValidation(unittest.TestCase):
-    def test_the_backend_is_coerced_from_an_int(self):
-        self.assertIs(LiDARConfig(backend=2).backend, ScanBackend.SEGMENT)
-
-    def test_an_unknown_backend_raises(self):
-        for bad in (0, 99, "raster"):
-            with self.assertRaises(ValueError):
-                LiDARConfig(backend=bad)
-
     def test_only_the_two_known_devices_are_accepted(self):
         for good in ("cpu", "gpu"):
             self.assertEqual(LiDARConfig(scan_device=good).scan_device, good)
@@ -313,11 +281,11 @@ class TestConfigValidation(unittest.TestCase):
                 LiDARConfig(scan_device=bad)
 
     def test_the_section_stays_hashable(self):
-        self.assertIsInstance(hash(LiDARConfig(backend=ScanBackend.SEGMENT)), int)
+        self.assertIsInstance(hash(LiDARConfig()), int)
 
     def test_with_updates_revalidates(self):
-        cfg = LiDARConfig().with_updates(backend=ScanBackend.SEGMENT)
-        self.assertIs(cfg.backend, ScanBackend.SEGMENT)
+        cfg = LiDARConfig().with_updates(scan_device="cpu")
+        self.assertEqual(cfg.scan_device, "cpu")
         with self.assertRaises(ValueError):
             cfg.with_updates(scan_device="tpu")
 

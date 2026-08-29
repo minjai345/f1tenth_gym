@@ -232,8 +232,8 @@ continuing with the ``cfg`` from the doctest above:
 
 .. warning::
 
-   ``vectorization_mode="async"`` forks by default, and the ``SEGMENT`` scan
-   backend initialises JAX, which is multithreaded. Forking that deadlocks the
+   ``vectorization_mode="async"`` forks by default, and the exact scanner
+   initialises JAX, which is multithreaded. Forking that deadlocks the
    workers. Pass ``vector_kwargs={"context": "spawn"}`` and call it from a script
    guarded by ``if __name__ == "__main__":`` — spawn re-imports the parent module
    in each worker. The example below uses ``"sync"``, which needs neither.

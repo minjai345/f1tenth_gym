@@ -148,9 +148,8 @@ Build your own track
 Two scripts author a circuit instead of downloading one.
 ``run_in_empty_track.py`` builds a mapless track from a hand-written
 reference line with ``Track.from_refline(x, y, velx)`` and passes the
-resulting ``Track`` object straight through as ``map_name``, which also skips
-the per-environment cost of rebuilding the LiDAR distance transform
-(:doc:`tracks`):
+resulting ``Track`` object straight through as ``map_name``, which also shares
+cached wall and ray-tile preprocessing between environments (:doc:`tracks`):
 
 .. code-block:: bash
 

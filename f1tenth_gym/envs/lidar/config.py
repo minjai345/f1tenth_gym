@@ -2,21 +2,8 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, replace
-from enum import IntEnum
 
-__all__ = ["LiDARConfig", "ScanBackend"]
-
-
-class ScanBackend(IntEnum):
-    """How a range is produced.
-
-    RASTER sphere-traces the distance transform, so it reads long by up to half a
-    cell diagonal. SEGMENT intersects the wall segments analytically: exact and
-    differentiable, but JAX-backed, so vector envs need ``context="spawn"``.
-    """
-
-    RASTER = 1
-    SEGMENT = 2
+__all__ = ["LiDARConfig"]
 
 
 # 270 degrees, the default sweep. Stored as the angle pair, since that is what
@@ -46,9 +33,12 @@ class LiDARConfig:
             episode (reproducible with reset(seed=...)), modelling calibration
             error. Constant across a rollout, unlike noise_std.
         base_link_to_lidar_tf: (x, y, yaw) offset from base_link in meters/radians.
+        scan_device: JAX device used for exact segment intersection. Async
+            process vectorization must use a spawn context after JAX initializes.
 
-    All of the above affect the *observed* scan only; collision detection uses
-    the clean scan.
+    Sensor geometry and noise affect the *observed* scan only; collision
+    detection uses independent segment contact geometry. ``scan_device``
+    changes placement, not results.
     """
 
     enabled: bool = True
@@ -62,17 +52,9 @@ class LiDARConfig:
     range_bias_std: float = 0.0
     # (x, y, yaw) offset from base_link in meters/radians.
     base_link_to_lidar_tf: tuple[float, float, float] = (0.275, 0.0, 0.0)
-    backend: ScanBackend = ScanBackend.SEGMENT
-    # SEGMENT only. Per agent per launch it trails RASTER by 10%, and batching is
-    # what pays: at 12 agents "gpu" is 7x faster per agent, "cpu" 0.86x.
     scan_device: str = "cpu"
 
     def __post_init__(self) -> None:
-        # Validation
-        try:
-            object.__setattr__(self, "backend", ScanBackend(self.backend))
-        except ValueError as exc:
-            raise ValueError(f"backend must be a ScanBackend: {exc}") from exc
         if self.scan_device not in ("cpu", "gpu"):
             raise ValueError(
                 f"scan_device must be 'cpu' or 'gpu', got {self.scan_device!r}")

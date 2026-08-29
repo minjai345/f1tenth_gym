@@ -12,7 +12,7 @@ import numpy as np
 from f1tenth_gym.envs.collision_models import get_vertices
 from f1tenth_gym.envs.dynamic_models import F1TENTH_VEHICLE_PARAMETERS
 from f1tenth_gym.envs.lidar.config import LiDARConfig
-from f1tenth_gym.envs.lidar.laser_models import ray_cast
+from f1tenth_gym.envs.lidar import ray_cast
 from f1tenth_gym.envs.lidar.segment_scan import SegmentScanSimulator2D
 from f1tenth_gym.envs.simulator import F110Simulator
 from f1tenth_gym.envs.track import Track
@@ -109,7 +109,7 @@ class TestFunctionalWallScan(unittest.TestCase):
         )
         cls.host.set_map(cls.track)
 
-    def test_wall_ranges_match_the_live_segment_backend(self):
+    def test_wall_ranges_match_the_live_segment_scanner(self):
         indexes = (25, 130, 310, 505)
         poses = np.stack(
             [

@@ -196,7 +196,7 @@ class TestEnvInterface(unittest.TestCase):
             num_agents=num_agents,
             observation_config=ObservationConfig(type=ObservationType.KINEMATIC_STATE),
         )
-        # spawn, not the default fork: the SEGMENT scan backend initialises JAX in
+        # Spawn, not the default fork: the exact scanner initialises JAX in
         # this process, and JAX is multithreaded, so os.fork() deadlocks the workers.
         vec_env = gym.make_vec(
             "f1tenth_gym:f1tenth-v0", vectorization_mode="async", config=cfg,

@@ -27,7 +27,7 @@ has one intermediate value (205 = unknown) and falls back to the binarised grid;
 | extraction time | 0.49 s | **0.11 s** |
 | per-segment normal error, synthetic wall (length-weighted) | 19.19° | **0.004°** |
 
-Agreement with the LiDAR's EDT, 3,000 free points on Spielberg, `(EDT − segment
+Agreement with the former LiDAR EDT, 3,000 free points on Spielberg, `(EDT − segment
 distance) / cell`: median **+0.146** (binarised: +0.480), range [−0.141, +0.998].
 The offset does not grow with range.
 

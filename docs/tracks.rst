@@ -192,10 +192,11 @@ row 0 is the smallest world ``y``.
 The image is binarised following ROS ``map_server`` semantics. Occupancy probability is
 ``(255 - pixel) / 255``, or ``pixel / 255`` when ``negate: 1``, and a cell is an
 obstacle exactly when that probability exceeds ``occupied_thresh``; everything else —
-including the ROS "unknown" band — is free, because the ray tracer needs a binary world.
-In the resulting grid ``0`` is occupied and ``255`` is free; dark pixels are walls, and
-the LiDAR's distance transform measures the distance to the nearest zero. Releases
-before v1.0.0 ignored the YAML and cut at a hard-coded pixel value of 128; set
+including the ROS "unknown" band — is free. In the resulting grid ``0`` is occupied
+and ``255`` is free. Exact LiDAR and contact geometry is extracted as oriented wall
+segments along the occupied/free boundary; occupancy queries still use the binary
+grid. Releases before v1.0.0 ignored the YAML and cut at a hard-coded pixel value of
+128; set
 ``occupied_thresh: 0.495`` to reproduce that grid exactly.
 
 Only those two values survive the binarisation, and walls are the rare ones —

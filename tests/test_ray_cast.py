@@ -10,7 +10,7 @@ import unittest
 import numpy as np
 
 from f1tenth_gym.envs.collision_models import get_vertices
-from f1tenth_gym.envs.lidar.laser_models import get_blocked_view_ranges, ray_cast
+from f1tenth_gym.envs.lidar.opponent import get_blocked_view_ranges, ray_cast
 
 LENGTH, WIDTH = 0.58, 0.31
 EGO = np.array([0.0, 0.0, 0.0])
@@ -28,7 +28,7 @@ def swept(pose, verts, scan_angles):
 
 def brute_force(pose, scan_angles, verts):
     """Every beam tested, no culling: the ground truth `ray_cast` must reproduce."""
-    from f1tenth_gym.envs.lidar.laser_models import get_range
+    from f1tenth_gym.envs.lidar.opponent import get_range
 
     looped = np.vstack([verts, verts[0:1]])
     scan = np.full(scan_angles.shape[0], CLEAR)

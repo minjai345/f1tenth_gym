@@ -179,7 +179,6 @@ Sensing & collision
 .. autosummary::
 
    f1tenth_gym.envs.lidar.LiDARConfig
-   f1tenth_gym.envs.lidar.ScanSimulator2D
    f1tenth_gym.envs.lidar.ray_cast
    f1tenth_gym.envs.collision_models.CollisionCheckMode
 

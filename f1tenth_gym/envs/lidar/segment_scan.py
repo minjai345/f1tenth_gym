@@ -1,9 +1,4 @@
-"""Scan simulator that casts against oriented wall segments instead of a grid.
-
-Drop-in for :class:`ScanSimulator2D`. The distance transform the raster backend
-traces measures to the nearest occupied cell *centre*, so it reads long by a median
-+0.513 px on Spielberg; casting segments has no such bias and is differentiable.
-"""
+"""Exact LiDAR scanning against oriented wall segments."""
 
 import numpy as np
 
@@ -23,7 +18,7 @@ class SegmentScanSimulator2D:
             angle_min: First beam angle relative to heading, or None to derive it.
             angle_max: Last beam angle, or None to derive it.
             std_dev: Observation noise standard deviation, applied by ``scan``.
-            min_range: Unused; kept so the constructor matches the raster backend.
+            min_range: Lower bound used by the environment's observation clipping.
             max_range: Longest reported range, and the radius the tile table covers.
             tile_size: Tile side in metres for the candidate table.
             device: ``"cpu"`` or ``"gpu"`` for the jitted kernel.

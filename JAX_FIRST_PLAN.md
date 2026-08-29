@@ -463,7 +463,8 @@ tests pass and the compiled batched path contains no NumPy conversion.
   pair-order invariance, ``jit``, environment ``vmap``, ``eval_shape`` and
   finite pose gradients.
 - Noise, fixed episode bias and dropout remain in Phase 5. The host RASTER
-  backend remains until the full scan/contact gate permits its planned removal.
+  backend was retained through the scan/contact differential gate and removed
+  in Phase 4d.
 
 #### Phase 4b implementation record — 2026-08-28
 
@@ -504,6 +505,20 @@ tests pass and the compiled batched path contains no NumPy conversion.
 - Sensing and contact are now complete standalone functional layers. They are
   not yet wired into the free-flight ``step_dynamics`` state transition; that
   integration remains part of the complete core/adapters work.
+
+#### Phase 4d implementation record — 2026-08-29
+
+- The raster sphere tracer, SciPy EDT construction, discretized-angle sine/
+  cosine tables and ``ScanBackend`` selector were removed. Exact segment
+  intersection is now the only mutable-environment LiDAR implementation;
+  ``scan_device`` remains the explicit CPU/GPU placement choice.
+- Opponent-body occlusion was separated into a focused Numba geometry module,
+  preserving the incumbent in-place ray-cast contract and its randomized
+  brute-force oracle rather than deleting it with the raster scanner.
+- The weak recorded legacy-scan fixture and generator were deleted after the
+  exact scanner passed wall, opponent, environment, noise and JAX parity gates.
+  Historical accuracy/performance measurements remain as the rationale for the
+  migration, with retired behavior labelled accordingly.
 
 ### Phase 5 — observations, episode semantics and adapters
 
@@ -687,7 +702,8 @@ not opportunistic cleanup:
       research, but reject MB-only runtime/DR knobs rather than silently ignoring them.
 - [x] Promote KS-CoG, migrate the raw state contract, then delete frame-conversion
       scaffolding once no supported model uses a rear-axle native state.
-- [ ] Remove RASTER and `jax-pf` together only after the segment scan gate passes.
+- [x] Remove RASTER after the segment scan gate passes; keep absent `jax-pf`
+      out of package dependencies and built artifacts.
 - [x] Correct the stale `collision_check` documentation.
 - [x] Reconcile the documented 20,000 SAT/GJK cases with the 4,000-case executable
       regression before moving GJK out of production.

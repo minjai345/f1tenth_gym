@@ -363,9 +363,9 @@ reset-function builder:
 ``LiDARConfig``
 ---------------
 
-The simulated LiDAR. Import from ``f1tenth_gym.envs.lidar``; every angular
-field is in radians, and an angle beyond ±π raises with a
-did-you-pass-degrees hint.
+The simulated LiDAR casts exact rays against oriented wall segments. Import
+from ``f1tenth_gym.envs.lidar``; every angular field is in radians, and an
+angle beyond ±π raises with a did-you-pass-degrees hint.
 
 .. list-table::
    :header-rows: 1
@@ -380,9 +380,8 @@ did-you-pass-degrees hint.
        contact remains active and is independent of LiDAR.
    * - ``num_beams``
      - ``1080``
-     - ``>= 1``. Angular resolution is capped by a 2000-entry internal
-       lookup table — about 1500 distinct rays at the default FOV, so
-       raising beams past that buys nothing.
+     - ``>= 1``. Beams evenly span the exact stored angle pair, including
+       both endpoints when there is more than one beam.
    * - ``angle_min``
      - ``-2.3561945`` (-135°)
      - Must be ``>= -π``.
@@ -409,6 +408,10 @@ did-you-pass-degrees hint.
      - ``(0.275, 0.0, 0.0)``
      - ``(x, y, yaw)`` sensor offset from ``base_link`` in metres/radians.
        Unvalidated.
+   * - ``scan_device``
+     - ``"cpu"``
+     - ``"cpu"`` or ``"gpu"`` for the JAX segment-intersection kernel.
+       Async vector workers must use a spawn context after JAX initializes.
 
 The three noise fields shape only the *observed* scan. Collision and response
 come from segment contact geometry independently of LiDAR (:doc:`sim2real`).
@@ -435,6 +438,11 @@ Giving both a field of view and an explicit angle is over-determined and raises.
 an input, validated, and then overwritten from the angles — so
 ``LiDARConfig(field_of_view=5.0, angle_min=-0.5, angle_max=0.5)`` silently
 stored ``1.0``.
+
+There is no backend selector. The former raster/EDT scanner was removed after
+the exact segment implementation passed its differential gates. Delete a stale
+``backend`` key from serialized development configurations; it now raises
+``TypeError`` instead of silently selecting different sensor physics.
 
 ``RenderConfig``
 ----------------

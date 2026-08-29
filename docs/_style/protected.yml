@@ -27,10 +27,10 @@ metadata_render_fps:
   note: The env's ``metadata["render_fps"]`` is **not** ``render_config.render_fps``. It is set to...
   page: rendering.rst
 occupancy_semantics:
-  hash: 4e2507aabd7d8da8
+  hash: 23bd088ea2551f21
   note: 'The image is binarised following ROS ``map_server`` semantics ... 0 occupied / 255 free,
-    unknown band free, legacy 128 cut via occupied_thresh: 0.495. Replaced occupancy_polarity
-    when #1 landed (75e9822): the hard-coded-128 warning it protected became false.'
+    unknown band free, legacy 128 cut via occupied_thresh: 0.495. Re-hashed in Phase 4d when the
+    retired EDT explanation was replaced by the exact wall-segment extraction contract.'
   page: tracks.rst
 pid_steer_p_controller:
   hash: db6ba05a38b29de9

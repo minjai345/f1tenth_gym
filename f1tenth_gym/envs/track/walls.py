@@ -82,7 +82,7 @@ def _grid_to_world(rc, resolution, origin):
     """(row, col) index coordinates -> world metres, as (M, 2).
 
     Index ``r`` addresses the cell whose centre sits half a cell above the
-    origin corner, matching ``xy_2_rc``'s ``int((y - orig_y) / resolution)``.
+    origin corner, matching the occupancy grid's lower-left world convention.
     """
     ox, oy, theta = origin
     gx = (rc[:, 1] + 0.5) * resolution

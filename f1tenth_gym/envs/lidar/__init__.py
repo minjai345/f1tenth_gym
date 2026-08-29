@@ -1,11 +1,7 @@
 from .config import LiDARConfig
-from .laser_models import (
-    ScanSimulator2D,
-    ray_cast,
-)
+from .opponent import ray_cast
 
 __all__ = [
     "LiDARConfig",
-    "ScanSimulator2D",
     "ray_cast",
 ]

@@ -1,11 +1,15 @@
-# LiDAR scan backends — measured numbers
+# LiDAR scanner migration — measured numbers
+
+The raster/EDT backend measured here was retired on 2026-08-29. Exact segment
+intersection is now the sole scanner. The former results remain as the
+reproducible rationale for that removal, not as a list of selectable backends.
 
 Every number here was produced on this tree. Machine: RTX 3080 Laptop, py3.13,
 jax 0.11.1, numpy 2.4. Ground truth throughout is exact ray-segment intersection
 against `wall_segments(track)`, itself validated against a synthetic half-plane whose
 wall position is known in closed form: **0.000 um max error over 721 beams**.
 
-## Why the raster backend is wrong
+## Why the former raster backend was removed
 
 `get_dt = resolution * distance_transform_edt(bitmap)` measures the distance to the
 nearest occupied cell **centre**. The wall face is half a cell nearer, so every range
@@ -87,8 +91,8 @@ This is the opposite of the contact kernels, which are launch-bound and lose on 
 10x; a scan is 1080 x 584 intersections, four orders of magnitude more work than a
 40-point contact solve, so the launch cost amortises.
 
-Those batched figures need `_update_scans` to make one vmapped call. It currently loops
-per agent, so the shipped path is the N=1 column.
+Those batched figures need `_update_scans` to make one vmapped call. The mutable
+environment still loops per agent, so its path is the N=1 column.
 
 Brute force over all segments is not viable: 3.7 ms (float32) to 9.3 ms (float64) per
 scan, 27-117x the EDT.
@@ -105,20 +109,21 @@ Note k/S is 70% on Spielberg and 64% on Austin: at `range_max = 30 m` on a ~100 
 circuit, most of the track is reachable from every tile, so the tile gather culls far
 less than it would on a large map. It still beats the 32 MB EDT it replaces.
 
-## What switching the default would cost
+## Removal gate
 
-`tests/test_scan_sim.py` compares against a recorded `legacy_scan.npz` at `mse < 2.0`.
-Exact segment casting scores **0.0891 / 0.1029 / 0.0205** on Spielberg / Monza / Austin
-against the current EDT's 0.0015 / 0.0052 / 0.0049 — it passes with 20-100x headroom.
-The fixture is a weak guard either way: `mse < 2.0` against a ~1 m median range is
-roughly a 140% RMS tolerance.
+A recorded `legacy_scan.npz` fixture compared scans at `mse < 2.0` before removal.
+Exact segment casting scored **0.0891 / 0.1029 / 0.0205** on Spielberg / Monza /
+Austin against the former EDT's 0.0015 / 0.0052 / 0.0049 — 20-100x inside the
+threshold. Because `mse < 2.0` against a ~1 m median range is roughly a 140% RMS
+tolerance, the weak fixture and its stale generator were deleted with the backend;
+exact geometry, host/JAX parity and environment tests are the surviving gates.
 
 The #91 no-false-collision pin holds: min(scan - side_distances) over ~109 centerline
 poses is 0.9150 m under the EDT and 0.9025 m exact.
 
-The sensor never entered occupied geometry in 400 steps of a wall-scrape crash under
-either collision-adjudicating mode; it is reachable only under `CollisionCheckMode.NONE`,
-where nothing adjudicates. A point-in-occupancy guard covers it.
+The sensor never entered occupied geometry in 400 steps of a wall-scrape crash.
+LiDAR is now independent of collision adjudication; geometric contact handles the
+stopping response, while `CollisionCheckMode.NONE` deliberately disables it.
 
 Douglas-Peucker at `wall_tolerance_px = 0.25` leaves 0.008% (Spielberg) / 0.025% (Monza)
 of beams more than 1 m from the un-simplified contour, against the EDT's 0.101% / 0.201%

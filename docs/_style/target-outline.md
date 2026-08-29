@@ -668,16 +668,16 @@ one-line summaries replace bare `automodule` walls.
    page's second warning. NEW from CLAUDE.md, two corrections the current page needs:
    `from_track_path` accepts only the legacy `{stem}_map.yaml`, so the :74 recipe cannot load any
    shipped map; and passing a Track instance as map_name cuts gym.make from 227 ms to 1.2 ms
-   because the LiDAR EDT is cached on the Track — the highest-leverage knob in the repo, and
+   because wall and ray-tile geometry is cached on the Track — the highest-leverage knob in the repo, and
    exactly the alternatives-and-trade-offs beat an explanation page owes.
 
 5. **What the occupancy image encodes** `[code]`
-   *Reader can:* The reader can author a map image whose walls the distance transform actually
-   finds, instead of one that reads inside-out.
+   *Reader can:* The reader can author a map image whose oriented wall segments are extracted
+   correctly, instead of one that reads inside-out.
    *Source:* resolution / origin / FLIP_TOP_BOTTOM from :51-53; the reference-line CSV column
    conventions from :59. :55-57 IS INVERTED AND MUST BE CORRECTED (ISSUES_PLAN #1): the true
-   polarity is `<=128 -> 0.0` = OBSTACLE and `>128 -> 255.0` = FREE, since get_dt is the EDT to
-   the nearest zero. NEW: pasted proof, verified this session — `np.unique(occupancy_map)` is
+   polarity is `<=128 -> 0.0` = OBSTACLE and `>128 -> 255.0` = FREE, matching occupancy and
+   occupied/free boundary extraction. NEW: pasted proof, verified this session — `np.unique(occupancy_map)` is
    `[0., 255.]`, only 0.82% of Spielberg's pixels are 0, and the pixel under `raceline[0]` reads
    255.0. Keep the surviving half of :57: negate/occupied_thresh/free_thresh are parsed into
    TrackSpec and never read, so every shipped map's declared 0.45 is silently overridden by the
@@ -1262,11 +1262,10 @@ one-line summaries replace bare `automodule` walls.
 6. **LiDAR and collision**
    *Reader can:* After this group the reader can change what the car sees and read the exact
    function that decides a crash, the last subsystem the step loop touches.
-   *Source:* autosummary of f1tenth_gym.envs.lidar.{LiDARConfig, ScanSimulator2D, check_collision,
-   ray_cast}; envs.collision_models.{CollisionCheckMode, collision, collision_multiple,
-   get_vertices}. Inherits :38-45. Documenting the lidar package rather than lidar.laser_models
-   structurally drops ScanTests, main and the nine internal ray kernels — no :exclude-members:
-   needed, verified they are absent from the package namespace.
+   *Source:* autosummary of f1tenth_gym.envs.lidar.{LiDARConfig, ray_cast};
+   envs.collision_models.{CollisionCheckMode, get_vertices}. Inherits :38-45. The package
+   namespace exposes configuration and the supported opponent-occlusion seam, not the internal
+   exact scanner adapter.
 
 7. **RL and sim2real**
    *Reader can:* After this group the reader can wrap the env for a single-agent learner, swap the

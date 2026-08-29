@@ -16,8 +16,8 @@ from .action import (
 from .collision_models import CollisionCheckMode, get_vertices
 from .dynamic_models import DynamicModel, VehicleParameters
 from .env_config import EnvConfig
-from .lidar import ScanSimulator2D, ray_cast
-from .lidar.config import ScanBackend
+from .lidar import ray_cast
+from .lidar.segment_scan import SegmentScanSimulator2D
 from .state import SimulationState
 from .track import Track
 
@@ -38,7 +38,7 @@ class ScanCache:
 
 
 def _make_scan_simulator(lidar_cfg):
-    """The scan backend named by the config, built from its shared arguments."""
+    """Build the exact segment scanner from the LiDAR configuration."""
     kwargs = dict(
         angle_min=lidar_cfg.angle_min,
         angle_max=lidar_cfg.angle_max,
@@ -46,13 +46,12 @@ def _make_scan_simulator(lidar_cfg):
         min_range=lidar_cfg.range_min,
         max_range=lidar_cfg.range_max,
     )
-    if lidar_cfg.backend is ScanBackend.SEGMENT:
-        from .lidar.segment_scan import SegmentScanSimulator2D
-
-        return SegmentScanSimulator2D(
-            lidar_cfg.num_beams, lidar_cfg.field_of_view,
-            device=lidar_cfg.scan_device, **kwargs)
-    return ScanSimulator2D(lidar_cfg.num_beams, lidar_cfg.field_of_view, **kwargs)
+    return SegmentScanSimulator2D(
+        lidar_cfg.num_beams,
+        lidar_cfg.field_of_view,
+        device=lidar_cfg.scan_device,
+        **kwargs,
+    )
 
 
 class F110Simulator:
@@ -151,7 +150,7 @@ class F110Simulator:
         self.scan_enabled = env_config.lidar_config.enabled
         self.scan_max_range = env_config.lidar_config.maximum_range
 
-        self.scan_sims: list[ScanSimulator2D] = []
+        self.scan_sims: list[SegmentScanSimulator2D] = []
         self.scan_rngs: list[np.random.Generator] = []
         self.scan_cache: list[ScanCache] = []
         # per-agent, per-beam systematic range bias (drawn per episode at reset)
@@ -380,7 +379,7 @@ class F110Simulator:
 
     # --- Internal helpers ---
 
-    def _build_scan_cache(self, simulator: ScanSimulator2D) -> ScanCache:
+    def _build_scan_cache(self, simulator: SegmentScanSimulator2D) -> ScanCache:
         """Build beam angles used by opponent-body ray casting."""
         num_beams = simulator.num_beams
         increment = simulator.get_increment()
