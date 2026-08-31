@@ -7,7 +7,10 @@ Run from the repository root, for example::
         --batch-sizes 1,16,64 --rollout-length 256 --agents 1
 
 Use ``--scenario lidar``, ``contact`` or ``full`` to include exact sensing or
-contact, and ``--unique-maps`` to exercise equal-shape indexed map selection.
+contact on a deterministic annular road, and ``--unique-maps`` to exercise
+equal-shape indexed map selection.  Contact/full start every body in a shallow
+outer-wall overlap; the solver's resting slop keeps response live throughout
+the rollout, and the result records the number of collision events.
 
 The only stdout payload is JSON.  Preprocessing, construction, reset, key
 generation, compilation, and the first synchronized execution are excluded
@@ -53,6 +56,7 @@ from f1tenth_gym.envs.lidar import LiDARConfig
 from f1tenth_gym.envs.observation import ObservationType
 from f1tenth_gym.envs.reset import ReferenceLine, ResetStrategy
 from f1tenth_gym.envs.track import Track
+from f1tenth_gym.envs.track.walls import wall_segments
 from f1tenth_gym.jax import (
     reset_batch_from_poses,
     reset_indexed_batch_from_poses,
@@ -65,6 +69,10 @@ from f1tenth_gym.jax.builder import (
     build_core,
     build_indexed_core,
 )
+
+
+_ROAD_HALF_WIDTH = 2.0
+_CONTACT_PENETRATION = 0.04
 
 try:
     from ._phase6_helpers import (
@@ -164,8 +172,14 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         parser.error(str(error))
     if args.unique_maps > min(args.batch_sizes):
         parser.error("unique maps must not exceed the smallest batch size")
-    if args.track_points < 8:
-        parser.error("track points must be >= 8")
+    # With agents <= points, twelve keeps the largest spline interval below the
+    # mutable/JAX 5 m half-search window for both the fixed-radius and widened
+    # circumference fixtures.  A zero local-search extent fails deep in Frenet
+    # projection with an unhelpful empty-trajectory error.
+    if args.track_points < 12:
+        parser.error("track points must be >= 12")
+    if args.agents > args.track_points:
+        parser.error("agents must not exceed track points")
     return args
 
 
@@ -174,15 +188,59 @@ def _make_track(
     point_count: int,
     *,
     center_x: float = 0.0,
+    with_walls: bool = False,
 ) -> Track:
     minimum_circumference = max(2.0 * np.pi * 8.0, 3.0 * agents)
     radius = minimum_circumference / (2.0 * np.pi)
     theta = np.linspace(0.0, 2.0 * np.pi, point_count, endpoint=False)
-    return Track.from_refline(
+    track = Track.from_refline(
         x=center_x + radius * np.cos(theta),
         y=radius * np.sin(theta),
         velx=np.full(point_count, 3.0),
     )
+    if with_walls:
+        _install_annular_road(track, center_x=center_x, radius=radius)
+    return track
+
+
+def _install_annular_road(
+    track: Track,
+    *,
+    center_x: float,
+    radius: float,
+    road_half_width: float = _ROAD_HALF_WIDTH,
+) -> None:
+    """Replace a fresh refline track's blank map with smooth closed road walls."""
+    resolution = float(track.spec.resolution)
+    origin_x, origin_y, origin_yaw = (
+        float(value) for value in track.spec.origin[:3]
+    )
+    if abs(origin_yaw) > 1e-12:
+        raise ValueError("the benchmark road requires an axis-aligned map")
+
+    rows, columns = track.occupancy_map.shape
+    world_x = origin_x + (np.arange(columns) + 0.5) * resolution
+    world_y = origin_y + (np.arange(rows) + 0.5) * resolution
+    radial_distance = np.hypot(
+        world_x[None, :] - center_x,
+        world_y[:, None],
+    )
+    road_clearance = road_half_width - np.abs(radial_distance - radius)
+    track.occupancy_map = np.where(
+        road_clearance >= 0.0,
+        255.0,
+        0.0,
+    ).astype(np.float32)
+
+    # Preserve sub-pixel circle geometry.  For a non-negated ROS map the wall
+    # extractor traces 255 * (1 - occupied_thresh); anchor zero clearance there
+    # and provide a one-cell antialiasing ramp on either side.
+    level = 255.0 * (1.0 - float(track.spec.occupied_thresh))
+    track.occupancy_grey = np.clip(
+        level + road_clearance * (255.0 / resolution),
+        0.0,
+        255.0,
+    ).astype(np.float32)
 
 
 def _make_config(
@@ -240,7 +298,13 @@ def _make_config(
     )
 
 
-def _explicit_poses(track: Track, agents: int) -> np.ndarray:
+def _explicit_poses(
+    track: Track,
+    agents: int,
+    *,
+    wall_contact: bool = False,
+    body_width: float = 0.31,
+) -> np.ndarray:
     indices = np.linspace(
         0,
         track.centerline.n,
@@ -248,7 +312,7 @@ def _explicit_poses(track: Track, agents: int) -> np.ndarray:
         endpoint=False,
         dtype=np.int32,
     )
-    return np.stack(
+    poses = np.stack(
         (
             track.centerline.xs[indices],
             track.centerline.ys[indices],
@@ -256,6 +320,20 @@ def _explicit_poses(track: Track, agents: int) -> np.ndarray:
         ),
         axis=1,
     ).astype(np.float32)
+    if wall_contact:
+        if not 0.0 < body_width < 2.0 * _ROAD_HALF_WIDTH:
+            raise ValueError("body width must fit inside the benchmark road")
+        outward = np.stack(
+            (np.sin(poses[:, 2]), -np.cos(poses[:, 2])),
+            axis=1,
+        )
+        offset = (
+            _ROAD_HALF_WIDTH
+            - 0.5 * body_width
+            + _CONTACT_PENETRATION
+        )
+        poses[:, :2] += np.float32(offset) * outward
+    return poses
 
 
 def _resolve_device(requested: str) -> jax.Device:
@@ -293,7 +371,7 @@ def _rollout_program(
 
     def rollout(state, step_keys, actions):
         def one_step(carry, keys):
-            current_state, checksum = carry
+            current_state, checksum, collision_events = carry
             if map_indices is None:
                 transition = step_batch(
                     keys,
@@ -314,14 +392,20 @@ def _rollout_program(
             return (
                 transition.state,
                 checksum + _tree_probe(transition),
+                collision_events
+                + jnp.sum(transition.events.collisions.astype(jnp.int32)),
             ), None
 
-        (_, checksum), _ = jax.lax.scan(
+        (_, checksum, collision_events), _ = jax.lax.scan(
             one_step,
-            (state, jnp.asarray(0.0, dtype=jnp.float32)),
+            (
+                state,
+                jnp.asarray(0.0, dtype=jnp.float32),
+                jnp.asarray(0, dtype=jnp.int32),
+            ),
             step_keys,
         )
-        return checksum
+        return checksum, collision_events
 
     return rollout
 
@@ -437,23 +521,24 @@ def _benchmark_jax(
     compile_seconds = time.perf_counter() - compile_started
 
     warmup_seconds = []
-    checksum = None
+    output = None
     for _ in range(warmup_runs):
         started = time.perf_counter()
-        checksum = executable(state, step_keys, actions)
-        checksum.block_until_ready()
+        output = executable(state, step_keys, actions)
+        jax.block_until_ready(output)
         warmup_seconds.append(time.perf_counter() - started)
 
     steady_seconds = []
     for _ in range(repetitions):
         started = time.perf_counter()
-        checksum = executable(state, step_keys, actions)
-        checksum.block_until_ready()
+        output = executable(state, step_keys, actions)
+        jax.block_until_ready(output)
         steady_seconds.append(time.perf_counter() - started)
 
-    if checksum is None:
+    if output is None:
         raise RuntimeError("the synchronized JAX rollout did not execute")
-    checksum_value = float(np.asarray(checksum))
+    checksum_value = float(np.asarray(output[0]))
+    collision_events = int(np.asarray(output[1]))
     if not math.isfinite(checksum_value):
         raise RuntimeError(f"the JAX checksum is not finite: {checksum_value}")
     timing = timing_summary(
@@ -483,6 +568,7 @@ def _benchmark_jax(
         "warmup_seconds": warmup_seconds,
         **timing,
         "checksum": checksum_value,
+        "collision_events_per_run": collision_events,
         "resident_input_bytes": _tree_nbytes((state, step_keys, actions)),
         "resident_table_bytes": _tree_nbytes(tables),
         "peak_memory": device_peak_memory(memory_stats),
@@ -497,17 +583,21 @@ def _numpy_probe(value: Any) -> float:
     if isinstance(value, (tuple, list)):
         return sum(_numpy_probe(item) for item in value)
     array = np.asarray(value)
-    if not array.size or not np.issubdtype(array.dtype, np.number):
+    if not array.size or not (
+        np.issubdtype(array.dtype, np.number)
+        or np.issubdtype(array.dtype, np.bool_)
+    ):
         return 0.0
-    return float(array.reshape(-1)[0])
+    return float(np.sum(array, dtype=np.float64))
 
 
 def _mutable_rollout(
     environments: list[F110Env],
     actions: np.ndarray,
     rollout_length: int,
-) -> float:
+) -> tuple[float, int]:
     checksum = 0.0
+    collision_events = 0
     for _ in range(rollout_length):
         for environment in environments:
             transition = environment.step(actions)
@@ -516,7 +606,10 @@ def _mutable_rollout(
                     "the non-terminating benchmark configuration ended an episode"
                 )
             checksum += _numpy_probe(transition)
-    return checksum
+            collision_events += int(
+                np.count_nonzero(transition[4]["collisions"])
+            )
+    return checksum, collision_events
 
 
 def _benchmark_mutable(
@@ -549,11 +642,11 @@ def _benchmark_mutable(
 
     try:
         warmup_seconds = []
-        checksum = None
+        output = None
         for _ in range(warmup_runs):
             reset_environments()
             started = time.perf_counter()
-            checksum = _mutable_rollout(
+            output = _mutable_rollout(
                 environments,
                 actions,
                 rollout_length,
@@ -564,7 +657,7 @@ def _benchmark_mutable(
         for _ in range(repetitions):
             reset_environments()
             started = time.perf_counter()
-            checksum = _mutable_rollout(
+            output = _mutable_rollout(
                 environments,
                 actions,
                 rollout_length,
@@ -574,8 +667,8 @@ def _benchmark_mutable(
         for environment in environments:
             environment.close()
 
-    if checksum is None or not math.isfinite(checksum):
-        raise RuntimeError(f"the mutable checksum is not finite: {checksum}")
+    if output is None or not math.isfinite(output[0]):
+        raise RuntimeError(f"the mutable checksum is not finite: {output}")
     timing = timing_summary(
         steady_seconds,
         batch_size=batch_size,
@@ -602,7 +695,8 @@ def _benchmark_mutable(
         "compile_seconds": None,
         "warmup_seconds": warmup_seconds,
         **timing,
-        "checksum": float(checksum),
+        "checksum": float(output[0]),
+        "collision_events_per_run": int(output[1]),
         "resident_input_bytes": None,
         "resident_table_bytes": None,
         "peak_memory": unavailable_memory(
@@ -615,14 +709,21 @@ def _benchmark_mutable(
 
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
+    with_walls = args.scenario in ("lidar", "contact", "full")
     unique_tracks = tuple(
         _make_track(
             args.agents,
             args.track_points,
             center_x=50.0 * index,
+            with_walls=with_walls,
         )
         for index in range(args.unique_maps)
     )
+    wall_segment_count = (
+        len(wall_segments(unique_tracks[0])) if with_walls else 0
+    )
+    if with_walls and wall_segment_count == 0:
+        raise RuntimeError("the walled benchmark track produced no wall segments")
     config = _make_config(
         unique_tracks[0],
         args.agents,
@@ -645,7 +746,15 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             for index in range(batch_size)
         )
         poses = np.stack(
-            [_explicit_poses(track, args.agents) for track in tracks]
+            [
+                _explicit_poses(
+                    track,
+                    args.agents,
+                    wall_contact=args.scenario in ("contact", "full"),
+                    body_width=float(config.params.width),
+                )
+                for track in tracks
+            ]
         )
         if device is not None:
             results.append(
@@ -727,10 +836,25 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 if args.scenario in ("contact", "full")
                 else "NONE"
             ),
+            "track_geometry": (
+                "synthetic_annular_road"
+                if with_walls
+                else "synthetic_wall_free_refline"
+            ),
+            "wall_segments": wall_segment_count,
+            "contact_workload": (
+                "persistent shallow outer-wall contact"
+                if args.scenario in ("contact", "full")
+                else "disabled"
+            ),
             "frenet_enabled": True,
             "episode_limits_enabled": False,
             "actions": "zero physical commands",
-            "initialization": "identical explicit centerline poses",
+            "initialization": (
+                "identical shallow wall-contact poses"
+                if args.scenario in ("contact", "full")
+                else "identical collision-free explicit centerline poses"
+            ),
             "comparison": (
                 "one shared/exact-shape-indexed JAX device batch versus the "
                 "same number of independent mutable F110Env instances"

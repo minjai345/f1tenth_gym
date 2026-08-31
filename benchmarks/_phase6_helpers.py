@@ -13,7 +13,7 @@ import statistics
 from typing import Any
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 4
 BENCHMARK_NAME = "f1tenth_gym_phase6_rollout"
 
 
@@ -137,6 +137,7 @@ _BACKEND_KEYS = {
     "environment_steps_per_second",
     "agent_steps_per_second",
     "checksum",
+    "collision_events_per_run",
     "resident_input_bytes",
     "resident_table_bytes",
     "peak_memory",
@@ -177,6 +178,15 @@ def validate_backend_result(result: Mapping[str, Any]) -> None:
         raise ValueError("contact_enabled does not match the scenario")
     if expected_lidar != (result["active_lidar_beams"] > 0):
         raise ValueError("active_lidar_beams does not match the scenario")
+    collision_events = result["collision_events_per_run"]
+    if (
+        isinstance(collision_events, bool)
+        or not isinstance(collision_events, numbers.Integral)
+        or collision_events < 0
+    ):
+        raise ValueError("collision_events_per_run must be an integer >= 0")
+    if expected_contact != (collision_events > 0):
+        raise ValueError("collision event count does not match the scenario")
     for name in (
         "steady_median_seconds",
         "steady_min_seconds",

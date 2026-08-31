@@ -38,6 +38,7 @@ def backend_result():
         "warmup_seconds": [2.5],
         **timing,
         "checksum": 1.25,
+        "collision_events_per_run": 0,
         "resident_input_bytes": 1024,
         "resident_table_bytes": 2048,
         "peak_memory": unavailable_memory("test", "not exposed"),
@@ -130,6 +131,12 @@ class TestResultSchema(unittest.TestCase):
         result = backend_result()
         result["peak_memory"]["bytes"] = 123
         with self.assertRaisesRegex(ValueError, "null"):
+            validate_backend_result(result)
+
+    def test_collision_event_count_must_match_the_scenario(self):
+        result = backend_result()
+        result["collision_events_per_run"] = 1
+        with self.assertRaisesRegex(ValueError, "collision event"):
             validate_backend_result(result)
 
 
