@@ -82,9 +82,13 @@ already-resolved ``Track`` into a device-placed bundle::
 
 ``bundle.config``, ``bundle.tables`` and ``bundle.params`` can be passed to
 ``reset_core`` and ``step_core``; ``bundle.track`` keeps the resolved host track
-paired with those device arrays for adapters. This is construction for the
-functional core, not a Gymnasium environment: it does not render or turn
-``EnvConfig.seed`` into JAX keys. The deep-import ``GymObservationAdapter``
+paired with those device arrays for adapters. ``bundle.randomization`` contains
+the finite active vehicle bounds used by device-native resets. This is
+construction for the functional core, not a Gymnasium environment: it does not
+render or turn ``EnvConfig.seed`` into JAX keys. An explicit ``target_device``
+can place even a sensing/contact-disabled bundle on an accelerator; otherwise
+the active subsystem device settings select the target and CPU is the fallback.
+The deep-import ``GymObservationAdapter``
 packages every current observation preset and ``DIRECT`` layout with finite
 Gymnasium spaces, selective device transfer and independent float32 copies, but
 does not own an environment lifecycle. Construct it with
@@ -92,11 +96,12 @@ does not own an environment lifecycle. Construct it with
 ``ObservationConfig`` selects another view without replacing the bundle's
 source configuration, so sensor values and declared bounds cannot diverge.
 Builder calls still reject ``CUSTOM`` rewards unless a host adapter supplies an
-explicit built-in fallback whose result it discards.  When domain-randomization
-bounds vary, builder callers pass one already-sampled shared
-``VehicleParameters``.  Active contact and LiDAR must select the same JAX
-device, and functional contact currently requires the default wall-extraction
-tolerance.
+explicit built-in fallback whose result it discards. Varying domain-
+randomization bounds remain traced metadata rather than requiring a host draw;
+an optional explicit ``VehicleParameters`` still selects one checked host-
+managed episode. Active contact and LiDAR must select the same JAX device unless
+``target_device`` explicitly overrides both, and functional contact currently
+requires the default wall-extraction tolerance.
 
 The host-only Gymnasium boundary is a separate deep import::
 
@@ -112,7 +117,7 @@ draws, reconfiguration and the existing renderer.  Those facilities are
 adapter work: arbitrary Python and Gym/render objects never enter the pure
 transition.  The class is not registered and does not replace
 ``f1tenth_gym:f1tenth-v0``.  Its Gym-compatible host transfer is useful for
-SB3/SBX interoperability, but it is not the future device-batched training
+SB3/SBX interoperability, but it is separate from the device-batched training
 adapter and carries no throughput claim; see :doc:`rl`.
 
 ``JaxF110Env.reset(seed=...)`` controls a host Gymnasium RNG from which the
@@ -120,6 +125,15 @@ adapter derives explicit JAX keys.  Replay is deterministic within that class,
 but NumPy and JAX random streams are intentionally not byte-paired with
 ``F110Env``.  Functional pose/state overrides reserve and discard the same pose
 key child instead of shifting the bias and scan children.
+
+The root JAX namespace also exposes ``reset_batch``, ``step_batch`` and
+``step_batch_autoreset`` for shared-map device-native rollouts. Batched state
+and active parameters keep one leading environment axis; physical parameters
+remain scalar per environment and are shared across that environment's agents.
+``PolicyLayout`` builds ordered decentralized arrays without NumPy conversion,
+and joint flattening is explicit. Selective auto-reset preserves the terminal
+transition observation separately from the reset observation used as the next
+carry. See :doc:`rl` for the complete contract and example.
 
 ``delta`` is the steering angle, ``v`` the longitudinal speed, ``yaw`` the
 heading, and ``beta`` the body slip angle. Under ``KS`` there is nothing for a

@@ -125,8 +125,8 @@ gym; install the trainer separately.  The adapter provides compatibility, not
 an end-to-end device-native training path.  Each Gym step runs the compiled JAX
 transition, then transfers only the selected observation leaves to independent
 NumPy arrays for Gymnasium.  SBX subsequently transfers policy inputs to its
-own JAX program.  Native batched training should instead compose ``reset_core``
-and ``step_core`` under ``vmap``/``lax.scan``; no throughput comparison is
+own JAX program.  Native batched training should instead use ``reset_batch``
+and ``step_batch``/``step_batch_autoreset`` below; no throughput comparison is
 claimed for the Gym adapter.
 
 The optional ``tests/test_jax_rl_compat.py`` gate runs the Stable-Baselines3
@@ -134,12 +134,13 @@ environment checker and one eight-step SBX PPO update when those two external
 packages are installed.  It skips in the base package environment, keeping
 trainer stacks out of runtime dependencies.
 
-Python callbacks and episode randomization deliberately stay on the host.
-``RewardMode.CUSTOM`` is called after the packaged observation and final
-``info`` dictionary exist, just as it is for ``F110Env``.  Domain randomization
+Python callbacks and Gymnasium episode randomization deliberately stay on the
+host.  ``RewardMode.CUSTOM`` is called after the packaged observation and final
+``info`` dictionary exist, just as it is for ``F110Env``.  ``JaxF110Env`` also
 draws one shared ``VehicleParameters`` value from the Gym RNG at reset and
-builds that episode's traced core parameters from it.  Both behaviors cross the
-device boundary and therefore do not belong inside a compiled rollout.
+builds that episode's traced core parameters from it.  The device-batched API
+uses a different boundary: rewards must be pure JAX callables, and vehicle
+randomization is sampled from explicit device keys without host conversion.
 
 ``reset(seed=...)`` is deterministic within ``JaxF110Env``, including domain
 randomization and sensor noise, but it is not a byte-for-byte random-stream
@@ -155,6 +156,105 @@ requirements and timing semantics described in :doc:`rendering`; direct
 ``RecordVideo`` use needs ``JaxF110Env(cfg, render_mode="rgb_array")`` and
 ``render_enabled=True``.  Rendering also packages host arrays and is not part
 of a device-native throughput claim.
+
+Run a device-native batch
+-------------------------
+
+The pure batch adapter adds an environment axis without changing the physics
+core.  One compiled batch has one ``CoreConfig`` and one shared map table;
+state and episode parameters have an independent leading row for every
+environment.  Build that shared bundle on the requested device, then close it
+over compiled reset and step functions:
+
+.. code-block:: python
+
+   import jax
+   import jax.numpy as jnp
+
+   from f1tenth_gym.envs.track import Track
+   from f1tenth_gym.jax import (
+       PolicyField,
+       PolicyLayout,
+       policy_observation,
+       reset_batch,
+       step_batch_autoreset,
+   )
+   from f1tenth_gym.jax.builder import build_core
+
+   track = Track.from_track_name("Spielberg", 1.0)
+   bundle = build_core(cfg, track, target_device="cpu")
+   batch_size = 64
+   layout = PolicyLayout((PolicyField.KINEMATIC_STATE,))
+
+   @jax.jit
+   def reset(keys):
+       return reset_batch(
+           keys,
+           bundle.tables,
+           bundle.config,
+           bundle.params,
+           bundle.randomization,
+       )
+
+   @jax.jit
+   def step(step_keys, reset_keys, state, actions):
+       return step_batch_autoreset(
+           step_keys,
+           reset_keys,
+           state,
+           actions,
+           bundle.tables,
+           bundle.config,
+           bundle.params,
+           bundle.randomization,
+       )
+
+   root = jax.random.key(42)
+   reset_keys = jax.random.split(jax.random.fold_in(root, 0), batch_size)
+   observation, state = reset(reset_keys)
+   policy_input = policy_observation(observation, bundle.config, layout)
+   assert policy_input.shape == (batch_size, cfg.num_agents, 5)
+
+   actions = jnp.zeros((batch_size, cfg.num_agents, 2), dtype=jnp.float32)
+   step_keys = jax.random.split(jax.random.fold_in(root, 1), batch_size)
+   next_reset_keys = jax.random.split(jax.random.fold_in(root, 2), batch_size)
+   transition = step(step_keys, next_reset_keys, state, actions)
+   policy_input = policy_observation(
+       transition.next_observation, bundle.config, layout
+   )
+
+Use time-major key/action arrays around ``step`` in ``jax.lax.scan`` for a
+compiled rollout.  ``step_batch`` is the raw alternative: it reports terminal
+status but never resets or freezes a row.  ``step_batch_autoreset`` resets an
+entire environment when that row is terminated or truncated; it never resets
+individual agents.  Its two observation trees have distinct purposes:
+
+* ``transition_observation`` is the post-step value used for terminal targets
+  and timeout bootstrapping;
+* ``next_observation`` is the selectively reset value used as the next policy
+  input and matches ``transition.state``.
+
+Rewards remain ``(batch, agents)``.  ``select_ego_rewards`` produces one scalar
+per environment, while ``flatten_joint_observation`` explicitly turns a
+decentralized ``(batch, agents, features)`` policy view into a centralized
+``(batch, agents * features)`` view.  A custom device reward is vmapped once per
+environment and receives ``(observation, actions, events, metrics, params)``;
+it must return one value per agent using JAX operations only.
+
+``bundle.randomization`` contains the finite active vehicle bounds.  Each reset
+key draws one parameter row shared by every agent in that environment, and
+different environment rows can draw different physics without recompilation.
+The draw updates correlated dynamics and body geometry together.  A named
+folded key keeps pose and sensor reset streams unchanged when randomization is
+toggled.  The contact table is already sized for the configured full bound
+envelope; substituting wider bounds at runtime is unsupported.
+
+The first batching surface intentionally supports one shared map per compiled
+batch.  Equal-shape indexed maps and orchestration across exact-shape map
+buckets remain host-adapter work.  ``target_device`` is authoritative when
+provided; without it, the builder follows active LiDAR/contact device settings
+and otherwise selects CPU.  No throughput claim follows from the transform
+tests alone—benchmark the final policy/update program on its target hardware.
 
 Choose what the policy sees
 ---------------------------

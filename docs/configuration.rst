@@ -591,9 +591,11 @@ ValueError: RewardMode.CUSTOM requires reward_fn to be set
 ``DomainRandomizationConfig``
 -----------------------------
 
-Per-episode vehicle-parameter randomization, redrawn from the env RNG at
-every ``reset()`` — reproducible with ``reset(seed=...)``; :doc:`sim2real`
-covers where the draw lands in the control loop.
+Per-episode vehicle-parameter randomization, redrawn from the environment RNG
+at every Gymnasium ``reset()`` — reproducible with ``reset(seed=...)``;
+:doc:`sim2real` covers where the draw lands in the control loop. The native JAX
+batch adapter uses the same bounds with one explicit device key per environment
+instead; see :doc:`rl`.
 
 .. list-table::
    :header-rows: 1

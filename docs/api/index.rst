@@ -84,6 +84,13 @@ host construction and observation packaging are listed below.
    f1tenth_gym.jax.CoreState
    f1tenth_gym.jax.CoreObservation
    f1tenth_gym.jax.CoreMetrics
+   f1tenth_gym.jax.ActiveVehicleParams
+   f1tenth_gym.jax.VehicleRandomizationParams
+   f1tenth_gym.jax.BatchState
+   f1tenth_gym.jax.BatchStep
+   f1tenth_gym.jax.AutoResetBatchStep
+   f1tenth_gym.jax.PolicyField
+   f1tenth_gym.jax.PolicyLayout
    f1tenth_gym.jax.SplineTable
    f1tenth_gym.jax.TrackTable
    f1tenth_gym.jax.ResetTable
@@ -134,6 +141,16 @@ host construction and observation packaging are listed below.
    f1tenth_gym.jax.reset_core_from_poses
    f1tenth_gym.jax.reset_core_from_state
    f1tenth_gym.jax.step_core
+   f1tenth_gym.jax.sample_vehicle_params
+   f1tenth_gym.jax.sample_core_params
+   f1tenth_gym.jax.reset_batch
+   f1tenth_gym.jax.reset_batch_from_poses
+   f1tenth_gym.jax.reset_batch_from_state
+   f1tenth_gym.jax.step_batch
+   f1tenth_gym.jax.step_batch_autoreset
+   f1tenth_gym.jax.policy_observation
+   f1tenth_gym.jax.flatten_joint_observation
+   f1tenth_gym.jax.select_ego_rewards
 
 .. automodule:: f1tenth_gym.jax
 
@@ -144,6 +161,10 @@ host construction and observation packaging are listed below.
 .. automodule:: f1tenth_gym.jax.core
 
 .. automodule:: f1tenth_gym.jax.environment
+
+.. automodule:: f1tenth_gym.jax.randomization
+
+.. automodule:: f1tenth_gym.jax.batched
 
 .. automodule:: f1tenth_gym.jax.episode
 
@@ -177,6 +198,7 @@ with their source host configuration and track.
    f1tenth_gym.jax.builder.build_core_config
    f1tenth_gym.jax.builder.build_core_tables
    f1tenth_gym.jax.builder.build_core_params
+   f1tenth_gym.jax.builder.build_vehicle_randomization_params
    f1tenth_gym.jax.gym_env.JaxF110Env
    f1tenth_gym.jax.gym_observation.GymObservationAdapter
    f1tenth_gym.jax.preprocess.build_track_table

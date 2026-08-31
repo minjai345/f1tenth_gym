@@ -5,7 +5,7 @@ work, then read the named source and tests before changing a subsystem. The
 published Sphinx pages are the user-facing source of truth for behavior and
 examples; this file focuses on architecture, invariants, and change seams.
 
-Baseline reviewed: Phase 5f on 2026-08-31, based on `b47c0c8`. Treat counts
+Baseline reviewed: Phase 6a on 2026-08-31, based on `c5484a6`. Treat counts
 and the known-rough-edges section as a snapshot and re-check them against
 `HEAD`.
 
@@ -22,7 +22,8 @@ more 1/10-scale race cars. It combines:
 - occupancy-grid tracks, centerlines, racelines, and Frenet coordinates;
 - multi-agent reset strategies, rewards, termination, rendering, and wrappers;
 - deterministic seeding, actuator/sensor noise, and domain randomization;
-- a deep-import Gymnasium lifecycle over the functional JAX core.
+- a deep-import Gymnasium lifecycle over the functional JAX core;
+- shared-map device-batched JAX rollouts with selective auto-reset.
 
 The installed package is `f1tenth_gym` version `1.0.0dev`. Importing the
 package registers `f1tenth-v0`; normal use is the namespaced Gymnasium id
@@ -126,6 +127,11 @@ JaxF110Env(config=EnvConfig)         direct deep import, no Gym id
   -> jitted reset_core/step_core     immutable device transition
   -> GymObservationAdapter           selected device-to-NumPy observation view
   -> host lifecycle                  seeds, DR, CUSTOM reward, info and render
+
+build_core(config, shared_track)
+  -> reset_batch/step_batch           vmapped immutable device transition
+  -> optional selective auto-reset    terminal observation kept separately
+  -> PolicyLayout                     `(batch, agents, features)` device view
 ```
 
 ### Environment layer
@@ -255,6 +261,8 @@ rather than equality.
 | `envs/collision_models.py` | collision enum and collision-body vertices |
 | `envs/contact/` | JAX manifolds/solvers and the NumPy/JAX adapter |
 | `f1tenth_gym/jax/` | pure functional reset/step plus dynamics, sensing, contact and episode layers |
+| `f1tenth_gym/jax/randomization.py` | pure correlated active-vehicle draws and core-param replacement |
+| `f1tenth_gym/jax/batched.py` | pure shared-map environment batching, auto-reset and policy layouts |
 | `f1tenth_gym/jax/builder.py` | host `EnvConfig`/`Track` conversion and device placement |
 | `f1tenth_gym/jax/gym_env.py` | direct-import Gym lifecycle, host RNG/rewards/info and rendering |
 | `f1tenth_gym/jax/gym_observation.py` | host Gym observation layout, spaces and device-to-NumPy packaging |
@@ -268,7 +276,7 @@ rather than equality.
 | `envs/rendering/` | PyQt6/OpenGL renderer, objects, callbacks |
 | `envs/wrappers.py` | single-agent and observation-delay wrappers |
 | `examples/` | waypoint following, video, telemetry, synthetic tracks |
-| `tests/` | 648 collected tests across 49 `test_*.py` files |
+| `tests/` | 677 collected tests across 51 `test_*.py` files |
 | `docs/` | Sphinx user documentation plus behavioral measurements |
 
 ## Configuration model
@@ -354,8 +362,10 @@ The functional seam under `f1tenth_gym/jax/` owns traced vehicle and episode
 parameters, KS/ST dynamics, controllers, actuator noise/FIFOs and free-flight
 `lax.scan` rollouts. Host preprocessing produces fixed-shape spline,
 wall, tile and RL-reset tables; exact-shape buckets are the default for
-heterogeneous maps, with shared `Track` objects stored once and referenced by
-index. Clean exact scans use masked ray-tile candidates, the current LiDAR
+heterogeneous host layouts, with shared `Track` objects stored once. The first
+runtime batch adapter intentionally accepts one shared complete `CoreTables`;
+same-shape indexed maps are not yet a runtime surface. Clean exact scans use
+masked ray-tile candidates, the current LiDAR
 mounting calculation and simultaneous all-edge opponent occlusion. Runtime
 ``range_max`` must not exceed the ray table's preprocessed reach. Observed
 scans add key-driven Gaussian noise and reset-fixed per-beam bias, clip to the
@@ -399,6 +409,24 @@ response; disabled LiDAR uses one internal beam; disabling Frenet also disables
 lap termination and is incompatible with the PROGRESS reward. The core never
 auto-resets or freezes a terminated agent.
 
+`jax/randomization.py` owns the finite 20-field active vehicle prefix. One
+reset-key-derived draw updates `DynamicsParams` and `BodyParams` together, so
+`lr` and the CoG-relative collision-body offset cannot decorrelate. Fields use
+stable folded subkeys; equal bounds stay exact. A draw is scalar per environment
+and shared by every agent. Never install runtime bounds wider than the envelope
+used to preprocess contact tables.
+
+`jax/batched.py` vmaps the unchanged core over one shared map. `BatchState`
+carries independently sampled `CoreParams` beside each environment's
+`CoreState`; raw `step_batch` never resets, while `step_batch_autoreset` selects
+a whole reset candidate only for environment rows with global terminated or
+truncated status. It preserves the post-step terminal observation separately
+from the reset observation used as the next carry. Policy layouts produce
+ordered `(batch, agents, features)` arrays; centralized flattening and ego
+reward selection are explicit. Step and reset keys are separate, and a custom
+reward must be a pure per-environment JAX callable returning one value per
+agent.
+
 The deep-import `jax/gym_observation.py` resolves all current observation
 presets and gates from `EnvConfig`, shares finite-bound builders with the mutable
 providers, transfers only the canonical leaves a layout consumes, and emits
@@ -432,15 +460,18 @@ The deep-import host builder maps supported ``EnvConfig`` topology and traced
 values plus one resolved ``Track`` into a device-placed ``CoreBundle``. It
 preserves KS/ST, Euler/RK4 substeps, action controllers and delays, RL reset
 defaults, sensing/contact switches, EGO/ANY/ALL reduction and built-in rewards.
-Varying DR bounds require an explicit sampled shared ``VehicleParameters``;
-the builder validates every supported field and sizes contact tables from the
-full bound envelope. Continuous production leaves are float32, counters int32
-and flags boolean regardless of Python scalar types or JAX x64 mode. Disabled
+The bundle carries nominal `CoreParams` plus device-sampleable active DR bounds;
+an explicit host-managed shared `VehicleParameters` remains optional and is
+validated. Contact tables are sized from the full configured bound envelope.
+Continuous production leaves are float32, counters int32 and flags boolean
+regardless of Python scalar types or JAX x64 mode. Disabled
 contact uses constant masked contact/pair tables; disabled LiDAR uses a masked
 ray table, and wall extraction is skipped when neither subsystem needs it. The
 builder rejects winding laps, ``MAP_RANDOM_STATIC``, non-default active-contact
-wall tolerance and mixed active component devices. It also rejects ``CUSTOM``
-rewards unless a host adapter supplies an explicit built-in fallback.
+wall tolerance and, by default, mixed active component devices. An explicit
+`target_device` is authoritative and can also place a state-only batch away
+from the CPU fallback. The builder rejects ``CUSTOM`` rewards unless a host
+adapter supplies an explicit built-in fallback.
 `JaxF110Env` handles two host-only concerns before
 calling the builder: it runs Python `CUSTOM` rewards outside the core and
 supplies an already sampled shared DR value. Winding laps, `MAP_RANDOM_STATIC`,
@@ -559,7 +590,7 @@ constraint spans subsystems.
 
 ## Tests and validation
 
-The current tree collects 648 tests across 49 `test_*.py` files. Most tests use
+The current tree collects 677 tests across 51 `test_*.py` files. Most tests use
 `unittest.TestCase` but run through pytest. Tests cover public behavior and
 low-level numerical contracts, including JIT/vmap/gradient properties,
 allocation guards, cache invalidation, observation aliasing, vector envs,

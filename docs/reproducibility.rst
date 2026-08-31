@@ -198,3 +198,25 @@ after it — at the same seed:
    single-rollout A/B difference mixes the setting's effect with a fresh
    noise realisation — compare distributions over seeds, and difference
    individual rollouts only when their configs are identical.
+
+Device-native key trees
+-----------------------
+
+The functional JAX APIs use explicit keys rather than the mutable simulator's
+sequential NumPy generator. ``JaxF110Env`` derives those keys from its host
+Gymnasium RNG, so seeded replay is deterministic within that class but is not
+byte-paired with ``F110Env``. The native batch API accepts one key per
+environment directly.
+
+``reset_batch`` passes each row's reset key unchanged to ``reset_core``. Pose,
+fixed LiDAR bias and initial scan therefore keep the established named reset
+children. Device domain randomization derives a separate key with ``fold_in``;
+enabling it does not shift those pose or sensor children. The twenty supported
+vehicle fields also use stable field-index subkeys, so changing one field's
+bounds does not shift another field's draw.
+
+``step_batch_autoreset`` takes separate ``step_keys`` and ``reset_keys``. Step
+noise is therefore unchanged when auto-reset is enabled, and a reset candidate
+key affects only a row whose terminal or timeout status selects that candidate.
+The same device, key arrays, actions, configuration and software replay the
+complete batched tree. Cross-device bit identity is not promised.

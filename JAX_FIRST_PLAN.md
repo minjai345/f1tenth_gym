@@ -754,6 +754,47 @@ pass independently.
 *Done when:* training completes, numerical gates pass at scale, memory and
 throughput are published, and defaults follow the measured final program.
 
+#### Phase 6a implementation record — 2026-08-31
+
+- ``ActiveVehicleParams`` is the finite 20-field supported prefix of the host
+  vehicle ABI. Key-driven device randomization samples stable field-index
+  substreams and replaces dynamics plus collision-body geometry from the same
+  draw, preserving the ``lr``/CoG body-offset correlation. Fixed endpoints are
+  exact, disabled or constant bounds return the nominal vehicle, and the draw
+  remains one scalar parameter set shared by every agent in an environment.
+- ``CoreBundle`` now carries device-placed randomization metadata. Varying
+  bounds no longer require a host sample to build the core, while optional
+  explicit host episode parameters remain bounds-validated. Active values and
+  independent cross-field limit intervals receive finite/kernel-safety checks,
+  and contact preprocessing still covers the full configured body envelope.
+  An authoritative ``target_device`` can place a state-only training bundle on
+  an accelerator instead of inheriting the CPU fallback.
+- ``reset_batch`` and its override variants vmap the unchanged core over one
+  shared ``CoreTables`` and sample independent episode parameters from each
+  reset key. ``step_batch`` preserves raw terminal behavior without reset or
+  freezing. ``step_batch_autoreset`` receives separate transition/reset keys,
+  resets only whole environment rows selected by terminated-or-truncated, and
+  preserves the terminal transition observation separately from the reset
+  observation used as the next carry.
+- Ordered policy layouts produce decentralized
+  ``(batch, agents, features)`` device arrays; centralized flattening and ego
+  reward selection are explicit. Device ``CUSTOM`` rewards are pure JAX
+  callables vmapped per environment, receive actions/events/metrics/active
+  parameters and return one reward per agent. The disabled LiDAR/Frenet
+  placeholders cannot be selected into a policy layout.
+- Scalar parity, key replay/isolation, device DR, reset overrides, raw done
+  continuation, mixed termination/timeout selective auto-reset, terminal-value
+  preservation, custom rewards, policy channel order, transfer guards,
+  ``jit(lax.scan(vmap(step)))``-equivalent composition and import purity are
+  executable gates. The first adapter intentionally supports one shared map;
+  complete-table indexed maps must bucket reset and track shapes together.
+- This checkpoint establishes the native rollout contract, not completion of
+  Phase 6. A sustained PPO training job, measured CPU/GPU throughput and memory,
+  final contact device measurements, dependency locking, indexed map routing
+  and any optional official-JaxMARL adapter remain open. JaxMARL should wait
+  until the native training/update contract and intended multi-policy mode are
+  proven.
+
 ---
 
 ## 05 · Numerical and architectural traps
