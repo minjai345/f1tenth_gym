@@ -572,6 +572,29 @@ pass independently.
 - This is the first Phase 5 slice. Sensing is not yet composed with dynamics,
   contact, Frenet state or episode semantics in ``step_core``.
 
+#### Phase 5b implementation record — 2026-08-29
+
+- Stepping Frenet projection now uses a fixed-shape local candidate mask
+  centered on each agent's explicit previous ``s``. It matches the mutable
+  simulator's 10 m window across displaced and wrap-adjacent poses; the global
+  projector remains the reset/teleport oracle.
+- ``EpisodeState`` seeds separate progress and lap references from the reset
+  pose, tracks wrap-corrected cumulative arclength, finish splits, lap counts,
+  elapsed steps and latched per-agent terminal status without touching vehicle
+  state. Finish timing preserves the current pre-refresh clock guard and
+  partial-first-lap/out-lap behavior.
+- ``BookkeepingParams`` keeps collision/lap/step enables and limits plus reward
+  weights as traced leaves. Built-in SURVIVAL/PROGRESS rewards are per-agent for
+  device/MARL consumers; the future Gymnasium adapter selects its ego scalar,
+  while Python ``CUSTOM`` remains an adapter-only callback.
+- EGO/ANY/ALL termination, fresh collision/lap events, mixed terminal causes,
+  newly terminated status and independent timeout truncation pass ``jit``,
+  heterogeneous environment ``vmap`` and ``lax.scan`` gates. A scripted
+  out-lap/reward/status sequence agrees with the mutable environment.
+- These functions remain standalone layers. ``step_core`` still needs to
+  compose dynamics, wall/pair contact, local Frenet projection, observed scans
+  and episode bookkeeping in the documented order.
+
 ### Phase 6 — batched training and performance decisions
 
 - Run a complete device-native PPO training job; imported training code is a

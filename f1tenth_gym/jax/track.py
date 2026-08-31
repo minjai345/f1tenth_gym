@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 
 import jax
 import jax.numpy as jnp
@@ -60,6 +61,21 @@ class TrackTable:
     ray_tiles: TileTable
 
 
+@dataclass(frozen=True)
+class FrenetProjectionConfig:
+    """Static local-search policy for stepping Frenet projection."""
+
+    search_range: float = 10.0
+
+    def __post_init__(self) -> None:
+        search_range = float(self.search_range)
+        if not math.isfinite(search_range) or search_range <= 0.0:
+            raise ValueError(
+                f"search_range must be finite and > 0, got {self.search_range}"
+            )
+        object.__setattr__(self, "search_range", search_range)
+
+
 def _wrap_angle(angle: jax.Array) -> jax.Array:
     return jnp.arctan2(jnp.sin(angle), jnp.cos(angle))
 
@@ -90,16 +106,11 @@ def frenet_to_cartesian(
     return jnp.stack((x, y, _wrap_angle(yaw + frenet_pose[2])))
 
 
-def cartesian_to_frenet(
+def _project_to_frenet(
     table: SplineTable,
     pose: jax.Array,
+    live_segments: jax.Array,
 ) -> jax.Array:
-    """Globally project one ``[x, y, yaw]`` pose onto a reference line.
-
-    Stepping will add the current host simulator's local search window later;
-    this global fixed-shape form is the reset/teleport contract and projection
-    oracle for the device tables.
-    """
     starts = table.points[:-1, :2]
     edges = table.points[1:, :2] - starts
     length_sq = jnp.maximum(jnp.sum(edges * edges, axis=1), 1.0e-12)
@@ -107,7 +118,7 @@ def cartesian_to_frenet(
     fraction = jnp.clip(jnp.sum(offset * edges, axis=1) / length_sq, 0.0, 1.0)
     projections = starts + fraction[:, None] * edges
     distances_sq = jnp.sum((pose[:2] - projections) ** 2, axis=1)
-    distances_sq = jnp.where(table.segment_mask, distances_sq, jnp.inf)
+    distances_sq = jnp.where(live_segments, distances_sq, jnp.inf)
     segment = jnp.argmin(distances_sq)
     s = table.knots[segment] + fraction[segment] * (
         table.knots[segment + 1] - table.knots[segment]
@@ -120,6 +131,60 @@ def cartesian_to_frenet(
     signed = jnp.sign(jnp.dot(pose[:2] - values[:2], normal))
     ey = jnp.sqrt(distances_sq[segment]) * signed
     return jnp.stack((s, ey, _wrap_angle(pose[2] - yaw)))
+
+
+def cartesian_to_frenet(
+    table: SplineTable,
+    pose: jax.Array,
+) -> jax.Array:
+    """Globally project one ``[x, y, yaw]`` pose onto a reference line.
+
+    This whole-line form is the reset/teleport contract and projection oracle.
+    Stepping should use :func:`cartesian_to_frenet_local` with each agent's own
+    previous arclength.
+    """
+    return _project_to_frenet(table, pose, table.segment_mask)
+
+
+def cartesian_to_frenet_local(
+    table: SplineTable,
+    pose: jax.Array,
+    previous_s: jax.Array,
+    config: FrenetProjectionConfig = FrenetProjectionConfig(),
+) -> jax.Array:
+    """Project near ``previous_s`` using the mutable simulator's local window.
+
+    The candidate interval matches ``Track.cartesian_to_frenet``: half the
+    configured metric range on either side of the guessed spline segment. The
+    interval is represented as a mask over every fixed segment, so the result
+    remains jittable and vmappable without data-dependent array shapes.
+    """
+    segment_count = jnp.sum(table.segment_mask, dtype=jnp.int32)
+    guess = jnp.mod(previous_s, table.length)
+    centre = (
+        guess / (table.length + table.s_interval) * segment_count
+    ).astype(jnp.int32)
+    centre = jnp.mod(centre, segment_count)
+    half_window = jnp.maximum(
+        jnp.asarray(config.search_range / 2.0, dtype=table.s_interval.dtype)
+        / table.s_interval,
+        1.0,
+    ).astype(jnp.int32)
+    half_window = jnp.minimum(half_window, segment_count)
+
+    indices = jnp.arange(table.segment_mask.shape[0], dtype=jnp.int32)
+    offsets = jnp.mod(indices - centre, segment_count)
+    # The host builds 2*half_window candidate points, hence one fewer segment:
+    # starts range from centre-half_window through centre+half_window-2.
+    in_window = jnp.logical_or(
+        offsets >= segment_count - half_window,
+        offsets <= half_window - 2,
+    )
+    return _project_to_frenet(
+        table,
+        pose,
+        table.segment_mask & in_window,
+    )
 
 
 def tile_candidates(table: TileTable, points: jax.Array) -> tuple[jax.Array, jax.Array]:
@@ -139,11 +204,13 @@ def tile_candidates(table: TileTable, points: jax.Array) -> tuple[jax.Array, jax
 
 
 __all__ = [
+    "FrenetProjectionConfig",
     "SplineTable",
     "TileTable",
     "TrackTable",
     "WallTable",
     "cartesian_to_frenet",
+    "cartesian_to_frenet_local",
     "evaluate_spline",
     "frenet_to_cartesian",
     "tile_candidates",

@@ -12,8 +12,10 @@ from f1tenth_gym.envs.dynamic_models import F1TENTH_VEHICLE_PARAMETERS
 from f1tenth_gym.envs.track import Track
 from f1tenth_gym.jax import (
     DynamicsConfig,
+    FrenetProjectionConfig,
     ResetConfig,
     cartesian_to_frenet,
+    cartesian_to_frenet_local,
     evaluate_spline,
     frenet_to_cartesian,
     kinematic_single_track,
@@ -127,7 +129,15 @@ class TestTrackPreprocessing(unittest.TestCase):
         self.assertEqual(len(table_set.buckets), 2)
 
     def test_only_the_host_preprocessor_imports_numpy(self):
-        for filename in ("controls.py", "core.py", "dynamics.py", "integrators.py", "reset.py", "track.py"):
+        for filename in (
+            "controls.py",
+            "core.py",
+            "dynamics.py",
+            "episode.py",
+            "integrators.py",
+            "reset.py",
+            "track.py",
+        ):
             tree = ast.parse((ROOT / "f1tenth_gym" / "jax" / filename).read_text())
             imports = {
                 alias.name
@@ -137,6 +147,101 @@ class TestTrackPreprocessing(unittest.TestCase):
             }
             self.assertNotIn("numpy", imports, filename)
             self.assertNotIn("np", imports, filename)
+
+
+class TestLocalFrenetProjection(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.track = Track.from_track_name("Spielberg", 1.0)
+        cls.table = build_track_table(
+            cls.track,
+            F1TENTH_VEHICLE_PARAMETERS,
+            ray_max_range=5.0,
+        ).centerline
+        cls.project = staticmethod(
+            jax.jit(
+                cartesian_to_frenet_local,
+                static_argnums=3,
+            )
+        )
+
+    def test_matches_the_host_window_around_many_guesses(self):
+        line = self.track.centerline
+        indexes = np.linspace(0, len(line.xs) - 2, 24, dtype=int)
+        length = float(line.spline.s_frame_max)
+        for ordinal, index in enumerate(indexes):
+            arclength = float(line.ss[index])
+            pose = np.asarray(
+                self.track.frenet_to_cartesian(
+                    arclength,
+                    0.25 * np.sin(ordinal),
+                    0.1 * np.cos(ordinal),
+                ),
+                dtype=np.float32,
+            )
+            previous_s = (arclength + 2.0 * np.sin(0.7 * ordinal)) % length
+            expected = self.track.cartesian_to_frenet(
+                *pose,
+                s_guess=previous_s,
+                use_s_guess=True,
+            )
+            actual = self.project(
+                self.table,
+                pose,
+                jnp.asarray(previous_s, dtype=jnp.float32),
+                FrenetProjectionConfig(),
+            )
+            np.testing.assert_allclose(actual, expected, atol=1.0e-2)
+
+    def test_each_agent_keeps_its_own_distant_search_window(self):
+        line = self.track.centerline
+        indexes = np.asarray([10, len(line.xs) // 2], dtype=int)
+        poses = jnp.asarray(
+            np.stack(
+                (line.xs[indexes], line.ys[indexes], line.yaws[indexes]),
+                axis=1,
+            ),
+            dtype=jnp.float32,
+        )
+        previous = jnp.asarray(line.ss[indexes], dtype=jnp.float32)
+        actual = jax.jit(
+            jax.vmap(
+                lambda pose, prior: cartesian_to_frenet_local(
+                    self.table, pose, prior
+                )
+            )
+        )(poses, previous)
+        self.assertGreater(float(jnp.abs(actual[0, 0] - actual[1, 0])), 50.0)
+        np.testing.assert_allclose(actual[:, 0], previous, atol=0.2)
+
+    def test_a_track_wide_window_reduces_to_the_global_oracle(self):
+        line = self.track.centerline
+        index = len(line.xs) // 3
+        pose = jnp.asarray(
+            [line.xs[index] + 0.15, line.ys[index] - 0.1, line.yaws[index]],
+            dtype=jnp.float32,
+        )
+        expected = cartesian_to_frenet(self.table, pose)
+        actual = cartesian_to_frenet_local(
+            self.table,
+            pose,
+            jnp.asarray(0.0, dtype=jnp.float32),
+            FrenetProjectionConfig(search_range=2.1 * float(self.table.length)),
+        )
+        np.testing.assert_allclose(actual, expected, atol=1.0e-6)
+
+    def test_window_validation_and_shape_evaluation(self):
+        for bad in (0.0, -1.0, np.inf):
+            with self.assertRaises(ValueError):
+                FrenetProjectionConfig(search_range=bad)
+        pose = jnp.asarray([0.0, 0.0, 0.0], dtype=jnp.float32)
+        shaped = jax.eval_shape(
+            lambda value: cartesian_to_frenet_local(
+                self.table, value, jnp.asarray(0.0, dtype=jnp.float32)
+            ),
+            pose,
+        )
+        self.assertEqual(shaped.shape, (3,))
 
 
 class TestJaxReset(unittest.TestCase):

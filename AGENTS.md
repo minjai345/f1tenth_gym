@@ -5,7 +5,7 @@ work, then read the named source and tests before changing a subsystem. The
 published Sphinx pages are the user-facing source of truth for behavior and
 examples; this file focuses on architecture, invariants, and change seams.
 
-Baseline reviewed: Phase 5a on 2026-08-29, based on `a664499`. Treat counts
+Baseline reviewed: Phase 5b on 2026-08-29, based on `c53250f`. Treat counts
 and the known-rough-edges section as a snapshot and re-check them against
 `HEAD`.
 
@@ -226,7 +226,7 @@ rather than equality.
 | `envs/lidar/` | LiDAR config, mutable exact scanner and opponent occlusion |
 | `envs/collision_models.py` | collision enum and collision-body vertices |
 | `envs/contact/` | JAX manifolds/solvers and the NumPy/JAX adapter |
-| `f1tenth_gym/jax/` | pure dynamics, state, track/reset tables, clean/observed sensing and wall/pair contact |
+| `f1tenth_gym/jax/` | pure dynamics, state, track/reset tables, sensing, contact and episode bookkeeping |
 | `envs/track/track.py` | map/reference-line loading and Frenet transforms |
 | `envs/track/walls.py` | oriented wall extraction from occupancy maps |
 | `envs/track/budget.py` | exact allocation budgets and guards |
@@ -236,7 +236,7 @@ rather than equality.
 | `envs/rendering/` | PyQt6/OpenGL renderer, objects, callbacks |
 | `envs/wrappers.py` | single-agent and observation-delay wrappers |
 | `examples/` | waypoint following, video, telemetry, synthetic tracks |
-| `tests/` | 567 collected tests across 43 `test_*.py` files |
+| `tests/` | 586 collected tests across 44 `test_*.py` files |
 | `docs/` | Sphinx user documentation plus behavioral measurements |
 
 ## Configuration model
@@ -338,6 +338,15 @@ padding. Pair manifolds share one state snapshot, and every global Jacobi sweep
 scatter-adds equal-and-opposite impulses/corrections before one native-state
 write per body. ``resolve_contacts`` preserves wall-then-pair ordering and unions
 fresh per-step events without freezing or latching agents.
+Global Frenet projection is the reset/teleport oracle; stepping has a separate
+fixed-shape local projection centered on each agent's own previous ``s`` and
+matching the mutable simulator's 10 m search window. ``EpisodeState`` keeps
+independent progress/lap references, finish splits and terminal latches.
+``BookkeepingParams`` keeps limits, enable flags and reward weights traced;
+built-in device rewards are per-agent, while a Gymnasium adapter must select
+the ego scalar. Episode status preserves EGO/ANY/ALL reduction and a distinct
+timeout truncation without mutating vehicle state. Pre- and post-transition
+clocks remain explicit because observations intentionally lag step info today.
 `DynamicsConfig` contains structural choices; `EpisodeParams` contains values
 that vary under environment-level `vmap` without recompilation. The functional
 step is still free-flight-only and does not yet integrate sensing/contact or
@@ -450,7 +459,7 @@ constraint spans subsystems.
 
 ## Tests and validation
 
-The current tree collects 567 tests across 43 `test_*.py` files. Most tests use
+The current tree collects 586 tests across 44 `test_*.py` files. Most tests use
 `unittest.TestCase` but run through pytest. Tests cover public behavior and
 low-level numerical contracts, including JIT/vmap/gradient properties,
 allocation guards, cache invalidation, observation aliasing, vector envs,

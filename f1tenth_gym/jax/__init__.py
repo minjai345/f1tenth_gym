@@ -2,7 +2,7 @@
 
 The functional environment is intentionally assembled in layers. This
 namespace exposes pure dynamics, control, state, reference-line, reset,
-geometry and clean-sensing kernels. Host-only map extraction lives in
+geometry, sensing, and episode kernels. Host-only map extraction lives in
 :mod:`f1tenth_gym.jax.preprocess`; importing this package does not load maps,
 construct a Gymnasium environment, or initialize rendering.
 """
@@ -26,6 +26,19 @@ from .core import (
     make_dynamics_state,
     rollout_dynamics,
     step_dynamics,
+)
+from .episode import (
+    BookkeepingParams,
+    BuiltinRewardMode,
+    EpisodeConfig,
+    EpisodeEvents,
+    EpisodeMetrics,
+    EpisodeState,
+    EpisodeStatus,
+    TerminationMode,
+    advance_episode,
+    reset_episode_state,
+    wrap_progress_delta,
 )
 from .contact import (
     ContactParams,
@@ -67,11 +80,13 @@ from .reset import (
     sample_reset_poses,
 )
 from .track import (
+    FrenetProjectionConfig,
     SplineTable,
     TileTable,
     TrackTable,
     WallTable,
     cartesian_to_frenet,
+    cartesian_to_frenet_local,
     evaluate_spline,
     frenet_to_cartesian,
     tile_candidates,
@@ -79,11 +94,19 @@ from .track import (
 
 __all__ = [
     "BodyParams",
+    "BookkeepingParams",
+    "BuiltinRewardMode",
     "ContactParams",
     "DynamicsConfig",
     "DynamicsParams",
     "DynamicsState",
     "EpisodeParams",
+    "EpisodeConfig",
+    "EpisodeEvents",
+    "EpisodeMetrics",
+    "EpisodeState",
+    "EpisodeStatus",
+    "FrenetProjectionConfig",
     "LongitudinalControlMode",
     "PairContactConfig",
     "PairTable",
@@ -94,15 +117,18 @@ __all__ = [
     "ScanState",
     "SplineTable",
     "SteeringControlMode",
+    "TerminationMode",
     "TileTable",
     "TrackTable",
     "WallTable",
     "WallContactConfig",
     "adapt_actions",
+    "advance_episode",
     "apply_contact_response",
     "beam_angles",
     "body_vertices",
     "cartesian_to_frenet",
+    "cartesian_to_frenet_local",
     "clean_scan",
     "collision_body_pose",
     "euler_step",
@@ -116,6 +142,7 @@ __all__ = [
     "opponent_ranges",
     "observed_scan",
     "reset_dynamics_state",
+    "reset_episode_state",
     "reset_scan_state",
     "resolve_wall_contacts",
     "resolve_contacts",
@@ -131,4 +158,5 @@ __all__ = [
     "tile_candidates",
     "transform_pose",
     "world_velocity",
+    "wrap_progress_delta",
 ]
