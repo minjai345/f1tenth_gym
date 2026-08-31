@@ -18,11 +18,13 @@ from f1tenth_gym.jax.batched import (
     BatchStep,
     PolicyField,
     PolicyLayout,
+    batch_action_bounds,
     flatten_joint_observation,
     policy_observation,
     reset_batch,
     reset_batch_from_poses,
     reset_batch_from_state,
+    scale_normalized_actions,
     select_ego_rewards,
     step_batch,
     step_batch_autoreset,
@@ -419,6 +421,146 @@ class TestBatchedResetAndStep(unittest.TestCase):
         self.assertTrue(
             bool(jnp.all(second.observation.state[..., 3] > first.observation.state[..., 3]))
         )
+
+
+class TestNormalizedActions(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.config, cls.tables, cls.params = _fixture()
+        keys = jax.random.split(jax.random.key(150), 3)
+        _observation, state = reset_batch(
+            keys,
+            cls.tables,
+            cls.config,
+            cls.params,
+            _randomization(cls.params),
+        )
+        dynamics = replace(
+            state.params.transition.dynamics,
+            s_min=jnp.asarray([-0.1, -0.2, -0.3], dtype=jnp.float32),
+            s_max=jnp.asarray([0.4, 0.5, 0.6], dtype=jnp.float32),
+            sv_min=jnp.asarray([-1.0, -2.0, -3.0], dtype=jnp.float32),
+            sv_max=jnp.asarray([1.5, 2.5, 3.5], dtype=jnp.float32),
+            a_max=jnp.asarray([4.0, 5.0, 6.0], dtype=jnp.float32),
+            v_min=jnp.asarray([-1.0, -1.5, -2.0], dtype=jnp.float32),
+            v_max=jnp.asarray([7.0, 8.0, 9.0], dtype=jnp.float32),
+        )
+        cls.state = replace(
+            state,
+            params=replace(
+                state.params,
+                transition=replace(state.params.transition, dynamics=dynamics),
+            ),
+        )
+
+    def _config(self, steering_mode, longitudinal_mode):
+        return replace(
+            self.config,
+            dynamics=replace(
+                self.config.dynamics,
+                steering_mode=steering_mode,
+                longitudinal_mode=longitudinal_mode,
+            ),
+        )
+
+    def test_all_controller_modes_use_their_active_parameter_bounds(self):
+        dynamics = self.state.params.transition.dynamics
+        steering_cases = (
+            (
+                SteeringControlMode.TARGET_ANGLE,
+                dynamics.s_min,
+                dynamics.s_max,
+            ),
+            (
+                SteeringControlMode.STEERING_RATE,
+                dynamics.sv_min,
+                dynamics.sv_max,
+            ),
+        )
+        longitudinal_cases = (
+            (
+                LongitudinalControlMode.TARGET_SPEED,
+                dynamics.v_min,
+                dynamics.v_max,
+            ),
+            (
+                LongitudinalControlMode.ACCELERATION,
+                -dynamics.a_max,
+                dynamics.a_max,
+            ),
+        )
+        for steering_mode, steering_low, steering_high in steering_cases:
+            for longitudinal_mode, longitudinal_low, longitudinal_high in (
+                longitudinal_cases
+            ):
+                with self.subTest(
+                    steering=steering_mode,
+                    longitudinal=longitudinal_mode,
+                ):
+                    config = self._config(steering_mode, longitudinal_mode)
+                    low, high = batch_action_bounds(self.state.params, config)
+                    expected_low = jnp.stack(
+                        (steering_low, longitudinal_low), axis=-1
+                    )
+                    expected_high = jnp.stack(
+                        (steering_high, longitudinal_high), axis=-1
+                    )
+                    self.assertEqual(low.shape, (3, 2, 2))
+                    self.assertEqual(high.shape, (3, 2, 2))
+                    np.testing.assert_array_equal(low[:, 0], expected_low)
+                    np.testing.assert_array_equal(high[:, 0], expected_high)
+                    np.testing.assert_array_equal(low[:, 1], expected_low)
+                    np.testing.assert_array_equal(high[:, 1], expected_high)
+
+    def test_scaling_is_jittable_exact_at_landmarks_and_does_not_clip(self):
+        config = self._config(
+            SteeringControlMode.TARGET_ANGLE,
+            LongitudinalControlMode.TARGET_SPEED,
+        )
+        bounds = jax.jit(batch_action_bounds, static_argnums=1)
+        low, high = bounds(self.state, config)
+        scale = jax.jit(scale_normalized_actions, static_argnums=2)
+        np.testing.assert_array_equal(
+            scale(-jnp.ones_like(low), self.state, config), low
+        )
+        np.testing.assert_array_equal(
+            scale(jnp.ones_like(high), self.state.params, config), high
+        )
+        np.testing.assert_array_equal(
+            scale(jnp.zeros_like(low), self.state, config),
+            0.5 * low + 0.5 * high,
+        )
+        np.testing.assert_array_equal(
+            scale(jnp.full_like(low, 2.0), self.state, config),
+            -0.5 * low + 1.5 * high,
+        )
+
+    def test_invalid_types_and_batch_shapes_fail_early(self):
+        with self.assertRaisesRegex(TypeError, "BatchState or CoreParams"):
+            batch_action_bounds(object(), self.config)
+        with self.assertRaisesRegex(TypeError, "CoreConfig"):
+            batch_action_bounds(self.state, object())
+        with self.assertRaisesRegex(ValueError, "one leading row"):
+            batch_action_bounds(self.params, self.config)
+
+        malformed_params = replace(
+            self.state.params,
+            transition=replace(
+                self.state.params.transition,
+                dynamics=replace(
+                    self.state.params.transition.dynamics,
+                    s_min=jnp.asarray(-0.1, dtype=jnp.float32),
+                ),
+            ),
+        )
+        with self.assertRaisesRegex(ValueError, "s_min has shape"):
+            batch_action_bounds(malformed_params, self.config)
+        with self.assertRaisesRegex(ValueError, "actions must have shape"):
+            scale_normalized_actions(
+                jnp.zeros((3, 2), dtype=jnp.float32),
+                self.state,
+                self.config,
+            )
 
 
 class TestSelectiveAutoReset(unittest.TestCase):

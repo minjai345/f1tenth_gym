@@ -6,9 +6,10 @@ loads host configuration and map types and performs device selection.
 
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass
 import math
-from typing import Any
+from typing import Any, Iterable
 
 import jax
 import jax.numpy as jnp
@@ -54,6 +55,7 @@ from .episode import (
 )
 from .geometry import BodyParams
 from .integrators import euler_step, rk4_step
+from .indexed import IndexedCoreTables, stack_core_tables
 from .lidar import ScanConfig, ScanParams
 from .pairs import PairContactConfig, PairTable
 from .preprocess import (
@@ -82,6 +84,110 @@ class CoreBundle:
     randomization: VehicleRandomizationParams
     device: Any
     track: Track
+
+
+@dataclass(frozen=True)
+class IndexedCoreBucket:
+    """One exact-shape map executable and its source-row routing metadata.
+
+    ``tracks`` and the leading table axis use the same bucket-local ordering.
+    ``source_indices`` identifies rows in the caller's original environment
+    batch, while ``map_indices`` selects one of those unique local maps for
+    each source row.  Callers can therefore compile once per bucket and stitch
+    observations or state leaves back with ``source_indices``.
+    """
+
+    tables: IndexedCoreTables
+    tracks: tuple[Track, ...]
+    source_indices: tuple[int, ...]
+    map_indices: jax.Array
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.tables, IndexedCoreTables):
+            raise TypeError("tables must be an IndexedCoreTables instance")
+        tracks = tuple(self.tracks)
+        if len(tracks) != self.tables.num_maps:
+            raise ValueError(
+                "tracks must contain one entry per indexed map, got "
+                f"{len(tracks)} and {self.tables.num_maps}"
+            )
+        if any(not isinstance(track, Track) for track in tracks):
+            raise TypeError("every bucket track must be a Track instance")
+        source_indices = tuple(int(index) for index in self.source_indices)
+        if not source_indices:
+            raise ValueError("an indexed core bucket must route at least one row")
+        if any(index < 0 for index in source_indices):
+            raise ValueError("source_indices must be non-negative")
+        if len(set(source_indices)) != len(source_indices):
+            raise ValueError("source_indices must be unique within a bucket")
+        map_indices = jnp.asarray(self.map_indices)
+        if map_indices.shape != (len(source_indices),):
+            raise ValueError(
+                "map_indices must have one entry per source row, got "
+                f"{map_indices.shape} and {len(source_indices)}"
+            )
+        if not jnp.issubdtype(map_indices.dtype, jnp.integer):
+            raise TypeError("map_indices must have an integer dtype")
+        host_map_indices = np.asarray(map_indices)
+        if (
+            host_map_indices.size
+            and (
+                host_map_indices.min() < 0
+                or host_map_indices.max() >= self.tables.num_maps
+            )
+        ):
+            raise ValueError(
+                f"map_indices must be in [0, {self.tables.num_maps})"
+            )
+        object.__setattr__(self, "tracks", tracks)
+        object.__setattr__(self, "source_indices", source_indices)
+        object.__setattr__(self, "map_indices", map_indices)
+
+
+@dataclass(frozen=True)
+class IndexedCoreBundle:
+    """Host-orchestrated exact-shape map buckets sharing one core topology."""
+
+    env_config: EnvConfig
+    config: CoreConfig
+    params: CoreParams
+    randomization: VehicleRandomizationParams
+    device: Any
+    buckets: tuple[IndexedCoreBucket, ...]
+    num_environments: int
+    num_unique_tracks: int
+
+    def __post_init__(self) -> None:
+        buckets = tuple(self.buckets)
+        num_environments = int(self.num_environments)
+        num_unique_tracks = int(self.num_unique_tracks)
+        if num_environments < 1:
+            raise ValueError("num_environments must be >= 1")
+        if num_unique_tracks < 1:
+            raise ValueError("num_unique_tracks must be >= 1")
+        if not buckets or any(
+            not isinstance(bucket, IndexedCoreBucket) for bucket in buckets
+        ):
+            raise TypeError(
+                "buckets must contain at least one IndexedCoreBucket"
+            )
+        routed = tuple(
+            source
+            for bucket in buckets
+            for source in bucket.source_indices
+        )
+        if sorted(routed) != list(range(num_environments)):
+            raise ValueError(
+                "bucket source_indices must partition every environment row "
+                "exactly once"
+            )
+        if sum(bucket.tables.num_maps for bucket in buckets) != num_unique_tracks:
+            raise ValueError(
+                "bucket map counts must equal num_unique_tracks"
+            )
+        object.__setattr__(self, "buckets", buckets)
+        object.__setattr__(self, "num_environments", num_environments)
+        object.__setattr__(self, "num_unique_tracks", num_unique_tracks)
 
 
 def _float32_tree(tree: Any):
@@ -653,6 +759,141 @@ def _put_on_device(tree: Any, device: Any):
     )
 
 
+def _core_table_signature(table: CoreTables) -> tuple:
+    """Return the exact complete-table leaf shape and dtype signature."""
+    if not isinstance(table, CoreTables):
+        raise TypeError("table must be a CoreTables instance")
+    return tuple(
+        (tuple(leaf.shape), np.dtype(leaf.dtype).str)
+        for leaf in jax.tree.leaves(table)
+    )
+
+
+def _deduplicate_tracks(
+    tracks: Iterable[Track],
+) -> tuple[tuple[Track, ...], tuple[int, ...]]:
+    """Validate rows and map repeated object identities to one host track."""
+    source_tracks = tuple(tracks)
+    if not source_tracks:
+        raise ValueError("at least one resolved Track is required")
+    for index, track in enumerate(source_tracks):
+        if not isinstance(track, Track):
+            raise TypeError(
+                f"tracks[{index}] must be a resolved Track instance"
+            )
+        if track.centerline is None or track.raceline is None:
+            raise ValueError(
+                f"tracks[{index}] must define both centerline and raceline"
+            )
+
+    unique_tracks: list[Track] = []
+    identity_to_index: dict[int, int] = {}
+    source_to_unique: list[int] = []
+    for track in source_tracks:
+        identity = id(track)
+        unique_index = identity_to_index.get(identity)
+        if unique_index is None:
+            unique_index = len(unique_tracks)
+            identity_to_index[identity] = unique_index
+            unique_tracks.append(track)
+        source_to_unique.append(unique_index)
+    return tuple(unique_tracks), tuple(source_to_unique)
+
+
+def build_indexed_core(
+    config: EnvConfig,
+    tracks: Iterable[Track],
+    *,
+    vehicle_params: VehicleParameters | None = None,
+    max_bytes: int = DEFAULT_MAX_BYTES,
+    custom_reward_fallback: BuiltinRewardMode | None = None,
+    target_device: str | jax.Device | None = None,
+) -> IndexedCoreBundle:
+    """Build exact-shape indexed-map buckets for one environment topology.
+
+    ``tracks`` has one entry per desired environment row. Repeated object
+    identities are preprocessed once. Distinct maps are then grouped by every
+    leaf shape and dtype in their complete ``CoreTables`` values, including
+    reset and pair topology as well as track geometry. Each returned bucket is
+    ready for the pure functions in :mod:`f1tenth_gym.jax.indexed`; callers
+    slice inputs by ``source_indices`` and pass ``map_indices`` unchanged.
+
+    Core topology, nominal parameters and randomization bounds are shared by
+    all buckets because this builder accepts one ``EnvConfig`` and one optional
+    episode vehicle draw. Heterogeneous configuration topologies belong in
+    separate calls.
+    """
+    _validate_host_surface(config)
+    unique_tracks, source_to_unique = _deduplicate_tracks(tracks)
+    randomization = build_vehicle_randomization_params(config)
+    core_config = build_core_config(
+        config,
+        custom_reward_fallback=custom_reward_fallback,
+    )
+    device = _core_device(config, target_device)
+
+    unique_tables = tuple(
+        build_core_tables(
+            config,
+            track,
+            vehicle_params=vehicle_params,
+            max_bytes=max_bytes,
+        )
+        for track in unique_tracks
+    )
+    params = build_core_params(
+        config,
+        unique_tables[0].track,
+        vehicle_params=vehicle_params,
+        custom_reward_fallback=custom_reward_fallback,
+    )
+
+    groups: dict[tuple, list[int]] = defaultdict(list)
+    for unique_index, table in enumerate(unique_tables):
+        groups[_core_table_signature(table)].append(unique_index)
+
+    buckets: list[IndexedCoreBucket] = []
+    for unique_indices in groups.values():
+        local_index = {
+            unique_index: index
+            for index, unique_index in enumerate(unique_indices)
+        }
+        source_indices = tuple(
+            source_index
+            for source_index, unique_index in enumerate(source_to_unique)
+            if unique_index in local_index
+        )
+        map_indices = np.asarray(
+            [
+                local_index[source_to_unique[source_index]]
+                for source_index in source_indices
+            ],
+            dtype=np.int32,
+        )
+        indexed_tables = stack_core_tables(
+            unique_tables[unique_index] for unique_index in unique_indices
+        )
+        buckets.append(
+            IndexedCoreBucket(
+                tables=_put_on_device(indexed_tables, device),
+                tracks=tuple(unique_tracks[index] for index in unique_indices),
+                source_indices=source_indices,
+                map_indices=jax.device_put(map_indices, device),
+            )
+        )
+
+    return IndexedCoreBundle(
+        env_config=config,
+        config=core_config,
+        params=_put_on_device(params, device),
+        randomization=_put_on_device(randomization, device),
+        device=device,
+        buckets=tuple(buckets),
+        num_environments=len(source_to_unique),
+        num_unique_tracks=len(unique_tracks),
+    )
+
+
 def build_core(
     config: EnvConfig,
     track: Track,
@@ -706,9 +947,12 @@ def build_core(
 
 __all__ = [
     "CoreBundle",
+    "IndexedCoreBucket",
+    "IndexedCoreBundle",
     "build_core",
     "build_core_config",
     "build_core_params",
     "build_core_tables",
+    "build_indexed_core",
     "build_vehicle_randomization_params",
 ]

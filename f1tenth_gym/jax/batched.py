@@ -15,6 +15,7 @@ from typing import Any, Callable
 import jax
 import jax.numpy as jnp
 
+from .controls import LongitudinalControlMode, SteeringControlMode
 from .environment import (
     CoreConfig,
     CoreMetrics,
@@ -113,6 +114,127 @@ RewardFn = Callable[
     [CoreObservation, jax.Array, EpisodeEvents, CoreMetrics, CoreParams],
     jax.Array,
 ]
+
+
+def _batched_core_params(
+    state_or_params: BatchState | CoreParams,
+    config: CoreConfig,
+) -> tuple[CoreParams, int]:
+    """Resolve and validate one row of core parameters per environment."""
+    if not isinstance(config, CoreConfig):
+        raise TypeError("config must be a CoreConfig")
+    if isinstance(state_or_params, BatchState):
+        params = state_or_params.params
+    elif isinstance(state_or_params, CoreParams):
+        params = state_or_params
+    else:
+        raise TypeError("state_or_params must be a BatchState or CoreParams")
+
+    timestep = jnp.asarray(params.transition.timestep)
+    if timestep.ndim != 1 or timestep.shape[0] < 1:
+        raise ValueError(
+            "params must have one leading row per environment; "
+            f"got timestep shape {timestep.shape}"
+        )
+    batch_size = timestep.shape[0]
+    dynamics = params.transition.dynamics
+    for name in (
+        "s_min",
+        "s_max",
+        "sv_min",
+        "sv_max",
+        "a_max",
+        "v_min",
+        "v_max",
+    ):
+        shape = jnp.shape(getattr(dynamics, name))
+        if shape != (batch_size,):
+            raise ValueError(
+                "state_or_params dynamics leaves must have one leading row "
+                f"per environment; {name} has shape {shape}, expected "
+                f"{(batch_size,)}"
+            )
+
+    if isinstance(state_or_params, BatchState):
+        expected_model = (
+            batch_size,
+            config.dynamics.num_agents,
+            config.dynamics.state_dim,
+        )
+        if state_or_params.core.dynamics.model.shape != expected_model:
+            raise ValueError(
+                "state.core.dynamics.model must have shape "
+                f"{expected_model}, got "
+                f"{state_or_params.core.dynamics.model.shape}"
+            )
+    return params, batch_size
+
+
+def batch_action_bounds(
+    state_or_params: BatchState | CoreParams,
+    config: CoreConfig,
+) -> tuple[jax.Array, jax.Array]:
+    """Return active physical action bounds as ``(B, A, 2)`` arrays.
+
+    Vehicle parameters vary across environments and are shared by all agents
+    in one environment. The selected controller modes determine whether each
+    action column represents a setpoint or a direct model effort.
+    """
+    params, batch_size = _batched_core_params(state_or_params, config)
+    dynamics = params.transition.dynamics
+
+    if config.dynamics.steering_mode is SteeringControlMode.TARGET_ANGLE:
+        steering_low = dynamics.s_min
+        steering_high = dynamics.s_max
+    elif config.dynamics.steering_mode is SteeringControlMode.STEERING_RATE:
+        steering_low = dynamics.sv_min
+        steering_high = dynamics.sv_max
+    else:
+        raise ValueError(
+            "unsupported steering control mode: "
+            f"{config.dynamics.steering_mode!r}"
+        )
+
+    if config.dynamics.longitudinal_mode is LongitudinalControlMode.TARGET_SPEED:
+        longitudinal_low = dynamics.v_min
+        longitudinal_high = dynamics.v_max
+    elif config.dynamics.longitudinal_mode is LongitudinalControlMode.ACCELERATION:
+        longitudinal_low = -dynamics.a_max
+        longitudinal_high = dynamics.a_max
+    else:
+        raise ValueError(
+            "unsupported longitudinal control mode: "
+            f"{config.dynamics.longitudinal_mode!r}"
+        )
+
+    low = jnp.stack((steering_low, longitudinal_low), axis=-1)
+    high = jnp.stack((steering_high, longitudinal_high), axis=-1)
+    shape = (batch_size, config.dynamics.num_agents, 2)
+    return (
+        jnp.broadcast_to(low[:, None, :], shape),
+        jnp.broadcast_to(high[:, None, :], shape),
+    )
+
+
+def scale_normalized_actions(
+    actions: jax.Array,
+    state_or_params: BatchState | CoreParams,
+    config: CoreConfig,
+) -> jax.Array:
+    """Affinely map normalized ``(B, A, 2)`` actions to physical commands.
+
+    The function deliberately does not clip. A policy should impose its own
+    bounded distribution (for example, a tanh transform); out-of-range inputs
+    are extrapolated by the same affine map so policy bugs remain visible.
+    """
+    low, high = batch_action_bounds(state_or_params, config)
+    actions = jnp.asarray(actions, dtype=low.dtype)
+    if actions.shape != low.shape:
+        raise ValueError(
+            f"actions must have shape {low.shape}, got {actions.shape}"
+        )
+    weight = (actions + 1.0) * 0.5
+    return (1.0 - weight) * low + weight * high
 
 
 def _key_batch_size(keys: jax.Array, name: str) -> int:
@@ -459,11 +581,13 @@ __all__ = [
     "BatchStep",
     "PolicyField",
     "PolicyLayout",
+    "batch_action_bounds",
     "flatten_joint_observation",
     "policy_observation",
     "reset_batch",
     "reset_batch_from_poses",
     "reset_batch_from_state",
+    "scale_normalized_actions",
     "select_ego_rewards",
     "step_batch",
     "step_batch_autoreset",
