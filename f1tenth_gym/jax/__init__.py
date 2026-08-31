@@ -51,6 +51,8 @@ from .environment import (
     CoreTables,
     observe_core,
     reset_core,
+    reset_core_from_poses,
+    reset_core_from_state,
     step_core,
 )
 from .contact import (
@@ -89,6 +91,7 @@ from .pairs import (
 from .reset import (
     ResetConfig,
     ResetTable,
+    model_state_from_poses,
     reset_dynamics_state,
     sample_reset_poses,
 )
@@ -156,12 +159,15 @@ __all__ = [
     "lidar_poses",
     "make_dynamics_state",
     "make_pair_table",
+    "model_state_from_poses",
     "evaluate_spline",
     "frenet_to_cartesian",
     "opponent_ranges",
     "observe_core",
     "observed_scan",
     "reset_core",
+    "reset_core_from_poses",
+    "reset_core_from_state",
     "reset_dynamics_state",
     "reset_episode_state",
     "reset_scan_state",

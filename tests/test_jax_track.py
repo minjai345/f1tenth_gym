@@ -19,9 +19,11 @@ from f1tenth_gym.jax import (
     evaluate_spline,
     frenet_to_cartesian,
     kinematic_single_track,
+    model_state_from_poses,
     reset_dynamics_state,
     rk4_step,
     sample_reset_poses,
+    single_track,
     tile_candidates,
 )
 from f1tenth_gym.jax.preprocess import (
@@ -315,6 +317,31 @@ class TestJaxReset(unittest.TestCase):
         np.testing.assert_array_equal(state.model[:, 4], poses[:, 2])
         np.testing.assert_array_equal(state.model[:, 2:4], 0.0)
         self.assertEqual(float(state.sim_time), 0.0)
+
+    def test_pose_conversion_has_one_exact_ks_and_st_layout(self):
+        poses = jnp.asarray(
+            [[1.0, 2.0, 0.3], [-4.0, 5.0, -0.6]], dtype=jnp.float32
+        )
+        for state_dim, dynamics_fn in (
+            (5, kinematic_single_track),
+            (7, single_track),
+        ):
+            with self.subTest(state_dim=state_dim):
+                config = DynamicsConfig(
+                    num_agents=2,
+                    state_dim=state_dim,
+                    dynamics_fn=dynamics_fn,
+                    integrator_fn=rk4_step,
+                )
+                convert = jax.jit(model_state_from_poses, static_argnums=1)
+                model = convert(poses, config)
+                expected = np.zeros((2, state_dim), dtype=np.float32)
+                expected[:, :2] = np.asarray(poses[:, :2])
+                expected[:, 4] = np.asarray(poses[:, 2])
+                np.testing.assert_array_equal(model, expected)
+
+        with self.assertRaisesRegex(ValueError, "poses must have shape"):
+            model_state_from_poses(poses[:1], config)
 
     def test_reset_preprocessing_validates_ranges(self):
         with self.assertRaisesRegex(ValueError, "max_dist"):

@@ -12,6 +12,7 @@ from .core import (
     DynamicsConfig,
     DynamicsState,
     EpisodeParams,
+    make_dynamics_state,
     step_dynamics,
 )
 from .dynamics import standardize_state
@@ -36,7 +37,12 @@ from .lidar import (
     reset_scan_state,
 )
 from .pairs import PairContactConfig, PairTable, resolve_contacts
-from .reset import ResetConfig, ResetTable, reset_dynamics_state
+from .reset import (
+    ResetConfig,
+    ResetTable,
+    model_state_from_poses,
+    reset_dynamics_state,
+)
 from .track import (
     FrenetProjectionConfig,
     TrackTable,
@@ -225,20 +231,16 @@ def _observed_scans(
     )
 
 
-def reset_core(
-    key: jax.Array,
+def _finish_reset(
+    bias_key: jax.Array,
+    scan_key: jax.Array,
+    dynamics: DynamicsState,
     tables: CoreTables,
     config: CoreConfig,
     params: CoreParams,
 ) -> tuple[CoreObservation, CoreState]:
-    """Sample and initialize one environment, including its first real scan."""
-    pose_key, bias_key, scan_key = jax.random.split(key, 3)
-    poses, dynamics = reset_dynamics_state(
-        pose_key,
-        tables.reset,
-        config.reset,
-        config.dynamics,
-    )
+    """Initialize every non-dynamics carry from one zero-clock model state."""
+    poses = dynamics.model[:, jnp.asarray((0, 1, 4))]
     frenet = _reset_frenet(poses, tables, config)
     episode = reset_episode_state(frenet, config.episode)
     scan_state = reset_scan_state(
@@ -264,6 +266,84 @@ def reset_core(
         observation_sim_time=dynamics.sim_time,
     )
     return observe_core(state), state
+
+
+def reset_core(
+    key: jax.Array,
+    tables: CoreTables,
+    config: CoreConfig,
+    params: CoreParams,
+) -> tuple[CoreObservation, CoreState]:
+    """Sample and initialize one environment, including its first real scan."""
+    pose_key, bias_key, scan_key = jax.random.split(key, 3)
+    _poses, dynamics = reset_dynamics_state(
+        pose_key,
+        tables.reset,
+        config.reset,
+        config.dynamics,
+    )
+    return _finish_reset(
+        bias_key,
+        scan_key,
+        dynamics,
+        tables,
+        config,
+        params,
+    )
+
+
+def reset_core_from_poses(
+    key: jax.Array,
+    poses: jax.Array,
+    tables: CoreTables,
+    config: CoreConfig,
+    params: CoreParams,
+) -> tuple[CoreObservation, CoreState]:
+    """Initialize from explicit CoG poses ``[x, y, yaw]`` with zero motion."""
+    poses = jnp.asarray(poses)
+    expected = (config.dynamics.num_agents, 3)
+    if poses.shape != expected:
+        raise ValueError(f"poses must have shape {expected}, got {poses.shape}")
+    poses = poses.astype(tables.reset.waypoints.dtype)
+    model = model_state_from_poses(poses, config.dynamics)
+    dynamics = make_dynamics_state(model, config.dynamics)
+    _pose_key, bias_key, scan_key = jax.random.split(key, 3)
+    return _finish_reset(
+        bias_key,
+        scan_key,
+        dynamics,
+        tables,
+        config,
+        params,
+    )
+
+
+def reset_core_from_state(
+    key: jax.Array,
+    model_state: jax.Array,
+    tables: CoreTables,
+    config: CoreConfig,
+    params: CoreParams,
+) -> tuple[CoreObservation, CoreState]:
+    """Initialize from complete native KS/ST state rows without alteration."""
+    model = jnp.asarray(model_state)
+    expected = (config.dynamics.num_agents, config.dynamics.state_dim)
+    if model.shape != expected:
+        raise ValueError(
+            f"model_state must have shape {expected}, got {model.shape}"
+        )
+    dynamics = make_dynamics_state(
+        model.astype(tables.reset.waypoints.dtype), config.dynamics
+    )
+    _pose_key, bias_key, scan_key = jax.random.split(key, 3)
+    return _finish_reset(
+        bias_key,
+        scan_key,
+        dynamics,
+        tables,
+        config,
+        params,
+    )
 
 
 def step_core(
@@ -360,5 +440,7 @@ __all__ = [
     "CoreTables",
     "observe_core",
     "reset_core",
+    "reset_core_from_poses",
+    "reset_core_from_state",
     "step_core",
 ]

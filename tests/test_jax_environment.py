@@ -53,8 +53,11 @@ from f1tenth_gym.jax import (
     make_dynamics_state,
     observe_core,
     reset_core,
+    reset_core_from_poses,
+    reset_core_from_state,
     reset_episode_state,
     rk4_step,
+    sample_reset_poses,
     single_track,
     standardize_state,
     step_core,
@@ -231,6 +234,97 @@ class TestCoreResetAndStep(unittest.TestCase):
         )(observation.state[:, jnp.asarray((0, 1, 4))])
         np.testing.assert_allclose(observation.frenet, expected_frenet, atol=1e-6)
         np.testing.assert_array_equal(observe_core(state).state, observation.state)
+
+    def test_pose_override_matches_sampled_reset_without_shifting_named_keys(self):
+        key = jax.random.key(301)
+        pose_key, _bias_key, _scan_key = jax.random.split(key, 3)
+        poses = sample_reset_poses(pose_key, self.tables.reset, self.config.reset)
+        sampled = reset_core(key, self.tables, self.config, self.params)
+        overridden = jax.jit(reset_core_from_poses, static_argnums=3)(
+            key,
+            poses,
+            self.tables,
+            self.config,
+            self.params,
+        )
+        for actual, expected in zip(
+            jax.tree.leaves(overridden), jax.tree.leaves(sampled), strict=True
+        ):
+            np.testing.assert_array_equal(actual, expected)
+
+    def test_full_state_override_preserves_native_motion_and_resets_carry(self):
+        _track, _lidar, config, tables, params = core_fixture(
+            num_agents=2,
+            state_dim=7,
+            contact_enabled=True,
+            noise_std=0.05,
+            range_bias_std=0.1,
+        )
+        model = np.asarray(
+            [
+                [1.0, 0.2, 0.12, 2.5, 0.3, -0.4, 0.08],
+                [1.0, 0.2, -0.2, -1.5, -0.7, 0.6, -0.09],
+            ],
+            dtype=np.float64,
+        )
+        observation, state = jax.jit(
+            reset_core_from_state, static_argnums=3
+        )(jax.random.key(302), model, tables, config, params)
+
+        np.testing.assert_array_equal(observation.state, model.astype(np.float32))
+        np.testing.assert_array_equal(
+            observation.standard_state, model.astype(np.float32)
+        )
+        np.testing.assert_array_equal(state.dynamics.control_input, 0.0)
+        np.testing.assert_array_equal(state.dynamics.steer_delay_buffer, 0.0)
+        np.testing.assert_array_equal(state.dynamics.throttle_delay_buffer, 0.0)
+        np.testing.assert_array_equal(state.dynamics.steer_delay_head, 0)
+        np.testing.assert_array_equal(state.dynamics.throttle_delay_head, 0)
+        np.testing.assert_array_equal(state.collisions, False)
+        np.testing.assert_array_equal(observation.collisions, 0.0)
+        self.assertEqual(float(state.dynamics.sim_time), 0.0)
+        self.assertEqual(int(state.episode.elapsed_steps), 0)
+        expected_frenet = jax.vmap(
+            lambda pose: cartesian_to_frenet(tables.track.centerline, pose)
+        )(observation.state[:, jnp.asarray((0, 1, 4))])
+        np.testing.assert_allclose(observation.frenet, expected_frenet, atol=1e-6)
+        np.testing.assert_array_equal(
+            state.episode.progress_previous_s, observation.frenet[:, 0]
+        )
+        np.testing.assert_array_equal(
+            state.episode.lap_previous_s, observation.frenet[:, 0]
+        )
+
+    def test_reset_overrides_validate_shapes_and_vmap_full_states(self):
+        with self.assertRaisesRegex(ValueError, "poses must have shape"):
+            reset_core_from_poses(
+                jax.random.key(303),
+                jnp.zeros((2, 3), dtype=jnp.float32),
+                self.tables,
+                self.config,
+                self.params,
+            )
+        with self.assertRaisesRegex(ValueError, "model_state must have shape"):
+            reset_core_from_state(
+                jax.random.key(304),
+                jnp.zeros((1, 7), dtype=jnp.float32),
+                self.tables,
+                self.config,
+                self.params,
+            )
+
+        keys = jax.random.split(jax.random.key(305), 3)
+        models = jnp.zeros((3, 1, 5), dtype=jnp.float32)
+        models = models.at[:, 0, 0].set(jnp.asarray([1.0, 2.0, 3.0]))
+        observations, states = jax.jit(
+            jax.vmap(
+                lambda key, model: reset_core_from_state(
+                    key, model, self.tables, self.config, self.params
+                )
+            )
+        )(keys, models)
+        np.testing.assert_array_equal(observations.state, models)
+        self.assertEqual(states.dynamics.model.shape, (3, 1, 5))
 
     def test_step_preserves_the_observation_info_clock_split(self):
         _observation, state = self.reset(

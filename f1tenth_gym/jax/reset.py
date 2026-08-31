@@ -78,6 +78,23 @@ def sample_reset_poses(
     return poses
 
 
+def model_state_from_poses(
+    poses: jax.Array,
+    dynamics_config: DynamicsConfig,
+) -> jax.Array:
+    """Build zero-motion native KS/ST rows from CoG ``[x, y, yaw]`` poses."""
+    poses = jnp.asarray(poses)
+    expected = (dynamics_config.num_agents, 3)
+    if poses.shape != expected:
+        raise ValueError(f"poses must have shape {expected}, got {poses.shape}")
+    model = jnp.zeros(
+        (dynamics_config.num_agents, dynamics_config.state_dim),
+        dtype=poses.dtype,
+    )
+    model = model.at[:, :2].set(poses[:, :2])
+    return model.at[:, 4].set(poses[:, 2])
+
+
 def reset_dynamics_state(
     key: jax.Array,
     table: ResetTable,
@@ -88,17 +105,14 @@ def reset_dynamics_state(
     if reset_config.num_agents != dynamics_config.num_agents:
         raise ValueError("reset and dynamics configs must use the same num_agents")
     poses = sample_reset_poses(key, table, reset_config)
-    model = jnp.zeros(
-        (dynamics_config.num_agents, dynamics_config.state_dim), dtype=poses.dtype
-    )
-    model = model.at[:, :2].set(poses[:, :2])
-    model = model.at[:, 4].set(poses[:, 2])
+    model = model_state_from_poses(poses, dynamics_config)
     return poses, make_dynamics_state(model, dynamics_config)
 
 
 __all__ = [
     "ResetConfig",
     "ResetTable",
+    "model_state_from_poses",
     "reset_dynamics_state",
     "sample_reset_poses",
 ]
