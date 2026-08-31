@@ -62,6 +62,11 @@ from .preprocess import (
     build_scan_params,
     build_track_table,
 )
+from .randomization import (
+    ACTIVE_VEHICLE_FIELDS,
+    ActiveVehicleParams,
+    VehicleRandomizationParams,
+)
 from .reset import ResetConfig
 from .track import FrenetProjectionConfig, TrackTable
 
@@ -74,6 +79,7 @@ class CoreBundle:
     config: CoreConfig
     tables: CoreTables
     params: CoreParams
+    randomization: VehicleRandomizationParams
     device: Any
     track: Track
 
@@ -83,6 +89,128 @@ def _float32_tree(tree: Any):
     return jax.tree.map(
         lambda value: np.asarray(value, dtype=np.float32),
         tree,
+    )
+
+
+def _active_vehicle_params(params: VehicleParameters) -> ActiveVehicleParams:
+    """Copy the supported host ABI prefix into finite float32 leaves."""
+    return ActiveVehicleParams(
+        **{
+            name: np.float32(getattr(params, name))
+            for name in ACTIVE_VEHICLE_FIELDS
+        }
+    )
+
+
+def _validate_active_values(
+    params: VehicleParameters,
+    *,
+    prefix: str,
+) -> None:
+    """Reject active values that can make supported kernels undefined."""
+    for name in ACTIVE_VEHICLE_FIELDS:
+        value = getattr(params, name)
+        if not math.isfinite(value):
+            raise ValueError(f"{prefix}.{name} must be finite, got {value!r}")
+
+    for name in ("lf", "lr", "m", "I", "v_switch", "width", "length"):
+        value = getattr(params, name)
+        if value <= 0.0:
+            raise ValueError(f"{prefix}.{name} must be > 0, got {value!r}")
+    for name in ("mu", "C_Sf", "C_Sr", "h", "a_max"):
+        value = getattr(params, name)
+        if value < 0.0:
+            raise ValueError(f"{prefix}.{name} must be >= 0, got {value!r}")
+    for lower_name, upper_name in (
+        ("s_min", "s_max"),
+        ("sv_min", "sv_max"),
+        ("v_min", "v_max"),
+    ):
+        lower = getattr(params, lower_name)
+        upper = getattr(params, upper_name)
+        if lower > upper:
+            raise ValueError(
+                f"{prefix}.{lower_name} must be <= {prefix}.{upper_name}, "
+                f"got {lower!r} > {upper!r}"
+            )
+
+
+def _validate_randomization_intervals(
+    low: VehicleParameters,
+    high: VehicleParameters,
+) -> None:
+    """Validate bounds and cross-field ordering for every possible draw."""
+    _validate_active_values(low, prefix="domain_randomization.low")
+    _validate_active_values(high, prefix="domain_randomization.high")
+    for name in ACTIVE_VEHICLE_FIELDS:
+        lower = getattr(low, name)
+        upper = getattr(high, name)
+        if lower > upper:
+            raise ValueError(
+                f"domain_randomization.low.{name} must be <= "
+                f"domain_randomization.high.{name}, got "
+                f"{lower!r} > {upper!r}"
+            )
+
+    # Fields are sampled independently. Endpoint validation alone does not
+    # prevent a draw whose lower limit is above its independently drawn upper
+    # limit, so require the complete intervals to remain ordered.
+    for lower_name, upper_name in (
+        ("s_min", "s_max"),
+        ("sv_min", "sv_max"),
+        ("v_min", "v_max"),
+    ):
+        lower = getattr(high, lower_name)
+        upper = getattr(low, upper_name)
+        if lower > upper:
+            raise ValueError(
+                "domain-randomization intervals must preserve "
+                f"{lower_name} <= {upper_name} for every draw, but "
+                f"high.{lower_name}={lower!r} > low.{upper_name}={upper!r}"
+            )
+
+
+def build_vehicle_randomization_params(
+    config: EnvConfig,
+) -> VehicleRandomizationParams:
+    """Build the pure-JAX active vehicle and per-episode DR bounds.
+
+    Disabled randomization and enabled-but-constant bounds collapse to one
+    nominal vehicle with a false enable flag. A varying configuration keeps
+    all twenty active bounds so dynamics and collision geometry are sampled
+    from one correlated vehicle draw on device.
+    """
+    if not isinstance(config, EnvConfig):
+        raise TypeError("config must be an EnvConfig instance")
+    if tuple(PARAMETER_ORDER[:20]) != ACTIVE_VEHICLE_FIELDS:
+        raise RuntimeError(
+            "the functional active-vehicle fields no longer match the first "
+            "20 entries of the VehicleParameters ABI"
+        )
+
+    nominal_host = config.params
+    _validate_active_values(nominal_host, prefix="params")
+    nominal = _active_vehicle_params(nominal_host)
+    randomization = config.domain_randomization_config
+    varying = bool(randomization.randomized_fields())
+    if not varying:
+        return VehicleRandomizationParams(
+            nominal=nominal,
+            low=nominal,
+            high=nominal,
+            enabled=np.bool_(False),
+        )
+
+    low_host = randomization.low
+    high_host = randomization.high
+    if low_host is None or high_host is None:  # guarded by host config
+        raise ValueError("enabled domain randomization requires low/high bounds")
+    _validate_randomization_intervals(low_host, high_host)
+    return VehicleRandomizationParams(
+        nominal=nominal,
+        low=_active_vehicle_params(low_host),
+        high=_active_vehicle_params(high_host),
+        enabled=np.bool_(True),
     )
 
 
@@ -375,6 +503,7 @@ def build_core_tables(
 
 
 def _validate_vehicle_draw(config: EnvConfig, params: VehicleParameters) -> None:
+    _validate_active_values(params, prefix="vehicle_params")
     randomization = config.domain_randomization_config
     if not randomization.randomized_fields():
         return
@@ -386,7 +515,7 @@ def _validate_vehicle_draw(config: EnvConfig, params: VehicleParameters) -> None
     # endpoints agree. Checking the complete supported surface prevents a caller
     # from smuggling an out-of-range fixed body or dynamics value past a table
     # sized from the configured bounds.
-    for name in PARAMETER_ORDER[:20]:
+    for name in ACTIVE_VEHICLE_FIELDS:
         value = getattr(params, name)
         low = getattr(low_params, name)
         high = getattr(high_params, name)
@@ -479,7 +608,29 @@ def build_core_params(
     )
 
 
-def _core_device(config: EnvConfig):
+def _platform_device(platform: str):
+    """Resolve the first available device for one explicit JAX platform."""
+    try:
+        devices = jax.devices(platform)
+    except (RuntimeError, ValueError) as exc:
+        raise RuntimeError(
+            f"requested JAX {platform!r} device is unavailable"
+        ) from exc
+    if not devices:
+        raise RuntimeError(f"requested JAX {platform!r} device is unavailable")
+    return devices[0]
+
+
+def _core_device(config: EnvConfig, target_device: Any = None):
+    if target_device is not None:
+        if isinstance(target_device, str):
+            return _platform_device(target_device)
+        if isinstance(target_device, jax.Device):
+            return target_device
+        raise TypeError(
+            "target_device must be a JAX platform string, jax.Device, or None"
+        )
+
     requested = []
     if config.collision_check is CollisionCheckMode.SEGMENT_CONTACT:
         requested.append(config.contact_config.device)
@@ -492,15 +643,7 @@ def _core_device(config: EnvConfig):
             f"different devices: {sorted(unique)}"
         )
     backend = requested[0] if requested else "cpu"
-    try:
-        devices = jax.devices(backend)
-    except RuntimeError as exc:
-        raise RuntimeError(
-            f"requested JAX {backend!r} device is unavailable"
-        ) from exc
-    if not devices:
-        raise RuntimeError(f"requested JAX {backend!r} device is unavailable")
-    return devices[0]
+    return _platform_device(backend)
 
 
 def _put_on_device(tree: Any, device: Any):
@@ -517,31 +660,27 @@ def build_core(
     vehicle_params: VehicleParameters | None = None,
     max_bytes: int = DEFAULT_MAX_BYTES,
     custom_reward_fallback: BuiltinRewardMode | None = None,
+    target_device: str | jax.Device | None = None,
 ) -> CoreBundle:
     """Build and place one complete functional core from a resolved track.
 
-    Varying domain-randomization bounds require an explicit sampled
-    ``vehicle_params`` until key-driven sampling is part of the core. Active
-    contact and LiDAR must select the same available JAX device. A host adapter
-    that executes a Python custom reward after conversion may opt into a
-    ``custom_reward_fallback`` whose compiled result it ignores.
+    With no explicit episode draw, ``params`` contains the nominal vehicle and
+    ``randomization`` carries device-sampleable active bounds. An explicit
+    ``vehicle_params`` remains useful for host-managed episodes and is checked
+    against the same bounds. Active contact and LiDAR must select the same
+    available JAX device unless authoritative ``target_device`` is supplied.
+    A host adapter that executes a Python custom reward after conversion may
+    opt into a ``custom_reward_fallback`` whose compiled result it ignores.
     """
     _validate_host_surface(config)
     if not isinstance(track, Track):
         raise TypeError("track must be a resolved Track instance")
-    if (
-        config.domain_randomization_config.randomized_fields()
-        and vehicle_params is None
-    ):
-        raise ValueError(
-            "domain randomization requires an explicit sampled vehicle_params "
-            "until the key-driven core sampler is composed"
-        )
+    randomization = build_vehicle_randomization_params(config)
     core_config = build_core_config(
         config,
         custom_reward_fallback=custom_reward_fallback,
     )
-    device = _core_device(config)
+    device = _core_device(config, target_device)
     tables = build_core_tables(
         config,
         track,
@@ -559,6 +698,7 @@ def build_core(
         config=core_config,
         tables=_put_on_device(tables, device),
         params=_put_on_device(params, device),
+        randomization=_put_on_device(randomization, device),
         device=device,
         track=track,
     )
@@ -570,4 +710,5 @@ __all__ = [
     "build_core_config",
     "build_core_params",
     "build_core_tables",
+    "build_vehicle_randomization_params",
 ]

@@ -2,12 +2,13 @@
 
 The functional environment is intentionally assembled in layers. This
 namespace exposes pure dynamics, control, state, reference-line, reset,
-geometry, sensing, and episode kernels. Host-only map extraction lives in
-:mod:`f1tenth_gym.jax.preprocess`, and ``EnvConfig`` conversion lives in the
-deep-import :mod:`f1tenth_gym.jax.builder`. Gymnasium observation packaging is
-also a deep import from :mod:`f1tenth_gym.jax.gym_observation`, and the host
-lifecycle is :mod:`f1tenth_gym.jax.gym_env`. Importing this package does not
-resolve maps, construct a Gymnasium environment, or initialize rendering.
+geometry, sensing, episode, randomization, and batched-rollout kernels.
+Host-only map extraction lives in :mod:`f1tenth_gym.jax.preprocess`, and
+``EnvConfig`` conversion lives in the deep-import
+:mod:`f1tenth_gym.jax.builder`. Gymnasium observation packaging is also a deep
+import from :mod:`f1tenth_gym.jax.gym_observation`, and the host lifecycle is
+:mod:`f1tenth_gym.jax.gym_env`. Importing this package does not resolve maps,
+construct a Gymnasium environment, or initialize rendering.
 """
 
 from .dynamics import (
@@ -56,6 +57,30 @@ from .environment import (
     reset_core_from_poses,
     reset_core_from_state,
     step_core,
+)
+from .randomization import (
+    ACTIVE_VEHICLE_FIELDS,
+    ActiveVehicleParams,
+    VehicleRandomizationParams,
+    domain_randomization_key,
+    replace_core_vehicle_params,
+    sample_core_params,
+    sample_vehicle_params,
+)
+from .batched import (
+    AutoResetBatchStep,
+    BatchState,
+    BatchStep,
+    PolicyField,
+    PolicyLayout,
+    flatten_joint_observation,
+    policy_observation,
+    reset_batch,
+    reset_batch_from_poses,
+    reset_batch_from_state,
+    select_ego_rewards,
+    step_batch,
+    step_batch_autoreset,
 )
 from .contact import (
     ContactParams,
@@ -111,6 +136,11 @@ from .track import (
 )
 
 __all__ = [
+    "ACTIVE_VEHICLE_FIELDS",
+    "ActiveVehicleParams",
+    "AutoResetBatchStep",
+    "BatchState",
+    "BatchStep",
     "BodyParams",
     "BookkeepingParams",
     "BuiltinRewardMode",
@@ -134,6 +164,8 @@ __all__ = [
     "LongitudinalControlMode",
     "PairContactConfig",
     "PairTable",
+    "PolicyField",
+    "PolicyLayout",
     "ResetConfig",
     "ResetTable",
     "ScanConfig",
@@ -146,6 +178,7 @@ __all__ = [
     "TrackTable",
     "WallTable",
     "WallContactConfig",
+    "VehicleRandomizationParams",
     "adapt_actions",
     "advance_episode",
     "apply_contact_response",
@@ -156,6 +189,8 @@ __all__ = [
     "clean_scan",
     "collision_body_pose",
     "euler_step",
+    "domain_randomization_key",
+    "flatten_joint_observation",
     "integrate_substeps",
     "kinematic_single_track",
     "lidar_poses",
@@ -170,6 +205,9 @@ __all__ = [
     "reset_core",
     "reset_core_from_poses",
     "reset_core_from_state",
+    "reset_batch",
+    "reset_batch_from_poses",
+    "reset_batch_from_state",
     "reset_dynamics_state",
     "reset_episode_state",
     "reset_scan_state",
@@ -181,13 +219,20 @@ __all__ = [
     "single_track",
     "standardize_state",
     "sample_reset_poses",
+    "sample_core_params",
+    "sample_vehicle_params",
+    "select_ego_rewards",
     "speed_control",
     "solve_pair_impulses",
     "steering_angle_control",
     "step_dynamics",
     "step_core",
+    "step_batch",
+    "step_batch_autoreset",
     "tile_candidates",
     "transform_pose",
+    "policy_observation",
+    "replace_core_vehicle_params",
     "world_velocity",
     "wrap_progress_delta",
 ]

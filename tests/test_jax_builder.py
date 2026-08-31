@@ -14,6 +14,7 @@ from f1tenth_gym.envs.action import (
 from f1tenth_gym.envs.collision_models import CollisionCheckMode
 from f1tenth_gym.envs.contact import ContactConfig
 from f1tenth_gym.envs.dynamic_models import (
+    PARAMETER_ORDER,
     DynamicModel,
     F1TENTH_VEHICLE_PARAMETERS,
 )
@@ -39,6 +40,7 @@ from f1tenth_gym.jax.builder import (
     build_core_config,
     build_core_params,
     build_core_tables,
+    build_vehicle_randomization_params,
 )
 from f1tenth_gym.jax.controls import (
     LongitudinalControlMode,
@@ -321,6 +323,28 @@ class TestUnsupportedHostSurface(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "different devices"):
             build_core(host, circle_track())
 
+        overridden = build_core(
+            host,
+            circle_track(),
+            target_device="cpu",
+        )
+        self.assertEqual(overridden.device.platform, "cpu")
+
+    def test_explicit_target_device_accepts_platform_or_device(self):
+        host = lightweight_config()
+        track = circle_track()
+        cpu = jax.devices("cpu")[0]
+
+        by_name = build_core(host, track, target_device="cpu")
+        by_object = build_core(host, track, target_device=cpu)
+
+        self.assertEqual(by_name.device.platform, "cpu")
+        self.assertIs(by_object.device, cpu)
+        with self.assertRaisesRegex(RuntimeError, "unavailable"):
+            build_core(host, track, target_device="not-a-jax-platform")
+        with self.assertRaisesRegex(TypeError, "target_device"):
+            build_core(host, track, target_device=object())
+
     def test_public_builders_require_an_env_config(self):
         with self.assertRaisesRegex(TypeError, "EnvConfig"):
             build_core_config(object())
@@ -340,9 +364,49 @@ class TestDomainRandomizationMapping(unittest.TestCase):
         )
         self.tables = build_core_tables(self.host, self.track)
 
-    def test_full_builder_requires_an_explicit_episode_draw(self):
-        with self.assertRaisesRegex(ValueError, "explicit sampled"):
-            build_core(self.host, self.track)
+    def test_full_builder_keeps_nominal_params_and_device_bounds(self):
+        bundle = build_core(self.host, self.track)
+
+        self.assertAlmostEqual(
+            float(bundle.params.transition.dynamics.m), VEHICLE.m
+        )
+        self.assertTrue(bool(bundle.randomization.enabled))
+        self.assertAlmostEqual(float(bundle.randomization.low.m), 3.0)
+        self.assertAlmostEqual(float(bundle.randomization.high.m), 4.0)
+
+    def test_active_vehicle_mapping_matches_the_host_abi_prefix(self):
+        spec = build_vehicle_randomization_params(self.host)
+        nominal = np.asarray(spec.nominal.as_array())
+        low = np.asarray(spec.low.as_array())
+        high = np.asarray(spec.high.as_array())
+        expected_nominal = np.asarray(
+            [getattr(VEHICLE, name) for name in PARAMETER_ORDER[:20]],
+            dtype=np.float32,
+        )
+        expected_low = np.asarray(
+            [
+                getattr(self.host.domain_randomization_config.low, name)
+                for name in PARAMETER_ORDER[:20]
+            ],
+            dtype=np.float32,
+        )
+        expected_high = np.asarray(
+            [
+                getattr(self.host.domain_randomization_config.high, name)
+                for name in PARAMETER_ORDER[:20]
+            ],
+            dtype=np.float32,
+        )
+
+        np.testing.assert_array_equal(nominal, expected_nominal)
+        np.testing.assert_array_equal(low, expected_low)
+        np.testing.assert_array_equal(high, expected_high)
+        self.assertEqual(nominal.dtype, np.dtype(np.float32))
+        self.assertEqual(low.dtype, np.dtype(np.float32))
+        self.assertEqual(high.dtype, np.dtype(np.float32))
+        self.assertTrue(np.isfinite(nominal).all())
+        self.assertTrue(np.isfinite(low).all())
+        self.assertTrue(np.isfinite(high).all())
 
     def test_sampled_draw_is_copied_and_validated_against_bounds(self):
         sampled = VEHICLE.with_updates(m=3.5)
@@ -357,7 +421,9 @@ class TestDomainRandomizationMapping(unittest.TestCase):
         self.assertIs(bundle.env_config, self.host)
         self.assertIs(bundle.track, self.track)
         self.assertAlmostEqual(float(bundle.params.transition.dynamics.m), 3.5)
-        for leaf in jax.tree.leaves((bundle.tables, bundle.params)):
+        for leaf in jax.tree.leaves(
+            (bundle.tables, bundle.params, bundle.randomization)
+        ):
             self.assertEqual(leaf.device, bundle.device)
 
         outside = VEHICLE.with_updates(m=4.1)
@@ -375,6 +441,39 @@ class TestDomainRandomizationMapping(unittest.TestCase):
                 self.tables.track,
                 vehicle_params=fixed_outside,
             )
+
+        unsafe = sampled.with_updates(I=np.nan)
+        with self.assertRaisesRegex(ValueError, "vehicle_params.I.*finite"):
+            build_core_params(
+                self.host,
+                self.tables.track,
+                vehicle_params=unsafe,
+            )
+
+    def test_active_bounds_are_finite_and_safe_for_every_draw(self):
+        low = VEHICLE.with_updates(s_min=-0.2, s_max=0.1)
+        high = VEHICLE.with_updates(s_min=0.2, s_max=0.3)
+        crossing = lightweight_config(
+            domain_randomization_config=DomainRandomizationConfig(
+                enabled=True,
+                low=low,
+                high=high,
+            )
+        )
+        with self.assertRaisesRegex(ValueError, "intervals.*s_min <= s_max"):
+            build_vehicle_randomization_params(crossing)
+
+        nonfinite_low = VEHICLE.with_updates(mu=np.nan, m=3.0)
+        nonfinite_high = VEHICLE.with_updates(mu=np.nan, m=4.0)
+        nonfinite = lightweight_config(
+            domain_randomization_config=DomainRandomizationConfig(
+                enabled=True,
+                low=nonfinite_low,
+                high=nonfinite_high,
+            )
+        )
+        with self.assertRaisesRegex(ValueError, "low.mu.*finite"):
+            build_vehicle_randomization_params(nonfinite)
 
     def test_contact_table_uses_the_widest_randomized_body(self):
         low = VEHICLE.with_updates(length=0.60, width=0.30)
@@ -404,6 +503,15 @@ class TestDomainRandomizationMapping(unittest.TestCase):
         )
         bundle = build_core(host, self.track)
         self.assertAlmostEqual(float(bundle.params.transition.dynamics.m), VEHICLE.m)
+        self.assertFalse(bool(bundle.randomization.enabled))
+        np.testing.assert_array_equal(
+            bundle.randomization.low.as_array(),
+            bundle.randomization.nominal.as_array(),
+        )
+        np.testing.assert_array_equal(
+            bundle.randomization.high.as_array(),
+            bundle.randomization.nominal.as_array(),
+        )
 
     def test_production_parameter_dtypes_do_not_follow_python_values(self):
         host = lightweight_config(params=VEHICLE.with_updates(m=4))
