@@ -282,6 +282,32 @@ class TestUnsupportedHostSurface(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "wall_tolerance_px"):
             build_core_config(tolerance)
 
+    def test_host_adapter_can_explicitly_supply_a_custom_reward_fallback(self):
+        custom = lightweight_config(
+            reward_config=RewardConfig(
+                mode=RewardMode.CUSTOM,
+                reward_fn=lambda *_args: 0.0,
+            )
+        )
+        bundle = build_core(
+            custom,
+            circle_track(),
+            custom_reward_fallback=BuiltinRewardMode.SURVIVAL,
+        )
+
+        self.assertIs(bundle.env_config, custom)
+        self.assertIs(
+            bundle.config.episode.reward_mode,
+            BuiltinRewardMode.SURVIVAL,
+        )
+        with self.assertRaisesRegex(ValueError, "only applies"):
+            build_core_config(
+                lightweight_config(),
+                custom_reward_fallback=BuiltinRewardMode.SURVIVAL,
+            )
+        with self.assertRaisesRegex(TypeError, "BuiltinRewardMode"):
+            build_core_config(custom, custom_reward_fallback="survival")
+
     def test_active_contact_and_scan_must_request_one_device(self):
         host = EnvConfig(
             contact_config=ContactConfig(device="gpu"),

@@ -155,13 +155,36 @@ def _termination(config: EnvConfig) -> TerminationMode:
     raise ValueError(f"unsupported agent termination mode: {selected!r}")
 
 
-def _reward(config: EnvConfig) -> BuiltinRewardMode:
+def _reward(
+    config: EnvConfig,
+    custom_reward_fallback: BuiltinRewardMode | None = None,
+) -> BuiltinRewardMode:
+    """Map the host reward mode to compiled dispatch.
+
+    A Python ``CUSTOM`` callback cannot execute in the functional transition.
+    Host adapters that run that callback after device-to-host conversion may
+    provide an explicit built-in fallback whose result they discard.  Keeping
+    this opt-in makes the standalone core builder reject callbacks by default
+    instead of silently changing their meaning.
+    """
+    if custom_reward_fallback is not None and not isinstance(
+        custom_reward_fallback, BuiltinRewardMode
+    ):
+        raise TypeError(
+            "custom_reward_fallback must be a BuiltinRewardMode or None"
+        )
     selected = config.reward_config.mode
+    if selected is not RewardMode.CUSTOM and custom_reward_fallback is not None:
+        raise ValueError(
+            "custom_reward_fallback only applies to RewardMode.CUSTOM"
+        )
     if selected is RewardMode.SURVIVAL:
         return BuiltinRewardMode.SURVIVAL
     if selected is RewardMode.PROGRESS:
         return BuiltinRewardMode.PROGRESS
     if selected is RewardMode.CUSTOM:
+        if custom_reward_fallback is not None:
+            return custom_reward_fallback
         raise ValueError(
             "RewardMode.CUSTOM is adapter-only; the functional core accepts "
             "built-in rewards or a future pure-JAX reward callable"
@@ -239,7 +262,11 @@ def _validate_host_surface(config: EnvConfig) -> None:
         )
 
 
-def build_core_config(config: EnvConfig) -> CoreConfig:
+def build_core_config(
+    config: EnvConfig,
+    *,
+    custom_reward_fallback: BuiltinRewardMode | None = None,
+) -> CoreConfig:
     """Translate validated host enums and topology into one static core config."""
     _validate_host_surface(config)
     state_dim, dynamics_fn = _dynamics(config)
@@ -283,7 +310,7 @@ def build_core_config(config: EnvConfig) -> CoreConfig:
             ego_index=config.ego_index,
             count_partial_first_lap=simulation.count_partial_first_lap,
             termination_mode=_termination(config),
-            reward_mode=_reward(config),
+            reward_mode=_reward(config, custom_reward_fallback),
         ),
         frenet=FrenetProjectionConfig(),
         contact_enabled=(
@@ -375,6 +402,7 @@ def build_core_params(
     track_table: TrackTable,
     *,
     vehicle_params: VehicleParameters | None = None,
+    custom_reward_fallback: BuiltinRewardMode | None = None,
 ) -> CoreParams:
     """Translate one nominal or already-sampled vehicle parameter episode.
 
@@ -382,7 +410,7 @@ def build_core_params(
     and enable flags to booleans independently of process-wide JAX x64 mode.
     """
     _validate_host_surface(config)
-    _reward(config)
+    _reward(config, custom_reward_fallback)
     if not isinstance(track_table, TrackTable):
         raise TypeError("track_table must be a TrackTable instance")
     explicit_draw = vehicle_params is not None
@@ -488,12 +516,15 @@ def build_core(
     *,
     vehicle_params: VehicleParameters | None = None,
     max_bytes: int = DEFAULT_MAX_BYTES,
+    custom_reward_fallback: BuiltinRewardMode | None = None,
 ) -> CoreBundle:
     """Build and place one complete functional core from a resolved track.
 
     Varying domain-randomization bounds require an explicit sampled
     ``vehicle_params`` until key-driven sampling is part of the core. Active
-    contact and LiDAR must select the same available JAX device.
+    contact and LiDAR must select the same available JAX device. A host adapter
+    that executes a Python custom reward after conversion may opt into a
+    ``custom_reward_fallback`` whose compiled result it ignores.
     """
     _validate_host_surface(config)
     if not isinstance(track, Track):
@@ -506,7 +537,10 @@ def build_core(
             "domain randomization requires an explicit sampled vehicle_params "
             "until the key-driven core sampler is composed"
         )
-    core_config = build_core_config(config)
+    core_config = build_core_config(
+        config,
+        custom_reward_fallback=custom_reward_fallback,
+    )
     device = _core_device(config)
     tables = build_core_tables(
         config,
@@ -518,6 +552,7 @@ def build_core(
         config,
         tables.track,
         vehicle_params=vehicle_params,
+        custom_reward_fallback=custom_reward_fallback,
     )
     return CoreBundle(
         env_config=config,

@@ -44,6 +44,7 @@ class TestPortability(unittest.TestCase):
     def test_root_jax_namespace_keeps_host_builders_as_deep_imports(self):
         roots = imported_roots(JAX / "__init__.py")
         self.assertNotIn(".builder", roots)
+        self.assertNotIn(".gym_env", roots)
         self.assertNotIn(".gym_observation", roots)
         self.assertNotIn(".preprocess", roots)
 
