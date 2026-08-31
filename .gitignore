@@ -172,9 +172,6 @@ cython_debug/
 
 **/maps/*
 
-# uv resolves this on demand; not tracked (see ISSUES_PLAN.md #4)
-uv.lock
-
 # XLA persistent compilation cache
 .jax_cache/
 

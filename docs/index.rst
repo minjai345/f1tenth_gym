@@ -93,6 +93,7 @@ https://f1tenth.org/build.html.
 
    dynamics
    tracks
+   jax_performance
    sim2real
    reproducibility
 

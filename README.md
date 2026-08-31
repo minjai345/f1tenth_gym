@@ -19,7 +19,7 @@ We recommend using [uv](https://docs.astral.sh/uv/) for fast, reliable dependenc
 ```bash
 git clone https://github.com/f1tenth/f1tenth_gym.git
 cd f1tenth_gym
-uv sync
+uv sync --frozen
 ```
 
 Then you can run a quick waypoint follow example by:
@@ -29,15 +29,15 @@ uv run python examples/waypoint_follow.py
 
 ### CPU-only machines
 
-`uv sync` installs GPU JAX by default. Without CUDA, skip the ~3 GB of GPU wheels:
+The default sync installs GPU JAX. Without CUDA, skip the ~3 GB of GPU wheels:
 
 ```bash
-uv sync --no-group gpu
+uv sync --frozen --no-group gpu
 ```
 
 Then run examples with:
 ```bash
-python examples/waypoint_follow.py
+uv run python examples/waypoint_follow.py
 ```
 
 ### Using Docker

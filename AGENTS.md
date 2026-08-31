@@ -5,9 +5,9 @@ work, then read the named source and tests before changing a subsystem. The
 published Sphinx pages are the user-facing source of truth for behavior and
 examples; this file focuses on architecture, invariants, and change seams.
 
-Baseline reviewed: Phase 6a on 2026-08-31, based on `c5484a6`. Treat counts
-and the known-rough-edges section as a snapshot and re-check them against
-`HEAD`.
+Baseline reviewed: Phase 6c on 2026-08-31, with the implementation based on
+`e573dfd`. Treat counts and the known-rough-edges section as a snapshot and
+re-check them against `HEAD`.
 
 ## What this repository is
 
@@ -23,7 +23,8 @@ more 1/10-scale race cars. It combines:
 - multi-agent reset strategies, rewards, termination, rendering, and wrappers;
 - deterministic seeding, actuator/sensor noise, and domain randomization;
 - a deep-import Gymnasium lifecycle over the functional JAX core;
-- shared-map device-batched JAX rollouts with selective auto-reset.
+- shared-map and exact-shape indexed-map device batches with selective
+  auto-reset, normalized action scaling and a native PPO validation job.
 
 The installed package is `f1tenth_gym` version `1.0.0dev`. Importing the
 package registers `f1tenth-v0`; normal use is the namespaced Gymnasium id
@@ -262,7 +263,8 @@ rather than equality.
 | `envs/contact/` | JAX manifolds/solvers and the NumPy/JAX adapter |
 | `f1tenth_gym/jax/` | pure functional reset/step plus dynamics, sensing, contact and episode layers |
 | `f1tenth_gym/jax/randomization.py` | pure correlated active-vehicle draws and core-param replacement |
-| `f1tenth_gym/jax/batched.py` | pure shared-map environment batching, auto-reset and policy layouts |
+| `f1tenth_gym/jax/batched.py` | pure shared-map batching, auto-reset, policy layouts and action scaling |
+| `f1tenth_gym/jax/indexed.py` | pure equal-shape indexed-map reset/step/auto-reset |
 | `f1tenth_gym/jax/builder.py` | host `EnvConfig`/`Track` conversion and device placement |
 | `f1tenth_gym/jax/gym_env.py` | direct-import Gym lifecycle, host RNG/rewards/info and rendering |
 | `f1tenth_gym/jax/gym_observation.py` | host Gym observation layout, spaces and device-to-NumPy packaging |
@@ -276,7 +278,9 @@ rather than equality.
 | `envs/rendering/` | PyQt6/OpenGL renderer, objects, callbacks |
 | `envs/wrappers.py` | single-agent and observation-delay wrappers |
 | `examples/` | waypoint following, video, telemetry, synthetic tracks |
-| `tests/` | 677 collected tests across 51 `test_*.py` files |
+| `validation/jax_native_ppo.py` | repository-only end-to-end native PPO correctness/training gate |
+| `benchmarks/phase6_rollout.py` | synchronized live-wall/sustained-contact CPU/GPU measurements |
+| `tests/` | 710 collected tests across 56 `test_*.py` files |
 | `docs/` | Sphinx user documentation plus behavioral measurements |
 
 ## Configuration model
@@ -362,9 +366,9 @@ The functional seam under `f1tenth_gym/jax/` owns traced vehicle and episode
 parameters, KS/ST dynamics, controllers, actuator noise/FIFOs and free-flight
 `lax.scan` rollouts. Host preprocessing produces fixed-shape spline,
 wall, tile and RL-reset tables; exact-shape buckets are the default for
-heterogeneous host layouts, with shared `Track` objects stored once. The first
-runtime batch adapter intentionally accepts one shared complete `CoreTables`;
-same-shape indexed maps are not yet a runtime surface. Clean exact scans use
+heterogeneous host layouts, with shared `Track` objects stored once. The shared
+runtime accepts one complete `CoreTables`; the indexed runtime stacks complete
+equal-shape tables and selects a map row per environment. Clean exact scans use
 masked ray-tile candidates, the current LiDAR
 mounting calculation and simultaneous all-edge opponent occlusion. Runtime
 ``range_max`` must not exceed the ray table's preprocessed reach. Observed
@@ -425,7 +429,17 @@ from the reset observation used as the next carry. Policy layouts produce
 ordered `(batch, agents, features)` arrays; centralized flattening and ego
 reward selection are explicit. Step and reset keys are separate, and a custom
 reward must be a pure per-environment JAX callable returning one value per
-agent.
+agent. `batch_action_bounds` derives each row's physical controller limits from
+its active parameters, and `scale_normalized_actions` maps bounded policy
+output without silently clipping it.
+
+`jax/indexed.py` keeps the same `BatchState` and transition contract while
+gathering every reset, track and pair-table leaf from `IndexedCoreTables` by a
+per-environment map index. Reset overrides, raw stepping and selective
+auto-reset all have indexed variants. A terminal observation remains separate
+from the reset observation, exactly as in the shared-map path. Pure traced
+entry points validate index shape/dtype; the host builder validates values
+before device execution.
 
 The deep-import `jax/gym_observation.py` resolves all current observation
 presets and gates from `EnvConfig`, shares finite-bound builders with the mutable
@@ -472,10 +486,21 @@ wall tolerance and, by default, mixed active component devices. An explicit
 `target_device` is authoritative and can also place a state-only batch away
 from the CPU fallback. The builder rejects ``CUSTOM`` rewards unless a host
 adapter supplies an explicit built-in fallback.
+`build_indexed_core` accepts one resolved track per environment row,
+preprocesses repeated object identities once, and buckets complete table
+pytrees by exact shape and dtype. Each `IndexedCoreBucket` carries bucket-local
+map indices and source-row routing; it never pads every map to the largest
+shape.
 `JaxF110Env` handles two host-only concerns before
 calling the builder: it runs Python `CUSTOM` rewards outside the core and
 supplies an already sampled shared DR value. Winding laps, `MAP_RANDOM_STATIC`,
 non-default active-contact wall tolerance and mixed devices remain unsupported.
+
+No JaxMARL adapter or dependency ships in v1. The official agent-dictionary,
+public-auto-reset API remains a possible future adapter for a concrete
+multi-policy consumer; do not vendor its base classes or make it a core
+contract. Current RL gates are the conventional SBX/SB3 Gymnasium path and the
+dense device-native PPO job.
 
 Keep the kernel/core modules pure JAX/array math, fixed-shape,
 jittable/vmappable, free of Gym and package-local imports, and free of NumPy
@@ -487,6 +512,17 @@ contract is enforced by
 JAX initializes multithreaded runtime state. Async Gymnasium vector workers
 must use a spawn context with LiDAR enabled; forking after JAX
 initialization can deadlock.
+
+Final Phase 6 measurements keep mutable/single-environment contact on CPU. On
+the reviewed RTX 3080, sustained two-agent wall contact remains faster on CPU
+through batch 48 and becomes faster on GPU from batch 64. Policy, sensing and
+optimizer work can move that crossover. Use `target_device` deliberately and
+consult `docs/jax_performance.rst` rather than encoding a universal threshold.
+The benchmark's state scenario is deliberately wall-free; LiDAR/contact/full
+use a deterministic 154-segment annular road. Contact/full start every body in
+a shallow wall overlap, and schema validation requires exactly
+`batch * agents * rollout_length` colliding-agent steps on both backends. Do
+not weaken that guard or publish empty-table sensor/contact throughput.
 
 ## Tracks, resets, and laps
 
@@ -590,7 +626,7 @@ constraint spans subsystems.
 
 ## Tests and validation
 
-The current tree collects 677 tests across 51 `test_*.py` files. Most tests use
+The current tree collects 710 tests across 56 `test_*.py` files. Most tests use
 `unittest.TestCase` but run through pytest. Tests cover public behavior and
 low-level numerical contracts, including JIT/vmap/gradient properties,
 allocation guards, cache invalidation, observation aliasing, vector envs,
@@ -619,7 +655,8 @@ behavior or shared infrastructure changes.
 skips its SB3 checker and eight-step SBX PPO update when
 `stable-baselines3`/`sbx-rl` are absent; run it in a separate environment with
 those packages installed rather than adding either trainer to runtime
-dependencies.
+dependencies. The Phase 6c release run passed both checks with
+Stable-Baselines3 2.9.0, SBX 0.28.0 and JAX 0.11.1 in an ephemeral environment.
 
 Documentation CI has three meaningful gates:
 
@@ -639,9 +676,10 @@ walk the large local virtualenv:
 uv run --no-sync flake8 f1tenth_gym tests examples --statistics
 ```
 
-`uv sync` includes the `dev`, `examples`, and `gpu` default groups. On a CPU
-machine use `uv sync --no-group gpu`. `uv.lock` is intentionally ignored in
-the reviewed baseline, so installs are resolved rather than lock-replayed.
+`uv sync` includes the `dev`, `examples`, and `gpu` default groups. The lock is
+committed; use `uv sync --frozen` for the reviewed environment, adding
+`--no-group gpu` on a CPU machine. CI and the CPU container use the same frozen
+resolution.
 
 ## Documentation map
 
@@ -653,6 +691,7 @@ the reviewed baseline, so installs are resolved rather than lock-replayed.
 - `docs/dynamics.rst`: models, state layouts, frame conversion, integration
 - `docs/tracks.rst`: maps, reference lines, Frenet semantics, synthetic tracks
 - `docs/rl.rst`: wrappers, flattening, reward modes, vector environments
+- `docs/jax_performance.rst`: native PPO, CPU/GPU throughput and placement data
 - `docs/sim2real.rst`: delays, noise, LiDAR offsets, domain randomization
 - `docs/reproducibility.rst`: reset seed tree and stream-shifting choices
 - `docs/rendering.rst`: render modes, clocks, video, callbacks

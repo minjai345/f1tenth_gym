@@ -40,7 +40,7 @@ jobs:
     - name: Install
       # Installs the project plus the dev group (pytest, flake8) and examples.
       # --no-group gpu skips ~3 GB of CUDA wheels the runner has no GPU for.
-      run: uv sync --no-group gpu
+      run: uv sync --frozen --no-group gpu
 
     - name: Test with pytest
       # rgb_array rendering defaults to the GL backend, which needs a display;
@@ -62,7 +62,7 @@ jobs:
     - name: Install
       # autodoc imports f1tenth_gym, so the project itself is needed; the docs
       # group carries Sphinx. No GPU on the runner, so skip the CUDA wheels.
-      run: uv sync --group docs --no-group gpu
+      run: uv sync --frozen --group docs --no-group gpu
 
     - name: Build docs (warnings are errors)
       run: uv run --no-sync python -m sphinx -W -b html docs docs/_build/html

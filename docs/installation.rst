@@ -16,12 +16,13 @@ Clone the repository and sync the environment with `uv <https://docs.astral.sh/u
 
    git clone https://github.com/f1tenth/f1tenth_gym.git
    cd f1tenth_gym
-   uv sync
+   uv sync --frozen
 
-``uv sync`` creates ``.venv/`` and installs the package (editable) with its runtime
-dependencies plus two default groups: ``dev`` (pytest, flake8, black, ...) and
-``examples`` (``moviepy``, ``shapely``, ``matplotlib`` — what the bundled scripts
-need beyond the library; skip them with ``uv sync --no-group examples``). Run
+``uv sync --frozen`` creates ``.venv/`` from the committed lock and installs the
+package (editable) with its runtime dependencies plus three default groups:
+``dev`` (pytest, flake8, black, ...), ``examples`` (``moviepy``, ``shapely``,
+``matplotlib`` — what the bundled scripts need beyond the library) and ``gpu``.
+Skip groups with, for example, ``uv sync --frozen --no-group examples``. Run
 subsequent commands through ``uv run``, e.g. ``uv run python your_script.py``.
 
 .. warning::
@@ -30,9 +31,9 @@ subsequent commands through ``uv run``, e.g. ``uv run python your_script.py``.
    ``pyproject.toml`` and ``uv.lock``. Install extra packages by adding them to
    the project rather than with ``uv pip install``, which the next sync undoes.
 
-``uv sync`` installs GPU JAX by default. On a machine without CUDA, add
-``--no-group gpu`` to skip roughly 3 GB of GPU wheels; plain ``jax`` remains a
-hard dependency either way and runs CPU-only.
+The default groups install GPU JAX. On a machine without CUDA, use ``uv sync
+--frozen --no-group gpu`` to skip roughly 3 GB of GPU wheels; plain ``jax``
+remains a hard dependency either way and runs CPU-only.
 
 Verify the install
 ------------------

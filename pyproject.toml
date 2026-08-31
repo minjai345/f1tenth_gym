@@ -75,6 +75,9 @@ examples = ["f1tenth_gym[video,trackgen]"]
 # opt in with `f1tenth_gym[cuda]`. Skip locally with `uv sync --no-group gpu`.
 gpu = ["f1tenth_gym[cuda]"]
 docs = ["sphinx>=7,<10", "sphinx-rtd-theme>=2"]
+# Isolated frozen environment for .github/workflows/lint.yml. These overlap
+# runtime/dev dependencies but avoid syncing the full project in that job.
+lint = ["flake8>=7.0.0,<8", "pyyaml>=5.3.1"]
 
 [tool.uv]
 default-groups = ["dev", "examples", "gpu"]

@@ -3,6 +3,10 @@
 The raster/EDT backend measured here was retired on 2026-08-29. Exact segment
 intersection is now the sole scanner. The former results remain as the
 reproducible rationale for that removal, not as a list of selectable backends.
+Performance comparisons to contact below also describe the historical mutable
+one-body-per-launch seam. See the
+[Phase 6 end-to-end measurements](jax_performance.rst) for current functional-batch
+CPU/GPU placement data.
 
 Every number here was produced on this tree. Machine: RTX 3080 Laptop, py3.13,
 jax 0.11.1, numpy 2.4. Ground truth throughout is exact ray-segment intersection
@@ -87,9 +91,9 @@ Per 1080-beam scan on Spielberg, 833 segments, k = 584 candidates per tile:
 
 The GPU total is nearly flat — 0.146 ms at N=1 against 0.225 ms at N=12 — so the
 per-agent cost collapses as the field grows: **7.09x faster than the EDT at 12 agents**.
-This is the opposite of the contact kernels, which are launch-bound and lose on GPU by
-10x; a scan is 1080 x 584 intersections, four orders of magnitude more work than a
-40-point contact solve, so the launch cost amortises.
+This was the opposite of the historical one-body-per-launch contact measurement,
+which lost on GPU by 10x. A scan is 1080 x 584 intersections, four orders of
+magnitude more work than a 40-point contact solve, so the launch cost amortises.
 
 Those batched figures need `_update_scans` to make one vmapped call. The mutable
 environment still loops per agent, so its path is the N=1 column.

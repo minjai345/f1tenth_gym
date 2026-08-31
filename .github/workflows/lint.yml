@@ -27,13 +27,19 @@ jobs:
         python-version: ${{ matrix.python-version }}
         enable-cache: true
 
-    # Neither check imports f1tenth_gym, so the project is never synced here:
-    # `--no-project --with` also keeps the ~3 GB CUDA stack out of this job.
+    # Keep this small job on the committed resolution without installing the
+    # project, examples, or the ~3 GB CUDA stack.
+    - name: Install lint tools
+      run: uv sync --frozen --only-group lint --no-install-project
+
     - name: Lint with flake8
       # exit-zero treats all errors as warnings; advisory only
-      run: uv run --no-project --with flake8 flake8 . --statistics --exit-zero
+      run: >-
+        uv run --no-sync flake8
+        f1tenth_gym tests examples benchmarks validation docs/style_lint.py
+        --statistics --exit-zero
 
     - name: Check the docs house style
       # gating since the Batch F rewrite (#21): the registries in docs/_style
       # ratchet, so this can only get stricter
-      run: uv run --no-project --with pyyaml python docs/style_lint.py --strict
+      run: uv run --no-sync python docs/style_lint.py --strict

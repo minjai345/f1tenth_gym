@@ -132,7 +132,10 @@ claimed for the Gym adapter.
 The optional ``tests/test_jax_rl_compat.py`` gate runs the Stable-Baselines3
 environment checker and one eight-step SBX PPO update when those two external
 packages are installed.  It skips in the base package environment, keeping
-trainer stacks out of runtime dependencies.
+trainer stacks out of runtime dependencies.  The Phase 6 release run passed
+both checks in an ephemeral environment with Stable-Baselines3 2.9.0, SBX 0.28.0
+and the locked JAX 0.11.1; those trainer versions are test evidence, not package
+constraints.
 
 Python callbacks and Gymnasium episode randomization deliberately stay on the
 host.  ``RewardMode.CUSTOM`` is called after the packaged observation and final
@@ -160,11 +163,12 @@ of a device-native throughput claim.
 Run a device-native batch
 -------------------------
 
-The pure batch adapter adds an environment axis without changing the physics
-core.  One compiled batch has one ``CoreConfig`` and one shared map table;
-state and episode parameters have an independent leading row for every
-environment.  Build that shared bundle on the requested device, then close it
-over compiled reset and step functions:
+The pure batch adapters add an environment axis without changing the physics
+core.  The shared-map entry points below use one ``CoreConfig`` and one map
+table; state and episode parameters have an independent leading row for every
+environment.  The indexed variant described afterward selects among stacked
+equal-shape tables.  Build a shared bundle on the requested device, then close
+it over compiled reset and step functions:
 
 .. code-block:: python
 
@@ -177,6 +181,7 @@ over compiled reset and step functions:
        PolicyLayout,
        policy_observation,
        reset_batch,
+       scale_normalized_actions,
        step_batch_autoreset,
    )
    from f1tenth_gym.jax.builder import build_core
@@ -215,7 +220,8 @@ over compiled reset and step functions:
    policy_input = policy_observation(observation, bundle.config, layout)
    assert policy_input.shape == (batch_size, cfg.num_agents, 5)
 
-   actions = jnp.zeros((batch_size, cfg.num_agents, 2), dtype=jnp.float32)
+   normalized = jnp.zeros((batch_size, cfg.num_agents, 2), dtype=jnp.float32)
+   actions = scale_normalized_actions(normalized, state, bundle.config)
    step_keys = jax.random.split(jax.random.fold_in(root, 1), batch_size)
    next_reset_keys = jax.random.split(jax.random.fold_in(root, 2), batch_size)
    transition = step(step_keys, next_reset_keys, state, actions)
@@ -241,6 +247,16 @@ decentralized ``(batch, agents, features)`` policy view into a centralized
 environment and receives ``(observation, actions, events, metrics, params)``;
 it must return one value per agent using JAX operations only.
 
+Policy distributions usually produce normalized actions.  The helper
+``batch_action_bounds(state, bundle.config)`` returns the active
+``(batch, agents, 2)`` physical limits, including each environment's current
+domain-randomization draw.  ``scale_normalized_actions`` maps ``-1`` and ``1``
+to those limits and zero to their midpoint.  It deliberately does not clip:
+use a bounded transform such as ``tanh`` in the policy so an invalid output is
+not hidden.  Target-angle versus steering-rate control selects ``s_min/s_max``
+versus ``sv_min/sv_max``; target-speed versus acceleration selects
+``v_min/v_max`` versus ``-a_max/a_max``.
+
 ``bundle.randomization`` contains the finite active vehicle bounds.  Each reset
 key draws one parameter row shared by every agent in that environment, and
 different environment rows can draw different physics without recompilation.
@@ -249,12 +265,43 @@ folded key keeps pose and sensor reset streams unchanged when randomization is
 toggled.  The contact table is already sized for the configured full bound
 envelope; substituting wider bounds at runtime is unsupported.
 
-The first batching surface intentionally supports one shared map per compiled
-batch.  Equal-shape indexed maps and orchestration across exact-shape map
-buckets remain host-adapter work.  ``target_device`` is authoritative when
-provided; without it, the builder follows active LiDAR/contact device settings
-and otherwise selects CPU.  No throughput claim follows from the transform
-tests alone—benchmark the final policy/update program on its target hardware.
+``build_indexed_core(cfg, tracks)`` accepts one resolved ``Track`` per
+environment row.  It preprocesses repeated object identities once, groups
+unique complete reset/track/pair tables by exact leaf shape, and returns one
+``IndexedCoreBucket`` per compilation shape.  Within a bucket,
+``reset_indexed_batch`` and ``step_indexed_batch`` select maps with the supplied
+``map_indices`` on device.  Across buckets, slice inputs by ``source_indices``,
+compile once per bucket, and stitch same-shaped outputs back into source order.
+This keeps small maps out of a globally padded worst-map table.  Direct callers
+must pass in-range indices: traced entry points validate shape and integer dtype,
+while ``build_indexed_core`` is the host boundary that validates values.
+
+``target_device`` is authoritative when provided; without it, the builder
+follows active LiDAR/contact device settings and otherwise selects CPU.  The
+repository-only ``validation/jax_native_ppo.py`` job exercises a complete
+rollout, termination-correct GAE and PPO update without making a trainer part of
+the package API.  ``benchmarks/phase6_rollout.py`` separately measures compile
+latency, synchronized steady throughput and available allocator memory for
+state, LiDAR, contact, full and indexed-map scenarios.  See
+:doc:`jax_performance` for the measured baseline, workload definitions and
+command pattern.
+
+JaxMARL status
+--------------
+
+An official-JaxMARL adapter is deliberately not shipped in this release.  Its
+current API uses observations, actions, rewards and done values in
+agent-keyed dictionaries, and its public ``step`` automatically resets when
+``done["__all__"]`` is true.  The native batch above instead keeps dense agent
+arrays and exposes terminal and reset observations separately, which preserves
+timeout targets and serves the current SBX/SB3 and native-PPO goals without a
+second framework dependency.
+
+Revisit the adapter when a concrete multi-policy IPPO or MAPPO consumer needs
+that interface.  It should depend on the `official JaxMARL package
+<https://github.com/FLAIROx/JaxMARL>`_, translate at the adapter boundary
+and pass a continuous multi-agent training gate; copied base classes or spaces
+will not be vendored into this package.
 
 Choose what the policy sees
 ---------------------------

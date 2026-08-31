@@ -58,10 +58,9 @@ ENV UV_PYTHON=3.12 \
 WORKDIR /f1tenth_gym
 COPY . /f1tenth_gym
 
-# Not --frozen/--locked: both hard-fail when uv.lock is absent, and it is
-# gitignored. --no-group gpu drops the CUDA stack that `gpu` in default-groups
-# would otherwise pull.
-RUN uv sync --no-group gpu
+# Reproduce the committed dependency snapshot. --no-group gpu drops the CUDA
+# stack that `gpu` in default-groups would otherwise pull into this CPU image.
+RUN uv sync --frozen --no-group gpu
 
 ENV VIRTUAL_ENV=/opt/venv
 ENV PATH="/opt/venv/bin:$PATH"

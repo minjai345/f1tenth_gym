@@ -148,6 +148,14 @@ host construction and observation packaging are listed below.
    f1tenth_gym.jax.reset_batch_from_state
    f1tenth_gym.jax.step_batch
    f1tenth_gym.jax.step_batch_autoreset
+   f1tenth_gym.jax.batch_action_bounds
+   f1tenth_gym.jax.scale_normalized_actions
+   f1tenth_gym.jax.stack_core_tables
+   f1tenth_gym.jax.reset_indexed_batch
+   f1tenth_gym.jax.reset_indexed_batch_from_poses
+   f1tenth_gym.jax.reset_indexed_batch_from_state
+   f1tenth_gym.jax.step_indexed_batch
+   f1tenth_gym.jax.step_indexed_batch_autoreset
    f1tenth_gym.jax.policy_observation
    f1tenth_gym.jax.flatten_joint_observation
    f1tenth_gym.jax.select_ego_rewards
@@ -165,6 +173,8 @@ host construction and observation packaging are listed below.
 .. automodule:: f1tenth_gym.jax.randomization
 
 .. automodule:: f1tenth_gym.jax.batched
+
+.. automodule:: f1tenth_gym.jax.indexed
 
 .. automodule:: f1tenth_gym.jax.episode
 
@@ -194,7 +204,10 @@ with their source host configuration and track.
 .. autosummary::
 
    f1tenth_gym.jax.builder.CoreBundle
+   f1tenth_gym.jax.builder.IndexedCoreBucket
+   f1tenth_gym.jax.builder.IndexedCoreBundle
    f1tenth_gym.jax.builder.build_core
+   f1tenth_gym.jax.builder.build_indexed_core
    f1tenth_gym.jax.builder.build_core_config
    f1tenth_gym.jax.builder.build_core_tables
    f1tenth_gym.jax.builder.build_core_params

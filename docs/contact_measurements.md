@@ -1,8 +1,14 @@
-# Contact system — measured numbers
+# Contact system — historical measured numbers
 
-Every number here was produced on this tree by the command shown. This file is the
-only surviving record of the contact measurements; the working plan it grew out of
-has been deleted.
+> **Historical pre-device-batch record.** Every number here was produced by the
+> command shown, before the functional environment batch existed. GPU conclusions
+> below describe the old mutable seam's one-body-per-launch contact call or an
+> isolated solver microbenchmark; they are not current whole-transition placement
+> guidance. See the [Phase 6 end-to-end measurements](jax_performance.rst) for the
+> live functional batch, sustained-contact crossover, and current decision.
+
+This file preserves the measurements behind the contact implementation; the working
+plan it grew out of has been deleted.
 
 Machine: RTX 3080 Laptop, py3.13, jax 0.11.1, numpy 2.4, scikit-image 0.26.
 
@@ -370,7 +376,7 @@ circle test would skip only 62/46/41% of steps, cost 21 us of numpy each time, a
 save at most 0.147 ms. Segment AABBs are looser still — a tile-occupancy test skips
 just 0.6% of steps, because one long diagonal wall has a huge axis-aligned box.
 
-## Device choice (verified against three adversarial attacks)
+## Historical mutable-seam device choice
 
 The GPU cost is **not** a flat launch fee. It is roughly
 
@@ -381,8 +387,9 @@ because `resolve` is a `lax.fori_loop` of `solver_iterations` sweeps and
 tiny sequential kernels: ~21.5 us per sweep on GPU against ~2 us on CPU. Flat in the
 number of bodies, rising in configuration.
 
-Consequence: every dial a user can turn to add work adds *depth*, which makes the
-GPU relatively worse, never better. Measured at one body per launch:
+Within that one-body-per-launch implementation, every dial a user can turn to add
+work adds *depth*, which makes the GPU relatively worse, never better. Measured at
+one body per launch:
 
 | config | cpu | gpu | ratio |
 |---|---|---|---|
@@ -393,9 +400,10 @@ GPU relatively worse, never better. Measured at one body per launch:
 | `tile_size=8.0` (k=83) | 0.188 ms | 2.235 ms | 11.9x |
 
 The only axis that amortises the sweep chain is **width** — bodies per launch — and
-nothing in the shipped code populates it. Crossover for a single vmapped launch at
-default settings is **~52 bodies** (cpu 1.140 ms at 48, 2.759 ms at 56; gpu flat
-1.39-1.48 ms). The knee is a cache/threading cliff on the CPU side, not a slope change.
+nothing in the then-shipped mutable code populated it. This isolated solver
+microbenchmark crossed over at **~52 bodies** (cpu 1.140 ms at 48, 2.759 ms at 56;
+gpu flat 1.39-1.48 ms). It is not the crossover of the later complete functional
+transition. The knee is a cache/threading cliff on the CPU side, not a slope change.
 
 `_resolve_contacts` resolves one body per launch, so no `num_agents` reaches it:
 
@@ -411,7 +419,7 @@ args and one `block_until_ready` at the end, per-call GPU cost is still ~1.0 ms 
 and 77% of a call is *host* dispatch, which serializes in a Python loop exactly as
 device time does. Per call the GPU path also burns ~10x more host CPU than the CPU path.
 
-### Batching agents (not yet implemented)
+### Batching agents (not yet implemented in the measured seam)
 
 One vmapped launch over an env's agents against N sequential launches, on CPU:
 
@@ -422,8 +430,11 @@ One vmapped launch over an env's agents against N sequential launches, on CPU:
 | 16 | 1.608 ms | 0.433 ms | 3.7x |
 | 32 | 3.267 ms | 0.792 ms | 4.1x |
 
-Worth doing as a *CPU* optimisation. It does not enable the GPU: even a perfectly
-batched single env needs ~52 bodies, and nobody races 52 F1TENTH cars. Note
+These measurements justified a *CPU* optimisation, but did not establish GPU
+viability for the mutable single-environment seam: even a perfectly batched single
+environment needed ~52 bodies in the isolated solve. The later functional runtime
+batches bodies across environments and must be judged by the end-to-end Phase 6
+measurements. Note
 `_resolve_agent_contacts` cannot be vmapped as written — it recomputes each body's
 vertices after every resolved pair, so pair resolution is order-dependent and its
 launch count stays O(N^2).
@@ -440,8 +451,8 @@ side (same segment arrays, same tile table) but each `F110Simulator` still build
 own `WallContact` with the table baked in as a traced constant: `same jitted callable:
 False`. Sync sub-envs step in a Python loop; async sub-envs are separate processes.
 
-That last point is also why a GPU default would be hazardous: `AsyncVectorEnv` forks K
-worker processes, and JAX preallocates a large fraction of VRAM *per process*.
+That last point is also why a GPU default for the mutable `AsyncVectorEnv` seam would
+be hazardous: it forks K worker processes, and JAX can reserve VRAM *per process*.
 
 ## Phase 8 — gradient surrogate
 

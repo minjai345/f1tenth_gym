@@ -2,9 +2,10 @@
 
 A framework-neutral, pure-JAX simulation core that can run thousands of
 environments in one compiled accelerator program. The existing Gymnasium API
-remains the compatibility surface for SBX/SB3 and current users; optional
-adapters expose device-batched and JaxMARL-style APIs without making either
-framework the simulation contract.
+remains the compatibility surface for SBX/SB3 and current users; the shipped
+device-batched API does not make a training framework the simulation contract.
+An official-JaxMARL adapter remains a possible future consumer, not a v1
+dependency.
 
 Working branch `dev-features` · merge source `jax/main` exactly once ·
 `jax-backend` is read-only research material · supported dynamics are KS-CoG
@@ -22,7 +23,7 @@ host-side configuration and track preprocessing
         -> pure reset/step functions
              -> Gymnasium adapter       (SBX/SB3/current users)
              -> device-batched adapter  (vmap + scan training)
-             -> optional JaxMARL adapter
+             -> optional JaxMARL adapter (deferred beyond v1)
 ```
 
 The pure core owns state transition, sensing, contact, progress and per-agent
@@ -170,8 +171,9 @@ correctness reference during migration. A JAX-backed Gymnasium adapter must:
 - preserve `terminated` versus `truncated` and the documented `info` values.
 
 It also preserves native action shape/order, controller semantics and the fact
-that `step()` validates but does not clip an out-of-space action. Normalized
-`[-1, 1]` actions, when useful to an RL library, belong in a wrapper.
+that `step()` validates but does not clip an out-of-space action. Gym-facing
+normalized `[-1, 1]` actions belong in a wrapper; device-native policies use a
+pure scaling helper inside their compiled rollout.
 
 A normal Gymnasium adapter introduces Python dispatch and host/device transfer.
 It proves ecosystem compatibility, not maximum simulator throughput. A separate
@@ -200,6 +202,17 @@ JaxMARL is an optional consumer of the functional core, not its base class.
 
 This boundary also keeps third-party Apache-2.0 code and its attribution out of
 the MIT package unless the official dependency is deliberately enabled.
+
+**v1 decision:** no JaxMARL adapter is shipped. The official API currently
+translates arrays to agent-keyed dictionaries and auto-resets its public
+``step`` on ``done["__all__"]``. The dense native batch already supplies the
+current multi-agent rollout contract, preserves terminal observations
+separately from selective reset observations and passes a complete PPO gate.
+Adding the external environment/algorithm dependency stack without a concrete
+multi-policy consumer would not improve that core. Revisit this decision for a
+specific IPPO/MAPPO integration, depend on the official package and run the
+continuous multi-agent smoke gate described below; do not vendor its base
+classes or spaces.
 
 ### Collision response and episode termination
 
@@ -740,16 +753,18 @@ pass independently.
 
 ### Phase 6 — batched training and performance decisions
 
-- Run a complete device-native PPO training job; imported training code is a
+- [x] Run a complete device-native PPO training job; imported training code is a
   starting pattern, not a frozen implementation.
-- Keep the SBX smoke/compatibility job separate from the native throughput job.
-- If JaxMARL ships, run at least one continuous multi-agent IPPO/MAPPO smoke job.
-- Benchmark batch sizes, agents, maps and beam counts with anti-DCE outputs,
+- [x] Keep the SBX smoke/compatibility job separate from the native throughput
+  job.
+- [x] Evaluate JaxMARL separately. It does not ship in v1; if a later release
+  adds it, run at least one continuous multi-agent IPPO/MAPPO smoke job.
+- [x] Benchmark batch sizes, agents, maps and beam counts with anti-DCE outputs,
   synchronization, compile time, steady-state throughput and peak memory.
-- Re-measure contact CPU/GPU behavior on the final batched transition before
+- [x] Re-measure contact CPU/GPU behavior on the final batched transition before
   changing any default.
-- Commit `uv.lock` and make CI/images use the locked environment once the JAX,
-  Flax/Chex and optional training dependency set is final.
+- [x] Commit `uv.lock` and make CI/images use the locked environment once the
+  runtime JAX and optional dependency decision is final.
 
 *Done when:* training completes, numerical gates pass at scale, memory and
 throughput are published, and defaults follow the measured final program.
@@ -794,6 +809,85 @@ throughput are published, and defaults follow the measured final program.
   and any optional official-JaxMARL adapter remain open. JaxMARL should wait
   until the native training/update contract and intended multi-policy mode are
   proven.
+
+#### Phase 6b implementation record — 2026-08-31
+
+- ``batch_action_bounds`` derives physical ``(batch, agents, 2)`` limits from
+  each environment's active traced vehicle parameters and the compiled
+  controller modes. ``scale_normalized_actions`` maps bounded policy output to
+  those limits without clipping, so domain-randomized rows do not silently use
+  nominal action scales.
+- The repository-only ``validation/jax_native_ppo.py`` job is a fresh JAX-only
+  PPO implementation, not a packaged trainer and not copied from either old JAX
+  branch. It keeps pre-tanh latent actions and joint log probabilities, stops
+  rollout gradients, clips policy/value updates and the global gradient norm,
+  and uses the terminal transition observation for timeout bootstrapping.
+  Natural termination zero-bootstraps; both termination and truncation stop GAE
+  recurrence across an auto-reset boundary.
+- The fixed CPU gate completed 98,304 environment steps reproducibly. Its
+  deterministic fixed-key evaluation improved the bounded speed objective from
+  ``0.0`` to ``0.924272`` and mean speed from ``0.0`` to ``2.964633 m/s`` for a
+  ``3 m/s`` target. The first compiled rollout/update took ``1.62 s`` and the
+  remaining updates sustained about ``49,229 environment-steps/s`` on the
+  reviewed CPU. These are validation-workload figures, not simulator-only
+  throughput.
+- ``IndexedCoreTables`` stacks complete equal-shape reset, track and pair tables.
+  Indexed reset, override, raw-step and selective-auto-reset functions choose a
+  table row per environment without changing ``BatchState`` or the core. The
+  host ``build_indexed_core`` deduplicates repeated ``Track`` identities,
+  buckets every complete table leaf by exact shape/dtype, supplies bucket-local
+  map indexes and source-row routing, and never pads a small map to a larger
+  bucket.
+- Action, PPO, indexed scalar-parity, JIT, reset and host-routing gates pass as
+  one focused 67-test slice. Commit ``8697e24`` records the training and indexed
+  runtime seams; the standalone measurement harness follows separately.
+- Phase 6 still requires published final-program measurements and a locked
+  dependency snapshot. The optional JaxMARL decision remains separate from the
+  now-proven native training contract.
+
+#### Phase 6c completion record — 2026-08-31
+
+- ``benchmarks/phase6_rollout.py`` records schema-validated JSON for equivalent
+  functional and mutable scenarios. It separates construction/reset and first
+  compilation from steady timing, synchronizes every call, consumes every
+  transition leaf to prevent dead-code elimination and reports environment and
+  agent rates, resident input/table bytes and real device allocator statistics
+  when the backend exposes them. Commit ``cc3477f`` records the base harness;
+  ``b58521a`` replaces its empty sensor/contact map with a 154-segment annular
+  road, and ``e573dfd`` requires sustained contact on every agent-step. Empty or
+  partly active contact measurements cannot pass the final JSON schema.
+- On the reviewed i9-11980HK CPU, state-only KS reached 800,971
+  environment-steps/s at batch 16, 1080-beam LiDAR reached 10,715 at batch 64,
+  persistent two-agent ST contact reached 38,564 at batch 96 and the full
+  ST/contact/1080-beam transition reached 4,817 at batch 8. Exact-shape four-map
+  indexing reached 607,768 at batch 64 and occupied exactly four 30,924-byte
+  tables.
+- The RTX 3080 Laptop GPU was initially hidden by the execution sandbox, not
+  absent from the host. With device nodes visible, JAX reported the GPU and all
+  PPO/state/LiDAR/contact/full/indexed gates completed without OOM. State-only
+  KS reached 2.03 million environment-steps/s at batch 1024; 1080-beam LiDAR
+  reached 67,296 at batch 64; the widest measured full transition reached
+  34,302 environment-steps/s at batch 64. The largest isolated simulator peak
+  was 148.3 MiB on the 16 GiB device.
+- Sustained two-agent ST contact kept CPU ahead through batch 48 and favored GPU
+  from batch 64. GPU/CPU rates were 0.83x at batch 48, 1.08x at batch 64, 1.55x
+  at batch 96 and 9.44x at batch 256. The mutable/single-environment default
+  therefore remains CPU. Native batched programs choose an explicit device from
+  the complete rollout shape; no universal crossover threshold is encoded.
+- The official JaxMARL surface was reevaluated after the native contract was
+  proven. Its agent-dictionary and public auto-reset boundary would be an
+  adapter translation, not a better core. A separate ephemeral gate passed the
+  Stable-Baselines3 2.9.0 environment checker and one SBX 0.28.0 eight-step PPO
+  update against JAX 0.11.1. Because that requested Gymnasium path and the
+  device-native PPO path are both covered, v1 deliberately ships no JaxMARL
+  dependency or vendored compatibility layer.
+- ``uv.lock`` is now source controlled. CI and the CPU container use
+  ``uv sync --frozen`` (and omit the default GPU group where appropriate), so
+  resolution drift can no longer change those gates. Flax, Chex, Optax,
+  JaxMARL and trainer packages remain intentionally absent: the validation PPO
+  is repository-only and no external training adapter ships. The measured
+  methodology, command shapes, CPU/GPU tables and placement guidance are
+  published in ``docs/jax_performance.rst``. Phase 6 is complete.
 
 ---
 
@@ -895,7 +989,8 @@ Required numerical gates include:
 - global termination reduction for `EGO`, `ANY` and `ALL`;
 - collision response continues when termination is disabled;
 - timeout remains distinguishable from termination;
-- optional JaxMARL key-first/reset/step/auto-reset contract;
+- optional JaxMARL key-first/reset/step/auto-reset contract, only if that
+  adapter is shipped;
 - device-batched `jit(vmap(lax.scan))` smoke tests.
 
 ### Performance gates
@@ -942,8 +1037,8 @@ they materially reduce the implementation surface.
 1. Merge original `jax/main` once; preserve its DAG and signatures.
 2. Use `jax-backend` only for ideas and warnings; import no commits or fixtures.
 3. Build a framework-neutral functional JAX core with no automatic reset.
-4. Keep Gymnasium as the SBX/SB3 compatibility API; add device-batched and
-   optional official-JaxMARL adapters around the core.
+4. Keep Gymnasium as the SBX/SB3 compatibility API and add a device-batched
+   API around the core. Defer the optional official-JaxMARL adapter beyond v1.
 5. Keep the NumPy environment until JAX parity and training gates pass; it is the
    live correctness oracle, not the long-term high-throughput path.
 6. Support KS-CoG and ST. MB is not supported by the JAX-first v1 surface.
@@ -957,9 +1052,9 @@ they materially reduce the implementation surface.
     sweeps vmap without recompilation.
 11. Treat x64 as a process-wide validation mode; production dtype is measured on
     the final implementation.
-12. Store unique preprocessed maps once, but choose padding versus shape bucketing
-    from measured memory and throughput.
-13. Commit `uv.lock` after dependency reconciliation and use locked CI/images.
+12. Store unique preprocessed maps once and bucket complete tables by exact
+    shape; measurements reject global worst-map padding.
+13. Keep `uv.lock` committed and use frozen resolution in CI/images.
 
 ---
 
@@ -970,6 +1065,8 @@ they materially reduce the implementation surface.
 - A promise of differentiability through hard contact, lap crossings,
   termination or reset.
 - Device-native Qt rendering; rendering remains a host-side consumer.
+- An official-JaxMARL adapter in the v1 release; add one only for a concrete
+  multi-policy consumer and keep it outside the core.
 - Reusing old trained weights as a behavior oracle.
 - Deleting the NumPy implementation before the JAX core and adapters pass their
   numerical, API and training gates.
