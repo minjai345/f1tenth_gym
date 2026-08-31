@@ -10,7 +10,7 @@ Use ``--scenario lidar``, ``contact`` or ``full`` to include exact sensing or
 contact on a deterministic annular road, and ``--unique-maps`` to exercise
 equal-shape indexed map selection.  Contact/full start every body in a shallow
 outer-wall overlap; the solver's resting slop keeps response live throughout
-the rollout, and the result records the number of collision events.
+the rollout, and the result records the number of colliding agent-steps.
 
 The only stdout payload is JSON.  Preprocessing, construction, reset, key
 generation, compilation, and the first synchronized execution are excluded
@@ -371,7 +371,7 @@ def _rollout_program(
 
     def rollout(state, step_keys, actions):
         def one_step(carry, keys):
-            current_state, checksum, collision_events = carry
+            current_state, checksum, colliding_agent_steps = carry
             if map_indices is None:
                 transition = step_batch(
                     keys,
@@ -392,11 +392,11 @@ def _rollout_program(
             return (
                 transition.state,
                 checksum + _tree_probe(transition),
-                collision_events
+                colliding_agent_steps
                 + jnp.sum(transition.events.collisions.astype(jnp.int32)),
             ), None
 
-        (_, checksum, collision_events), _ = jax.lax.scan(
+        (_, checksum, colliding_agent_steps), _ = jax.lax.scan(
             one_step,
             (
                 state,
@@ -405,7 +405,7 @@ def _rollout_program(
             ),
             step_keys,
         )
-        return checksum, collision_events
+        return checksum, colliding_agent_steps
 
     return rollout
 
@@ -538,7 +538,7 @@ def _benchmark_jax(
     if output is None:
         raise RuntimeError("the synchronized JAX rollout did not execute")
     checksum_value = float(np.asarray(output[0]))
-    collision_events = int(np.asarray(output[1]))
+    colliding_agent_steps = int(np.asarray(output[1]))
     if not math.isfinite(checksum_value):
         raise RuntimeError(f"the JAX checksum is not finite: {checksum_value}")
     timing = timing_summary(
@@ -568,7 +568,7 @@ def _benchmark_jax(
         "warmup_seconds": warmup_seconds,
         **timing,
         "checksum": checksum_value,
-        "collision_events_per_run": collision_events,
+        "colliding_agent_steps_per_run": colliding_agent_steps,
         "resident_input_bytes": _tree_nbytes((state, step_keys, actions)),
         "resident_table_bytes": _tree_nbytes(tables),
         "peak_memory": device_peak_memory(memory_stats),
@@ -597,7 +597,7 @@ def _mutable_rollout(
     rollout_length: int,
 ) -> tuple[float, int]:
     checksum = 0.0
-    collision_events = 0
+    colliding_agent_steps = 0
     for _ in range(rollout_length):
         for environment in environments:
             transition = environment.step(actions)
@@ -606,10 +606,10 @@ def _mutable_rollout(
                     "the non-terminating benchmark configuration ended an episode"
                 )
             checksum += _numpy_probe(transition)
-            collision_events += int(
+            colliding_agent_steps += int(
                 np.count_nonzero(transition[4]["collisions"])
             )
-    return checksum, collision_events
+    return checksum, colliding_agent_steps
 
 
 def _benchmark_mutable(
@@ -696,7 +696,7 @@ def _benchmark_mutable(
         "warmup_seconds": warmup_seconds,
         **timing,
         "checksum": float(output[0]),
-        "collision_events_per_run": int(output[1]),
+        "colliding_agent_steps_per_run": int(output[1]),
         "resident_input_bytes": None,
         "resident_table_bytes": None,
         "peak_memory": unavailable_memory(
