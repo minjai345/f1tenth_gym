@@ -140,7 +140,12 @@ def reset_indexed_batch(
     base_params: CoreParams,
     randomization: VehicleRandomizationParams,
 ):
-    """Reset a batch whose rows select among exact-shape map tables."""
+    """Reset a batch whose rows select among exact-shape map tables.
+
+    ``map_indices`` values must lie in ``[0, indexed.num_maps)``.  The host
+    ``build_indexed_core`` route validates that invariant before compilation;
+    this pure traced entry point validates only shape and integer dtype.
+    """
     batch_size = _validate_base_inputs(keys, config)
     indices = _validate_map_indices(map_indices, batch_size, indexed)
     observation, core, params = jax.vmap(
