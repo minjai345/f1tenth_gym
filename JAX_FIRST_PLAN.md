@@ -693,11 +693,56 @@ pass independently.
   rendering, device-batched policy layouts and key-driven parameter draws remain
   Phase 5 adapter work.
 
+#### Phase 5f implementation record — 2026-08-31
+
+- The deep-import ``JaxF110Env`` is the first complete Gymnasium lifecycle over
+  the functional core. It is deliberately not registered and does not replace
+  ``f1tenth_gym:f1tenth-v0``. Construction resolves the configured host track,
+  builds one paired ``CoreBundle``/``GymObservationAdapter`` and jits the
+  reset and transition entry points for that topology.
+- The adapter shape-validates native ``(num_agents, 2)`` actions and converts
+  them to production float32 without clipping. It supports sampled,
+  pose-override and full-native-state resets, packages independent NumPy
+  observations, selects the ego scalar from device rewards and returns Python
+  termination/truncation flags plus the established copied reset/step
+  information dictionaries. Observation time remains one transition behind
+  step ``info`` by design.
+- Gymnasium seeding owns a host NumPy generator and derives explicit per-reset
+  JAX keys from it. Same-class seeded replay is deterministic, including sensor
+  streams, while NumPy and JAX backends are not byte-paired. Functional reset
+  modes reserve the same pose/bias/scan key children, so an explicit pose/state
+  override does not shift the functional sensor children.
+- Varying domain-randomization bounds are sampled once per episode on the host
+  into the same shared ``VehicleParameters`` model used by the mutable gym, then
+  passed through the builder's bound validation into traced core parameters.
+  Python ``CUSTOM`` reward callbacks also stay at the Gym boundary and run only
+  after final packaged observations and ``info`` exist. Neither behavior enters
+  a compiled device rollout.
+- ``configure()``, ``update_map()`` and shared ``update_params()`` rebuild the
+  bundle, spaces, compiled entry points and renderer state as required. The
+  existing PyQt/OpenGL renderer, render clock, callbacks, DEFAULT renderer view,
+  human modes and cached RGB frames are reused rather than reimplemented in the
+  transition.
+- The current ``SingleAgentWrapper`` and Gymnasium ``FlattenObservation`` turn a
+  one-agent ``KINEMATIC_STATE`` adapter into finite float32 ``Box(5,)`` and
+  ``Box(2,)`` interfaces suitable for SB3/SBX APIs. That compatibility path
+  transfers selected observations from device to NumPy every Gym step; it is
+  not the device-batched adapter, no trainer dependency is added, and no
+  throughput comparison is claimed. Native batched training remains Phase 6
+  work.
+- Raw and wrapped Gymnasium checker runs, copied public values, stochastic seed
+  replay, reset overrides, invalid actions, custom rewards, shared DR,
+  truncation without freezing, config/map/parameter rebuilds and a mocked RGB
+  renderer lifecycle are executable adapter gates. Optional-dependency gates
+  also pass the Stable-Baselines3 checker and complete one eight-step SBX PPO
+  update. Display-backed video and sustained training remain separate Phase 6
+  validation.
+
 ### Phase 6 — batched training and performance decisions
 
 - Run a complete device-native PPO training job; imported training code is a
   starting pattern, not a frozen implementation.
-- Run an SBX smoke/compatibility job separately from the native throughput job.
+- Keep the SBX smoke/compatibility job separate from the native throughput job.
 - If JaxMARL ships, run at least one continuous multi-agent IPPO/MAPPO smoke job.
 - Benchmark batch sizes, agents, maps and beam counts with anti-DCE outputs,
   synchronization, compile time, steady-state throughput and peak memory.

@@ -177,6 +177,7 @@ with their source host configuration and track.
    f1tenth_gym.jax.builder.build_core_config
    f1tenth_gym.jax.builder.build_core_tables
    f1tenth_gym.jax.builder.build_core_params
+   f1tenth_gym.jax.gym_env.JaxF110Env
    f1tenth_gym.jax.gym_observation.GymObservationAdapter
    f1tenth_gym.jax.preprocess.build_track_table
    f1tenth_gym.jax.preprocess.build_track_table_set
@@ -192,6 +193,8 @@ with their source host configuration and track.
 .. automodule:: f1tenth_gym.jax.preprocess
 
 .. automodule:: f1tenth_gym.jax.gym_observation
+
+.. automodule:: f1tenth_gym.jax.gym_env
 
 Actions
 -------

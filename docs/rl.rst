@@ -66,6 +66,96 @@ every per-field bound is derived from the vehicle and track
 (:doc:`observations`), and the composed stack passes
 ``check_env(env, skip_render_check=True)``.
 
+Use the JAX-backed Gym adapter
+------------------------------
+
+The functional transition also has a conventional Gymnasium boundary.  Import
+it directly and use the same wrappers:
+
+.. code-block:: python
+
+   import numpy as np
+   from gymnasium.wrappers import FlattenObservation
+
+   from f1tenth_gym.envs.wrappers import SingleAgentWrapper
+   from f1tenth_gym.jax.gym_env import JaxF110Env
+
+   env = JaxF110Env(cfg)
+   env = SingleAgentWrapper(env)
+   env = FlattenObservation(env)
+
+   obs, info = env.reset(seed=42)
+   obs, reward, terminated, truncated, info = env.step(
+       np.array([0.0, 2.0], dtype=np.float32)
+   )
+   env.close()
+
+``JaxF110Env`` does not replace the registered environment:
+``f1tenth_gym:f1tenth-v0`` still constructs the mutable
+:class:`~f1tenth_gym.envs.f110_env.F110Env`.  The JAX-backed class is initially
+a deep import rather than another Gymnasium id, so construct it as shown above.
+It preserves the native multi-agent action, observation, reward, termination,
+reset-option and ``info`` contracts for the functional core's supported config
+surface.  Winding-angle laps, ``MAP_RANDOM_STATIC``, non-default active-contact
+wall tolerance and mixed active LiDAR/contact devices still fail at
+construction rather than falling through to different behavior.
+
+For Stable-Baselines3 or SBX, start with ``KINEMATIC_STATE`` and the two-wrapper
+stack above.  It exposes a finite float32 ``Box`` with shape ``(5,)`` and a
+float32 action ``Box`` with shape ``(2,)``, so an ``MlpPolicy`` does not need to
+understand the native nested agent dictionary.  Select ``DEFAULT`` or a
+``FEATURES`` view only when the policy really needs LiDAR.  ``DIRECT`` remains
+the exception: its raw arrays have no ``agent_0`` level, so it cannot be passed
+through ``SingleAgentWrapper``.
+
+SBX follows the Stable-Baselines3 environment API, so the ordinary construction
+is:
+
+.. code-block:: python
+
+   from sbx import SAC
+
+   env = FlattenObservation(SingleAgentWrapper(JaxF110Env(cfg)))
+   model = SAC("MlpPolicy", env, verbose=1)
+   model.learn(total_timesteps=10_000)
+   env.close()
+
+Neither ``sbx-rl`` nor ``stable-baselines3`` is a package dependency of this
+gym; install the trainer separately.  The adapter provides compatibility, not
+an end-to-end device-native training path.  Each Gym step runs the compiled JAX
+transition, then transfers only the selected observation leaves to independent
+NumPy arrays for Gymnasium.  SBX subsequently transfers policy inputs to its
+own JAX program.  Native batched training should instead compose ``reset_core``
+and ``step_core`` under ``vmap``/``lax.scan``; no throughput comparison is
+claimed for the Gym adapter.
+
+The optional ``tests/test_jax_rl_compat.py`` gate runs the Stable-Baselines3
+environment checker and one eight-step SBX PPO update when those two external
+packages are installed.  It skips in the base package environment, keeping
+trainer stacks out of runtime dependencies.
+
+Python callbacks and episode randomization deliberately stay on the host.
+``RewardMode.CUSTOM`` is called after the packaged observation and final
+``info`` dictionary exist, just as it is for ``F110Env``.  Domain randomization
+draws one shared ``VehicleParameters`` value from the Gym RNG at reset and
+builds that episode's traced core parameters from it.  Both behaviors cross the
+device boundary and therefore do not belong inside a compiled rollout.
+
+``reset(seed=...)`` is deterministic within ``JaxF110Env``, including domain
+randomization and sensor noise, but it is not a byte-for-byte random-stream
+match for ``F110Env``.  The adapter derives explicit JAX keys from Gymnasium's
+host RNG, and the functional reset reserves named pose, bias and scan children.
+In particular, choosing a pose or state reset override discards the pose child
+without shifting the functional sensor children.
+
+Rendering uses the existing PyQt/OpenGL backend and clocks.  The renderer gets
+a separate ``DEFAULT`` observation view even when the policy uses
+``KINEMATIC_STATE``.  Human and RGB modes therefore have the same display
+requirements and timing semantics described in :doc:`rendering`; direct
+``RecordVideo`` use needs ``JaxF110Env(cfg, render_mode="rgb_array")`` and
+``render_enabled=True``.  Rendering also packages host arrays and is not part
+of a device-native throughput claim.
+
 Choose what the policy sees
 ---------------------------
 

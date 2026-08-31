@@ -5,7 +5,7 @@ work, then read the named source and tests before changing a subsystem. The
 published Sphinx pages are the user-facing source of truth for behavior and
 examples; this file focuses on architecture, invariants, and change seams.
 
-Baseline reviewed: Phase 5e on 2026-08-31, based on `9a6d88f`. Treat counts
+Baseline reviewed: Phase 5f on 2026-08-31, based on `b47c0c8`. Treat counts
 and the known-rough-edges section as a snapshot and re-check them against
 `HEAD`.
 
@@ -21,12 +21,17 @@ more 1/10-scale race cars. It combines:
 - wall and car-to-car collision detection, plus JAX impulse-based contact;
 - occupancy-grid tracks, centerlines, racelines, and Frenet coordinates;
 - multi-agent reset strategies, rewards, termination, rendering, and wrappers;
-- deterministic seeding, actuator/sensor noise, and domain randomization.
+- deterministic seeding, actuator/sensor noise, and domain randomization;
+- a deep-import Gymnasium lifecycle over the functional JAX core.
 
 The installed package is `f1tenth_gym` version `1.0.0dev`. Importing the
 package registers `f1tenth-v0`; normal use is the namespaced Gymnasium id
 `f1tenth_gym:f1tenth-v0`. There is no ROS runtime in this repository despite
 the history and branch names.
+
+That registered id still constructs the mutable `F110Env`. The JAX-backed
+`JaxF110Env` is a distinct direct import from `f1tenth_gym.jax.gym_env`; it is
+not registered and must not silently replace the reference environment.
 
 The active code line has diverged substantially from the old upstream package.
 In particular, there is no per-agent `RaceCar` object and no dictionary/YAML
@@ -115,6 +120,12 @@ gym.make(..., config=EnvConfig)
        -> Observation provider       observation values and spaces
        -> ResetFn                    seeded initial-pose strategy
        -> RenderClock/renderer       optional pacing and pixels
+
+JaxF110Env(config=EnvConfig)         direct deep import, no Gym id
+  -> CoreBundle                      fixed topology/tables plus traced params
+  -> jitted reset_core/step_core     immutable device transition
+  -> GymObservationAdapter           selected device-to-NumPy observation view
+  -> host lifecycle                  seeds, DR, CUSTOM reward, info and render
 ```
 
 ### Environment layer
@@ -152,6 +163,23 @@ Because observation happens before `env.sim_time` is refreshed, the
 observation field `sim_time` is deliberately/currently one step behind
 `info["sim_time"]`. This behavior is documented and tested indirectly; change
 it only as an explicit API correction.
+
+`f1tenth_gym/jax/gym_env.py` owns the equivalent host lifecycle around the
+functional core. It keeps the same native actions, observation layouts, ego
+scalar reward, whole-environment end status, reset overrides and copied info
+surface. Built-in transition work stays in `jax/environment.py`; the adapter
+owns only operations that cannot belong in a pure compiled transition:
+
+- Gymnasium seed continuation and derivation of explicit JAX keys;
+- host sampling of one shared domain-randomized vehicle per episode;
+- device-to-NumPy observation and info packaging;
+- Python `CUSTOM` reward callbacks after final info exists;
+- `configure()`/map/parameter rebuilds and renderer integration.
+
+The adapter jits one environment transition, then crosses to NumPy on every
+Gym step. That makes it compatible with conventional wrappers and SB3/SBX, but
+it is not a device-batched training API and is not evidence of higher training
+throughput. Preserve this distinction in examples and benchmarks.
 
 ### Simulator layer
 
@@ -228,6 +256,7 @@ rather than equality.
 | `envs/contact/` | JAX manifolds/solvers and the NumPy/JAX adapter |
 | `f1tenth_gym/jax/` | pure functional reset/step plus dynamics, sensing, contact and episode layers |
 | `f1tenth_gym/jax/builder.py` | host `EnvConfig`/`Track` conversion and device placement |
+| `f1tenth_gym/jax/gym_env.py` | direct-import Gym lifecycle, host RNG/rewards/info and rendering |
 | `f1tenth_gym/jax/gym_observation.py` | host Gym observation layout, spaces and device-to-NumPy packaging |
 | `f1tenth_gym/jax/preprocess.py` | host fixed-shape track/reset/pair table construction |
 | `envs/track/track.py` | map/reference-line loading and Frenet transforms |
@@ -239,7 +268,7 @@ rather than equality.
 | `envs/rendering/` | PyQt6/OpenGL renderer, objects, callbacks |
 | `envs/wrappers.py` | single-agent and observation-delay wrappers |
 | `examples/` | waypoint following, video, telemetry, synthetic tracks |
-| `tests/` | 630 collected tests across 47 `test_*.py` files |
+| `tests/` | 648 collected tests across 49 `test_*.py` files |
 | `docs/` | Sphinx user documentation plus behavioral measurements |
 
 ## Configuration model
@@ -378,10 +407,26 @@ placeholder and preserves the lagged observation clock. Construct it through
 `GymObservationAdapter.from_bundle()`: the bundle retains its source
 `EnvConfig`, resolved host `Track`, traced scan range and static topology. An
 optional `ObservationConfig` can choose another view without independently
-mixing config/core pieces and making the declared space false. It is a packaging
-utility, not a Gymnasium environment; seeding/lifecycle, info dictionaries,
-custom rewards, action validation and render integration remain future adapter
-work. Key-driven domain-randomization sampling also remains open.
+mixing config/core pieces and making the declared space false. It remains a
+focused packaging utility; `JaxF110Env` composes it rather than duplicating
+field, bound or copy logic.
+
+The deep-import `jax/gym_env.py` supplies the conventional Gymnasium lifecycle
+without registering another environment id. It resolves the track, builds and
+jits one functional core topology, validates actions, supports sampled/pose/
+state resets, selects the ego device reward, packages copied observations and
+info, and preserves EGO/ANY/ALL termination plus distinct timeout truncation.
+It reuses the mutable renderer and its separate DEFAULT observation view.
+`CUSTOM` callbacks run on the host after final info assembly. Varying domain-
+randomization bounds draw one shared `VehicleParameters` on the host per reset
+and pass it through builder validation. `configure()`, `update_map()` and shared
+`update_params()` rebuild the paired core, spaces and renderer-facing state.
+
+Gym seeding and functional seeding are intentionally layered: the adapter owns
+a Gymnasium NumPy generator and derives explicit JAX episode keys from it. A
+seed replays within `JaxF110Env`, but it is not byte-paired with `F110Env`.
+Sampled, pose and state reset paths reserve the same pose/bias/scan children;
+overrides discard the pose child without shifting functional sensor streams.
 
 The deep-import host builder maps supported ``EnvConfig`` topology and traced
 values plus one resolved ``Track`` into a device-placed ``CoreBundle``. It
@@ -393,9 +438,13 @@ full bound envelope. Continuous production leaves are float32, counters int32
 and flags boolean regardless of Python scalar types or JAX x64 mode. Disabled
 contact uses constant masked contact/pair tables; disabled LiDAR uses a masked
 ray table, and wall extraction is skipped when neither subsystem needs it. The
-builder deliberately rejects ``CUSTOM`` rewards, winding laps,
-``MAP_RANDOM_STATIC``, non-default active-contact wall tolerance and mixed
-active component devices.
+builder rejects winding laps, ``MAP_RANDOM_STATIC``, non-default active-contact
+wall tolerance and mixed active component devices. It also rejects ``CUSTOM``
+rewards unless a host adapter supplies an explicit built-in fallback.
+`JaxF110Env` handles two host-only concerns before
+calling the builder: it runs Python `CUSTOM` rewards outside the core and
+supplies an already sampled shared DR value. Winding laps, `MAP_RANDOM_STATIC`,
+non-default active-contact wall tolerance and mixed devices remain unsupported.
 
 Keep the kernel/core modules pure JAX/array math, fixed-shape,
 jittable/vmappable, free of Gym and package-local imports, and free of NumPy
@@ -464,14 +513,18 @@ modes do not consume them.
 actions from `(1, 2)` to `(2,)`. Pair it with Gymnasium's
 `FlattenObservation` for conventional RL libraries. `ObservationDelayWrapper`
 delays only observations; reward, termination, truncation, and info stay
-current.
+current. These wrappers work unchanged with `JaxF110Env` for per-agent layouts.
+Use `KINEMATIC_STATE` plus `SingleAgentWrapper` and `FlattenObservation` for the
+least-surprising finite `Box(5,)` SB3/SBX interface. `DIRECT` has no agent-keyed
+level and therefore remains incompatible with `SingleAgentWrapper`.
 
 ## Rendering
 
 The only concrete renderer is PyQt6 + pyqtgraph/OpenGL. Pixel modes require an
 X display; use `xvfb-run` in headless environments. The renderer consumes a
 copy of DEFAULT-vocabulary observations even when the policy uses a different
-observation preset.
+observation preset. `F110Env` and `JaxF110Env` share this backend and clock
+contract; the JAX adapter packages its renderer view on the host.
 
 Rendering has two separate clocks:
 
@@ -506,7 +559,7 @@ constraint spans subsystems.
 
 ## Tests and validation
 
-The current tree collects 613 tests across 46 `test_*.py` files. Most tests use
+The current tree collects 648 tests across 49 `test_*.py` files. Most tests use
 `unittest.TestCase` but run through pytest. Tests cover public behavior and
 low-level numerical contracts, including JIT/vmap/gradient properties,
 allocation guards, cache invalidation, observation aliasing, vector envs,
@@ -530,6 +583,12 @@ xvfb-run -a env -u PYTHONPATH UV_CACHE_DIR=/tmp/f1tenth-gym-uv-cache \
 
 Focused tests are preferred during iteration, followed by the full suite when
 behavior or shared infrastructure changes.
+
+`tests/test_jax_rl_compat.py` is an optional trainer gate. The base environment
+skips its SB3 checker and eight-step SBX PPO update when
+`stable-baselines3`/`sbx-rl` are absent; run it in a separate environment with
+those packages installed rather than adding either trainer to runtime
+dependencies.
 
 Documentation CI has three meaningful gates:
 

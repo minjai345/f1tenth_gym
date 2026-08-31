@@ -91,12 +91,35 @@ does not own an environment lifecycle. Construct it with
 ``GymObservationAdapter.from_bundle(bundle)``; an optional
 ``ObservationConfig`` selects another view without replacing the bundle's
 source configuration, so sensor values and declared bounds cannot diverge.
-``CUSTOM`` rewards, winding-angle laps and ``MAP_RANDOM_STATIC`` remain adapter
-work. When domain-randomization bounds vary, callers currently pass one
-already-sampled shared ``VehicleParameters``; key-driven parameter sampling is
-not yet composed. Active contact and LiDAR must select the same JAX device, and
-functional contact currently requires the default wall-extraction tolerance.
-Use the Gymnasium API for training until the framework adapters land.
+Builder calls still reject ``CUSTOM`` rewards unless a host adapter supplies an
+explicit built-in fallback whose result it discards.  When domain-randomization
+bounds vary, builder callers pass one already-sampled shared
+``VehicleParameters``.  Active contact and LiDAR must select the same JAX
+device, and functional contact currently requires the default wall-extraction
+tolerance.
+
+The host-only Gymnasium boundary is a separate deep import::
+
+   from f1tenth_gym.jax.gym_env import JaxF110Env
+
+   env = JaxF110Env(config)
+
+It resolves the track, builds and jits the functional reset/step, validates the
+native ``(num_agents, 2)`` action, selects the ego reward, packages copied NumPy
+observations and ``info``, and preserves reset pose/state overrides.  It also
+implements host ``CUSTOM`` callbacks, per-reset shared domain-randomization
+draws, reconfiguration and the existing renderer.  Those facilities are
+adapter work: arbitrary Python and Gym/render objects never enter the pure
+transition.  The class is not registered and does not replace
+``f1tenth_gym:f1tenth-v0``.  Its Gym-compatible host transfer is useful for
+SB3/SBX interoperability, but it is not the future device-batched training
+adapter and carries no throughput claim; see :doc:`rl`.
+
+``JaxF110Env.reset(seed=...)`` controls a host Gymnasium RNG from which the
+adapter derives explicit JAX keys.  Replay is deterministic within that class,
+but NumPy and JAX random streams are intentionally not byte-paired with
+``F110Env``.  Functional pose/state overrides reserve and discard the same pose
+key child instead of shifting the bias and scan children.
 
 ``delta`` is the steering angle, ``v`` the longitudinal speed, ``yaw`` the
 heading, and ``beta`` the body slip angle. Under ``KS`` there is nothing for a
