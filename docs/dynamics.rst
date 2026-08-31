@@ -57,14 +57,20 @@ response per body. The combined ``resolve_contacts`` function preserves the
 mutable simulator's macro order—walls first, then pairs—and unions fresh
 per-agent events; collisions never latch or freeze a vehicle.
 
+``reset_core`` and ``step_core`` compose those layers into one immutable,
+explicit-key environment transition. Reset samples poses, projects Frenet state
+and produces a real first scan. Each step advances actuation/dynamics, resolves
+optional contact, projects the corrected pose, observes LiDAR and updates
+progress, laps, rewards and end status. ``CoreObservation`` is a fixed batched
+vocabulary for later adapters; ``CoreMetrics`` distinguishes termination from
+timeout truncation. The core does not auto-reset.
+
 These functions support ``jax.jit``, environment-level ``jax.vmap``,
 ``lax.scan`` and differentiation away from geometry switches. The standalone
-wall and pair functions remain available for focused use and testing. The
-free-flight transition does not yet integrate sensing/contact or episode
-semantics. Host-preprocessed reference-line, reset and ray tables are described
-in :doc:`tracks`; pair-table construction is listed in :doc:`api/index`. Use the
-Gymnasium API for training until the remaining core integration and adapters
-land.
+layers remain available for focused use and testing. Host-preprocessed
+reference-line, reset and ray tables are described in :doc:`tracks`; pair-table
+construction is listed in :doc:`api/index`. Use the Gymnasium API for training
+until configuration conversion and framework adapters land.
 
 ``delta`` is the steering angle, ``v`` the longitudinal speed, ``yaw`` the
 heading, and ``beta`` the body slip angle. Under ``KS`` there is nothing for a

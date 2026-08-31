@@ -62,8 +62,8 @@ Vehicle dynamics
 Functional JAX kernels
 ----------------------
 
-These are the device-compatible building blocks under active migration. They
-are pure functions, not yet a complete Gymnasium environment.
+These device-compatible pytrees and pure functions include a complete explicit-
+key transition core. They are not yet a Gymnasium environment or adapter.
 
 .. autosummary::
 
@@ -71,6 +71,18 @@ are pure functions, not yet a complete Gymnasium environment.
    f1tenth_gym.jax.DynamicsConfig
    f1tenth_gym.jax.DynamicsState
    f1tenth_gym.jax.EpisodeParams
+   f1tenth_gym.jax.BookkeepingParams
+   f1tenth_gym.jax.EpisodeConfig
+   f1tenth_gym.jax.EpisodeState
+   f1tenth_gym.jax.EpisodeEvents
+   f1tenth_gym.jax.EpisodeMetrics
+   f1tenth_gym.jax.EpisodeStatus
+   f1tenth_gym.jax.CoreConfig
+   f1tenth_gym.jax.CoreTables
+   f1tenth_gym.jax.CoreParams
+   f1tenth_gym.jax.CoreState
+   f1tenth_gym.jax.CoreObservation
+   f1tenth_gym.jax.CoreMetrics
    f1tenth_gym.jax.SplineTable
    f1tenth_gym.jax.TrackTable
    f1tenth_gym.jax.ResetTable
@@ -78,6 +90,7 @@ are pure functions, not yet a complete Gymnasium environment.
    f1tenth_gym.jax.BodyParams
    f1tenth_gym.jax.ScanConfig
    f1tenth_gym.jax.ScanParams
+   f1tenth_gym.jax.ScanState
    f1tenth_gym.jax.ContactParams
    f1tenth_gym.jax.WallContactConfig
    f1tenth_gym.jax.PairContactConfig
@@ -86,6 +99,7 @@ are pure functions, not yet a complete Gymnasium environment.
    f1tenth_gym.jax.SteeringControlMode
    f1tenth_gym.jax.kinematic_single_track
    f1tenth_gym.jax.single_track
+   f1tenth_gym.jax.standardize_state
    f1tenth_gym.jax.adapt_actions
    f1tenth_gym.jax.euler_step
    f1tenth_gym.jax.rk4_step
@@ -95,12 +109,15 @@ are pure functions, not yet a complete Gymnasium environment.
    f1tenth_gym.jax.rollout_dynamics
    f1tenth_gym.jax.evaluate_spline
    f1tenth_gym.jax.cartesian_to_frenet
+   f1tenth_gym.jax.cartesian_to_frenet_local
    f1tenth_gym.jax.frenet_to_cartesian
    f1tenth_gym.jax.sample_reset_poses
    f1tenth_gym.jax.reset_dynamics_state
    f1tenth_gym.jax.body_vertices
    f1tenth_gym.jax.lidar_poses
    f1tenth_gym.jax.clean_scan
+   f1tenth_gym.jax.reset_scan_state
+   f1tenth_gym.jax.observed_scan
    f1tenth_gym.jax.world_velocity
    f1tenth_gym.jax.apply_contact_response
    f1tenth_gym.jax.resolve_wall_contacts
@@ -108,6 +125,11 @@ are pure functions, not yet a complete Gymnasium environment.
    f1tenth_gym.jax.solve_pair_impulses
    f1tenth_gym.jax.resolve_pair_contacts
    f1tenth_gym.jax.resolve_contacts
+   f1tenth_gym.jax.reset_episode_state
+   f1tenth_gym.jax.advance_episode
+   f1tenth_gym.jax.observe_core
+   f1tenth_gym.jax.reset_core
+   f1tenth_gym.jax.step_core
    f1tenth_gym.jax.preprocess.build_track_table
    f1tenth_gym.jax.preprocess.build_track_table_set
    f1tenth_gym.jax.preprocess.build_reset_table
@@ -124,6 +146,10 @@ are pure functions, not yet a complete Gymnasium environment.
 .. automodule:: f1tenth_gym.jax.controls
 
 .. automodule:: f1tenth_gym.jax.core
+
+.. automodule:: f1tenth_gym.jax.environment
+
+.. automodule:: f1tenth_gym.jax.episode
 
 .. automodule:: f1tenth_gym.jax.contact
 

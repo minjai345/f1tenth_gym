@@ -5,7 +5,7 @@ work, then read the named source and tests before changing a subsystem. The
 published Sphinx pages are the user-facing source of truth for behavior and
 examples; this file focuses on architecture, invariants, and change seams.
 
-Baseline reviewed: Phase 5b on 2026-08-29, based on `c53250f`. Treat counts
+Baseline reviewed: Phase 5c on 2026-08-30, based on `5f580df`. Treat counts
 and the known-rough-edges section as a snapshot and re-check them against
 `HEAD`.
 
@@ -226,7 +226,7 @@ rather than equality.
 | `envs/lidar/` | LiDAR config, mutable exact scanner and opponent occlusion |
 | `envs/collision_models.py` | collision enum and collision-body vertices |
 | `envs/contact/` | JAX manifolds/solvers and the NumPy/JAX adapter |
-| `f1tenth_gym/jax/` | pure dynamics, state, track/reset tables, sensing, contact and episode bookkeeping |
+| `f1tenth_gym/jax/` | pure functional reset/step plus dynamics, sensing, contact and episode layers |
 | `envs/track/track.py` | map/reference-line loading and Frenet transforms |
 | `envs/track/walls.py` | oriented wall extraction from occupancy maps |
 | `envs/track/budget.py` | exact allocation budgets and guards |
@@ -236,7 +236,7 @@ rather than equality.
 | `envs/rendering/` | PyQt6/OpenGL renderer, objects, callbacks |
 | `envs/wrappers.py` | single-agent and observation-delay wrappers |
 | `examples/` | waypoint following, video, telemetry, synthetic tracks |
-| `tests/` | 586 collected tests across 44 `test_*.py` files |
+| `tests/` | 596 collected tests across 45 `test_*.py` files |
 | `docs/` | Sphinx user documentation plus behavioral measurements |
 
 ## Configuration model
@@ -318,9 +318,9 @@ The established portable JAX geometry seam is intentionally narrow:
 - `envs/contact/solver.py`
 - `f1tenth_gym/jax/lidar_kernels.py`
 
-The functional seam under `f1tenth_gym/jax/` currently owns traced vehicle and
-episode parameters, KS/ST dynamics, controllers, actuator noise/FIFOs and
-free-flight `lax.scan` rollouts. Host preprocessing produces fixed-shape spline,
+The functional seam under `f1tenth_gym/jax/` owns traced vehicle and episode
+parameters, KS/ST dynamics, controllers, actuator noise/FIFOs and free-flight
+`lax.scan` rollouts. Host preprocessing produces fixed-shape spline,
 wall, tile and RL-reset tables; exact-shape buckets are the default for
 heterogeneous maps, with shared `Track` objects stored once and referenced by
 index. Clean exact scans use masked ray-tile candidates, the current LiDAR
@@ -348,9 +348,21 @@ the ego scalar. Episode status preserves EGO/ANY/ALL reduction and a distinct
 timeout truncation without mutating vehicle state. Pre- and post-transition
 clocks remain explicit because observations intentionally lag step info today.
 `DynamicsConfig` contains structural choices; `EpisodeParams` contains values
-that vary under environment-level `vmap` without recompilation. The functional
-step is still free-flight-only and does not yet integrate sensing/contact or
-episode semantics.
+that vary under environment-level `vmap` without recompilation.
+
+`jax/environment.py` composes these layers. `CoreConfig` holds hashable topology;
+`CoreTables` holds reset, track and pair arrays; `CoreParams` keeps every varying
+value traced; and `CoreState` is the full immutable rollout carry. `reset_core`
+samples poses and fixed scan bias, globally projects Frenet state and returns a
+real first scan. `step_core` executes dynamics, optional wall/pair response,
+corrected-pose local Frenet projection, optional observed scanning and episode
+bookkeeping in the mutable simulator's order. Its canonical batched observation
+keeps the deliberate pre-transition time while metrics expose post-transition
+time. Contact `NONE` emits fresh false events without response; disabled LiDAR
+uses one internal beam; disabling Frenet also disables lap termination and is
+incompatible with the PROGRESS reward. The core never auto-resets or freezes a
+terminated agent. Gymnasium packaging, reset overrides, winding-angle laps and
+domain-randomization construction remain adapter work.
 
 Keep these pure JAX/array math, fixed-shape, jittable/vmappable, free of Gym
 and package-local imports, and free of NumPy marshalling. Host conversion,
@@ -459,7 +471,7 @@ constraint spans subsystems.
 
 ## Tests and validation
 
-The current tree collects 586 tests across 44 `test_*.py` files. Most tests use
+The current tree collects 596 tests across 45 `test_*.py` files. Most tests use
 `unittest.TestCase` but run through pytest. Tests cover public behavior and
 low-level numerical contracts, including JIT/vmap/gradient properties,
 allocation guards, cache invalidation, observation aliasing, vector envs,

@@ -301,8 +301,9 @@ Exact device scans
 the candidate and wall masks, and casts analytically against oriented wall
 segments. It then shortens those ranges against every edge of every opponent
 body in one fixed-shape calculation. The result is a noise-free ``(agents,
-beams)`` array; observation noise remains a later layer and collision response
-uses independent contact geometry.
+beams)`` array. ``reset_scan_state`` samples the episode-fixed per-beam bias;
+``observed_scan`` then adds per-step Gaussian noise and that bias, clips ranges,
+and applies dropout. Collision response uses independent contact geometry.
 
 Build the ray table for at least the sensor's longest range. The host helper
 ``build_scan_params(lidar_config, track_table)`` rejects a smaller table because

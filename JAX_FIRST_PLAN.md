@@ -595,6 +595,35 @@ pass independently.
   compose dynamics, wall/pair contact, local Frenet projection, observed scans
   and episode bookkeeping in the documented order.
 
+#### Phase 5c implementation record — 2026-08-30
+
+- ``CoreConfig`` now carries hashable dynamics/reset/sensor/contact/Frenet/
+  episode topology, while ``CoreTables`` and ``CoreParams`` keep fixed device
+  arrays and per-episode traced values separate. Cross-topology agent/state
+  mismatches fail before compilation.
+- ``reset_core`` uses fixed named key children to sample RL poses, initialize
+  zero-velocity native state, globally project each CoG pose, reset episode
+  state and sensor bias, and return a real observed first scan. Reset does not
+  adjudicate contact, matching the mutable simulator.
+- ``step_core`` composes command noise/FIFOs and dynamics, optional wall-then-
+  pair response, per-agent local Frenet projection from the corrected pose,
+  clean and observed scans, then reward/lap/termination/truncation bookkeeping.
+  It returns the planned five-part observation/state/reward/event/metric tree
+  and never auto-resets or freezes a terminated vehicle.
+- ``CoreObservation`` is one fixed agent-batched vocabulary: observed scans,
+  native and seven-channel standardized states, fresh collisions, Frenet pose,
+  lap values and the deliberately lagged observation clock. ``CoreMetrics``
+  retains post-transition time and distinct termination/truncation status.
+- Collision ``NONE`` and disabled sensing are static branches that do not trace
+  unused geometry; the latter uses the mutable simulator's one-beam internal
+  placeholder. With Frenet disabled, progress stays zero and lap termination is
+  explicitly off; PROGRESS reward is rejected structurally.
+- Aggregate reset/step replay, ``jit``, ``eval_shape``, shared-table parameter
+  ``vmap``, multi-step ``lax.scan``, contact termination without state freezing
+  and a six-step mutable-environment parity rollout are executable gates. The
+  remaining Phase 5 work is host configuration/parameter construction, reset
+  overrides, observation packaging and Gymnasium/device-batched adapters.
+
 ### Phase 6 — batched training and performance decisions
 
 - Run a complete device-native PPO training job; imported training code is a

@@ -43,6 +43,25 @@ class DynamicsParams:
         )
 
 
+def standardize_state(state: jax.Array) -> jax.Array:
+    """Return the common seven-channel state for one supported model row.
+
+    ST already uses ``[x, y, steering, speed, yaw, yaw_rate, beta]``.  The
+    mutable simulator's KS standardizer deliberately pads the unavailable yaw
+    rate and slip angle with zeros; deriving them here would change the public
+    observation contract.
+    """
+    if state.ndim != 1 or state.shape[0] not in (5, 7):
+        raise ValueError(
+            "state must have shape (5,) for KS or (7,) for ST, got "
+            f"{state.shape}"
+        )
+    state = jnp.asarray(state)
+    if state.shape[0] == 7:
+        return state
+    return jnp.concatenate((state, jnp.zeros((2,), dtype=state.dtype)))
+
+
 def _upper_acceleration_limit(
     speed: jax.Array, params: DynamicsParams
 ) -> jax.Array:
@@ -223,3 +242,11 @@ def single_track(
         lambda values: _single_track_dynamic_branch(*values),
         operands,
     )
+
+
+__all__ = [
+    "DynamicsParams",
+    "kinematic_single_track",
+    "single_track",
+    "standardize_state",
+]

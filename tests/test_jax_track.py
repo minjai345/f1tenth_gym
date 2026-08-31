@@ -133,6 +133,7 @@ class TestTrackPreprocessing(unittest.TestCase):
             "controls.py",
             "core.py",
             "dynamics.py",
+            "environment.py",
             "episode.py",
             "integrators.py",
             "reset.py",
