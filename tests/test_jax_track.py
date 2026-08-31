@@ -46,6 +46,28 @@ def circle_track(count=80, radius=8.0):
 
 
 class TestTrackPreprocessing(unittest.TestCase):
+    def test_disabled_geometry_still_validates_placeholder_tile_sizes(self):
+        track = circle_track()
+        for value in (0.0, -1.0, float("nan"), float("inf")):
+            with self.subTest(contact_tile_size=value):
+                with self.assertRaisesRegex(ValueError, "tile_size"):
+                    build_track_table(
+                        track,
+                        F1TENTH_VEHICLE_PARAMETERS,
+                        contact_enabled=False,
+                        contact_tile_size=value,
+                        ray_max_range=None,
+                    )
+            with self.subTest(ray_tile_size=value):
+                with self.assertRaisesRegex(ValueError, "tile_size"):
+                    build_track_table(
+                        track,
+                        F1TENTH_VEHICLE_PARAMETERS,
+                        contact_enabled=False,
+                        ray_max_range=None,
+                        ray_tile_size=value,
+                    )
+
     def test_spline_values_and_coordinate_transforms_match_the_host(self):
         track = circle_track()
         tables = build_track_table(

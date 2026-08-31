@@ -69,8 +69,25 @@ These functions support ``jax.jit``, environment-level ``jax.vmap``,
 ``lax.scan`` and differentiation away from geometry switches. The standalone
 layers remain available for focused use and testing. Host-preprocessed
 reference-line, reset and ray tables are described in :doc:`tracks`; pair-table
-construction is listed in :doc:`api/index`. Use the Gymnasium API for training
-until configuration conversion and framework adapters land.
+construction is listed in :doc:`api/index`.
+
+The host-only builder converts the supported parts of an ``EnvConfig`` and an
+already-resolved ``Track`` into a device-placed bundle::
+
+   from f1tenth_gym.jax.builder import build_core
+
+   bundle = build_core(config, track)
+
+``bundle.config``, ``bundle.tables`` and ``bundle.params`` can be passed to
+``reset_core`` and ``step_core``. This is construction for the functional core,
+not a Gymnasium adapter: it does not package observation presets, render, or
+turn ``EnvConfig.seed`` into JAX keys. ``CUSTOM`` rewards, winding-angle laps,
+``MAP_RANDOM_STATIC`` and reset pose/state overrides remain adapter work. When
+domain-randomization bounds vary, callers currently pass one already-sampled
+shared ``VehicleParameters``; key-driven parameter sampling is not yet composed.
+Active contact and LiDAR must select the same JAX device, and functional contact
+currently requires the default wall-extraction tolerance.
+Use the Gymnasium API for training until the framework adapters land.
 
 ``delta`` is the steering angle, ``v`` the longitudinal speed, ``yaw`` the
 heading, and ``beta`` the body slip angle. Under ``KS`` there is nothing for a

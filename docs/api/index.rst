@@ -130,14 +130,6 @@ key transition core. They are not yet a Gymnasium environment or adapter.
    f1tenth_gym.jax.observe_core
    f1tenth_gym.jax.reset_core
    f1tenth_gym.jax.step_core
-   f1tenth_gym.jax.preprocess.build_track_table
-   f1tenth_gym.jax.preprocess.build_track_table_set
-   f1tenth_gym.jax.preprocess.build_reset_table
-   f1tenth_gym.jax.preprocess.build_scan_params
-   f1tenth_gym.jax.preprocess.build_pair_table
-   f1tenth_gym.jax.preprocess.validate_pair_table
-   f1tenth_gym.jax.preprocess.bucket_track_tables
-   f1tenth_gym.jax.preprocess.compare_batch_layout
 
 .. automodule:: f1tenth_gym.jax
 
@@ -166,6 +158,31 @@ key transition core. They are not yet a Gymnasium environment or adapter.
 .. automodule:: f1tenth_gym.jax.track
 
 .. automodule:: f1tenth_gym.jax.reset
+
+Host JAX construction
+---------------------
+
+These helpers run outside compiled transitions. They convert a resolved host
+track and the supported ``EnvConfig`` surface into fixed arrays and a
+device-placed functional core bundle.
+
+.. autosummary::
+
+   f1tenth_gym.jax.builder.CoreBundle
+   f1tenth_gym.jax.builder.build_core
+   f1tenth_gym.jax.builder.build_core_config
+   f1tenth_gym.jax.builder.build_core_tables
+   f1tenth_gym.jax.builder.build_core_params
+   f1tenth_gym.jax.preprocess.build_track_table
+   f1tenth_gym.jax.preprocess.build_track_table_set
+   f1tenth_gym.jax.preprocess.build_reset_table
+   f1tenth_gym.jax.preprocess.build_scan_params
+   f1tenth_gym.jax.preprocess.build_pair_table
+   f1tenth_gym.jax.preprocess.validate_pair_table
+   f1tenth_gym.jax.preprocess.bucket_track_tables
+   f1tenth_gym.jax.preprocess.compare_batch_layout
+
+.. automodule:: f1tenth_gym.jax.builder
 
 .. automodule:: f1tenth_gym.jax.preprocess
 

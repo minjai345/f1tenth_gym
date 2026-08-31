@@ -33,8 +33,8 @@ class TileIndex:
         table: (rows, cols, k) int32 segment indices, -1 padding.
         origin: World ``(x, y)`` of tile (0, 0)'s lower corner.
         tile_size: Tile side in metres.
-        query_half_extent: Half-diagonal the table was built for; a larger query
-            body than this can miss candidates.
+        query_half_extent: Conservative query radius the table was built for; a
+            body reaching farther from the lookup point can miss candidates.
     """
 
     table: np.ndarray

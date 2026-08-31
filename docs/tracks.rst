@@ -294,6 +294,16 @@ and fixed arrays. ``MAP_RANDOM_STATIC`` is not yet part of this device surface;
 its current host sampler has a known row/column bug that must be resolved as an
 explicit behavior decision rather than copied into the new backend.
 
+The host builder selects the centerline or raceline, spacing, grid window,
+shuffle and lateral reset policy from ``EnvConfig``;
+``f1tenth_gym.jax.builder.build_core_tables`` materializes the reference-line
+choices. It builds an acceleration table only for an enabled subsystem:
+collision ``NONE`` gets constant-size masked contact and pair placeholders,
+and disabled LiDAR gets a masked ray placeholder. When both are disabled, wall
+extraction is skipped as well. An enabled contact table is sized to the
+farthest possible model-pose-relative collision-body corner, including
+configured body offsets and domain-randomization bounds.
+
 Exact device scans
 ------------------
 

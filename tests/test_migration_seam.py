@@ -41,6 +41,11 @@ def imported_roots(path):
 
 
 class TestPortability(unittest.TestCase):
+    def test_root_jax_namespace_keeps_host_builders_as_deep_imports(self):
+        roots = imported_roots(JAX / "__init__.py")
+        self.assertNotIn(".builder", roots)
+        self.assertNotIn(".preprocess", roots)
+
     def test_the_portable_modules_import_nothing_local(self):
         for path in PORTABLE:
             roots = imported_roots(path)

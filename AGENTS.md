@@ -5,7 +5,7 @@ work, then read the named source and tests before changing a subsystem. The
 published Sphinx pages are the user-facing source of truth for behavior and
 examples; this file focuses on architecture, invariants, and change seams.
 
-Baseline reviewed: Phase 5c on 2026-08-30, based on `5f580df`. Treat counts
+Baseline reviewed: Phase 5d on 2026-08-31, based on `839441e`. Treat counts
 and the known-rough-edges section as a snapshot and re-check them against
 `HEAD`.
 
@@ -227,6 +227,8 @@ rather than equality.
 | `envs/collision_models.py` | collision enum and collision-body vertices |
 | `envs/contact/` | JAX manifolds/solvers and the NumPy/JAX adapter |
 | `f1tenth_gym/jax/` | pure functional reset/step plus dynamics, sensing, contact and episode layers |
+| `f1tenth_gym/jax/builder.py` | host `EnvConfig`/`Track` conversion and device placement |
+| `f1tenth_gym/jax/preprocess.py` | host fixed-shape track/reset/pair table construction |
 | `envs/track/track.py` | map/reference-line loading and Frenet transforms |
 | `envs/track/walls.py` | oriented wall extraction from occupancy maps |
 | `envs/track/budget.py` | exact allocation budgets and guards |
@@ -236,7 +238,7 @@ rather than equality.
 | `envs/rendering/` | PyQt6/OpenGL renderer, objects, callbacks |
 | `envs/wrappers.py` | single-agent and observation-delay wrappers |
 | `examples/` | waypoint following, video, telemetry, synthetic tracks |
-| `tests/` | 596 collected tests across 45 `test_*.py` files |
+| `tests/` | 613 collected tests across 46 `test_*.py` files |
 | `docs/` | Sphinx user documentation plus behavioral measurements |
 
 ## Configuration model
@@ -333,6 +335,8 @@ wall contact vmaps the existing pure manifolds/Jacobi solver across agents and
 converts KS/ST native state to/from rigid-body velocity without host marshalling.
 It preserves the current host oracle's CoG tile lookup and its discarded
 speculative-only clamp; change either only as an explicit behavior correction.
+Contact-table reach covers the farthest CoG-relative collision-body corner,
+including body offsets and domain-randomization bounds.
 Fixed-capacity pair tables enumerate canonical unordered body pairs with masked
 padding. Pair manifolds share one state snapshot, and every global Jacobi sweep
 scatter-adds equal-and-opposite impulses/corrections before one native-state
@@ -362,12 +366,27 @@ time. Contact `NONE` emits fresh false events without response; disabled LiDAR
 uses one internal beam; disabling Frenet also disables lap termination and is
 incompatible with the PROGRESS reward. The core never auto-resets or freezes a
 terminated agent. Gymnasium packaging, reset overrides, winding-angle laps and
-domain-randomization construction remain adapter work.
+key-driven domain-randomization sampling remain adapter work.
 
-Keep these pure JAX/array math, fixed-shape, jittable/vmappable, free of Gym
-and package-local imports, and free of NumPy marshalling. Host conversion,
-device selection, map preprocessing, and caches belong in adapters. The
-contract is enforced by `tests/test_migration_seam.py`.
+The deep-import host builder maps supported ``EnvConfig`` topology and traced
+values plus one resolved ``Track`` into a device-placed ``CoreBundle``. It
+preserves KS/ST, Euler/RK4 substeps, action controllers and delays, RL reset
+defaults, sensing/contact switches, EGO/ANY/ALL reduction and built-in rewards.
+Varying DR bounds require an explicit sampled shared ``VehicleParameters``;
+the builder validates every supported field and sizes contact tables from the
+full bound envelope. Continuous production leaves are float32, counters int32
+and flags boolean regardless of Python scalar types or JAX x64 mode. Disabled
+contact uses constant masked contact/pair tables; disabled LiDAR uses a masked
+ray table, and wall extraction is skipped when neither subsystem needs it. The
+builder deliberately rejects ``CUSTOM`` rewards, winding laps,
+``MAP_RANDOM_STATIC``, non-default active-contact wall tolerance and mixed
+active component devices.
+
+Keep the kernel/core modules pure JAX/array math, fixed-shape,
+jittable/vmappable, free of Gym and package-local imports, and free of NumPy
+marshalling. Host conversion, device selection, map preprocessing, and caches
+belong in the host builder or adapters. The contract is enforced by
+`tests/test_migration_seam.py`.
 
 JAX initializes multithreaded runtime state. Async Gymnasium vector workers
 must use a spawn context with LiDAR enabled; forking after JAX
@@ -471,7 +490,7 @@ constraint spans subsystems.
 
 ## Tests and validation
 
-The current tree collects 596 tests across 45 `test_*.py` files. Most tests use
+The current tree collects 613 tests across 46 `test_*.py` files. Most tests use
 `unittest.TestCase` but run through pytest. Tests cover public behavior and
 low-level numerical contracts, including JIT/vmap/gradient properties,
 allocation guards, cache invalidation, observation aliasing, vector envs,

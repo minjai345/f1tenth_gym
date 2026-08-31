@@ -98,7 +98,11 @@ class TestQueryExtent(unittest.TestCase):
         self.assertAlmostEqual(query_half_extent(0.58, 0.31), math.hypot(0.58, 0.31) / 2)
 
     def test_nominal_body_without_randomization(self):
-        nominal = query_half_extent(F1TENTH.length, F1TENTH.width)
+        offset_x = -F1TENTH.lr + F1TENTH.collision_body_center_x
+        nominal = math.hypot(
+            abs(offset_x) + F1TENTH.length / 2.0,
+            abs(F1TENTH.collision_body_center_y) + F1TENTH.width / 2.0,
+        )
         self.assertAlmostEqual(widest_query_half_extent(F1TENTH, None), nominal)
 
     def test_randomized_body_widens_the_extent(self):
@@ -109,8 +113,10 @@ class TestQueryExtent(unittest.TestCase):
             low=F1TENTH.with_updates(length=0.55, width=0.30),
             high=F1TENTH.with_updates(length=0.70, width=0.40),
         )
+        offset_x = -F1TENTH.lr + F1TENTH.collision_body_center_x
         self.assertAlmostEqual(
-            widest_query_half_extent(F1TENTH, dr), math.hypot(0.70, 0.40) / 2
+            widest_query_half_extent(F1TENTH, dr),
+            math.hypot(abs(offset_x) + 0.70 / 2.0, 0.40 / 2.0),
         )
 
     def test_disabled_randomization_is_ignored(self):
@@ -121,8 +127,28 @@ class TestQueryExtent(unittest.TestCase):
         )
         self.assertAlmostEqual(
             widest_query_half_extent(F1TENTH, dr),
-            query_half_extent(F1TENTH.length, F1TENTH.width),
+            widest_query_half_extent(F1TENTH, None),
         )
+
+    def test_randomized_body_offsets_widen_the_cog_relative_extent(self):
+        dr = DomainRandomizationConfig(
+            enabled=True,
+            low=F1TENTH.with_updates(
+                lr=0.15,
+                collision_body_center_x=0.10,
+                collision_body_center_y=-0.05,
+            ),
+            high=F1TENTH.with_updates(
+                lr=0.25,
+                collision_body_center_x=0.30,
+                collision_body_center_y=0.07,
+            ),
+        )
+        expected = math.hypot(
+            0.15 + F1TENTH.length / 2.0,
+            0.07 + F1TENTH.width / 2.0,
+        )
+        self.assertAlmostEqual(widest_query_half_extent(F1TENTH, dr), expected)
 
     def test_a_randomized_budget_is_never_smaller(self):
         walls = extract_walls(blobs_grid(), 0.05)

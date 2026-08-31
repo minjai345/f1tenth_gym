@@ -40,7 +40,7 @@ class TileBudget(NamedTuple):
 
     Attributes:
         tile_size: Tile side in metres.
-        query_half_extent: Half-diagonal of the query body, in metres.
+        query_half_extent: Conservative radius from the lookup point, in metres.
         origin: World ``(x, y)`` of tile (0, 0)'s lower corner.
         tile_shape: ``(rows, cols)`` of the tile grid.
         k_tile: Exact most candidates any one tile can hand a query.
@@ -73,29 +73,57 @@ def query_half_extent(length: float, width: float) -> float:
 
 
 def widest_query_half_extent(vehicle_params, dr_config=None) -> float:
-    """Query half-extent at the largest body domain randomization can produce.
+    """CoG-relative corner reach at the largest body DR can produce.
 
-    A budget sized for the nominal car overflows the moment DR grows it.
+    Contact queries use the model CoG, while the configured collision rectangle
+    can be offset from that point. The broad phase must therefore cover the
+    farthest possible corner, not only the rectangle's own half-diagonal. A
+    budget sized for the nominal car also overflows the moment DR grows or
+    shifts the body.
 
     Args:
         vehicle_params: Nominal ``VehicleParameters``.
         dr_config: A ``DomainRandomizationConfig``, or None for no randomization.
 
     Returns:
-        The half-diagonal to size buffers against.
+        The farthest possible CoG-to-corner distance to size buffers against.
     """
-    # Not widest_params(): that widens limit fields for the observation bounds and
-    # leaves the body alone. The body's upper bound is the DR range's own endpoint.
-    length, width = float(vehicle_params.length), float(vehicle_params.width)
+    names = (
+        "length",
+        "width",
+        "lr",
+        "collision_body_center_x",
+        "collision_body_center_y",
+    )
+    candidates = {}
+    for name in names:
+        nominal = float(getattr(vehicle_params, name))
+        candidates[name] = [nominal] if math.isfinite(nominal) else []
     if dr_config is not None and getattr(dr_config, "enabled", False):
         for bound in (dr_config.low, dr_config.high):
             if bound is None:
                 continue
-            if math.isfinite(float(bound.length)):
-                length = max(length, float(bound.length))
-            if math.isfinite(float(bound.width)):
-                width = max(width, float(bound.width))
-    return query_half_extent(length, width)
+            for name in names:
+                value = float(getattr(bound, name))
+                if math.isfinite(value):
+                    candidates[name].append(value)
+
+    missing = [name for name, values in candidates.items() if not values]
+    if missing:
+        raise ValueError(
+            "collision broad-phase parameters must be finite: "
+            + ", ".join(missing)
+        )
+
+    length = max(candidates["length"])
+    width = max(candidates["width"])
+    offset_x = max(
+        abs(-lr + centre_x)
+        for lr in candidates["lr"]
+        for centre_x in candidates["collision_body_center_x"]
+    )
+    offset_y = max(abs(value) for value in candidates["collision_body_center_y"])
+    return math.hypot(offset_x + length / 2.0, offset_y + width / 2.0)
 
 
 def tile_budget(
@@ -113,7 +141,7 @@ def tile_budget(
 
     Args:
         walls: Extracted wall segments.
-        query_half_extent: Half-diagonal of the querying body, in metres.
+        query_half_extent: Conservative radius from the query point, in metres.
         tile_size: Tile side in metres.
         margin: Safety factor applied to ``k_tile`` to get ``k_tile_safe``.
         max_bytes: Ceiling on the accumulator this may allocate.

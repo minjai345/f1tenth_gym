@@ -624,6 +624,38 @@ pass independently.
   remaining Phase 5 work is host configuration/parameter construction, reset
   overrides, observation packaging and Gymnasium/device-batched adapters.
 
+#### Phase 5d implementation record — 2026-08-31
+
+- The deep-import host builder translates the supported ``EnvConfig`` surface
+  and one already-resolved ``Track`` into ``CoreConfig``, ``CoreTables`` and
+  ``CoreParams``. ``build_core`` selects the single device requested by active
+  contact/sensing, places every array tree there and returns one ``CoreBundle``
+  ready for ``reset_core``/``step_core``; mixed active devices fail before map
+  preprocessing.
+- Static model/integrator/controller/substep/delay/reset/contact/sensor/reward/
+  termination choices and traced physical, noise, solver, limit and reward
+  values now come from the current frozen config tree. Production continuous
+  parameters are explicitly float32, counters int32 and flags boolean even
+  when Python inputs are integral or process-wide JAX x64 is enabled.
+- Unsupported host behavior fails explicitly rather than falling through:
+  winding-angle laps, ``MAP_RANDOM_STATIC``, Python ``CUSTOM`` rewards and
+  non-default contact wall extraction tolerance are not part of this core
+  builder. Reset overrides and custom callback execution remain adapter work.
+- Varying domain-randomization bounds require an explicit already-sampled
+  shared ``VehicleParameters`` until key-driven device sampling lands. The
+  draw is checked across every supported dynamics/body field, while contact
+  tables are sized from the full bound envelope. Constant bounds need no draw.
+- Structurally disabled contact and LiDAR no longer build unused acceleration
+  indexes. Collision ``NONE`` receives constant-size masked contact/pair
+  placeholders, disabled LiDAR receives a masked ray placeholder, and wall
+  extraction is skipped when neither subsystem consumes it. Contact broad-
+  phase reach now includes the collision body's CoG-relative offset as well as
+  its half extents, including independent domain-randomization endpoints.
+- Mapping, rejection, device placement, dtype, disabled-allocation, reset/
+  jitted-step smoke and CoG-relative contact-budget tests are executable gates.
+  Phase 5 remains open for reset overrides, observation packaging, key-driven
+  parameter draws and Gymnasium/device-batched framework adapters.
+
 ### Phase 6 — batched training and performance decisions
 
 - Run a complete device-native PPO training job; imported training code is a

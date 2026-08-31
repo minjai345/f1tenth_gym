@@ -21,6 +21,7 @@ from f1tenth_gym.envs.track.ray_tiles import (
     DEFAULT_TILE_SIZE as RAY_TILE_SIZE,
     build_for_track as build_ray_tiles,
 )
+from f1tenth_gym.envs.track.walls import empty_walls, wall_segments
 
 from .lidar import ScanParams
 from .pairs import PairTable, make_pair_table
@@ -136,6 +137,22 @@ def _ray_table(index) -> TileTable:
     )
 
 
+def _empty_tile_table(tile_size: float) -> TileTable:
+    """Return one masked slot for a structurally disabled geometry query."""
+    tile_size = float(tile_size)
+    if not math.isfinite(tile_size) or tile_size <= 0.0:
+        raise ValueError(
+            f"disabled geometry tile_size must be finite and > 0, got {tile_size}"
+        )
+    return TileTable(
+        indices=jnp.zeros((1, 1, 1), dtype=jnp.int32),
+        mask=jnp.zeros((1, 1, 1), dtype=jnp.bool_),
+        origin=jnp.zeros((2,), dtype=jnp.float32),
+        tile_size=jnp.asarray(tile_size, dtype=jnp.float32),
+        reach=jnp.asarray(0.0, dtype=jnp.float32),
+    )
+
+
 def build_track_table(
     track,
     vehicle_params,
@@ -143,34 +160,53 @@ def build_track_table(
     domain_randomization=None,
     contact_tile_size: float = CONTACT_TILE_SIZE,
     contact_margin: float = DEFAULT_MARGIN,
-    ray_max_range: float = 30.0,
+    contact_enabled: bool = True,
+    ray_max_range: float | None = 30.0,
     ray_tile_size: float = RAY_TILE_SIZE,
     max_bytes: int = DEFAULT_MAX_BYTES,
 ) -> TrackTable:
     """Extract one current ``Track`` on the host and transfer its tables to JAX."""
-    walls, _budget, contact_index = build_contact_tiles(
-        track,
-        vehicle_params,
-        domain_randomization,
-        tile_size=contact_tile_size,
-        margin=contact_margin,
-        max_bytes=max_bytes,
-    )
-    ray_walls, ray_index = build_ray_tiles(
-        track,
-        ray_max_range,
-        tile_size=ray_tile_size,
-        max_bytes=max_bytes,
-    )
-    if ray_walls is not walls:
-        if len(ray_walls) != len(walls) or not np.array_equal(ray_walls.a, walls.a):
-            raise ValueError("contact and ray preprocessing produced different walls")
+    needs_walls = contact_enabled or ray_max_range is not None
+    walls = wall_segments(track) if needs_walls else empty_walls()
+    if contact_enabled:
+        contact_walls, _budget, contact_index = build_contact_tiles(
+            track,
+            vehicle_params,
+            domain_randomization,
+            tile_size=contact_tile_size,
+            margin=contact_margin,
+            max_bytes=max_bytes,
+        )
+        if contact_walls is not walls and (
+            len(contact_walls) != len(walls)
+            or not np.array_equal(contact_walls.a, walls.a)
+        ):
+            raise ValueError("contact preprocessing produced different walls")
+        contact_table = _contact_table(contact_index)
+    else:
+        contact_table = _empty_tile_table(contact_tile_size)
+
+    if ray_max_range is not None:
+        ray_walls, ray_index = build_ray_tiles(
+            track,
+            ray_max_range,
+            tile_size=ray_tile_size,
+            max_bytes=max_bytes,
+        )
+        if ray_walls is not walls and (
+            len(ray_walls) != len(walls)
+            or not np.array_equal(ray_walls.a, walls.a)
+        ):
+            raise ValueError("ray preprocessing produced different walls")
+        ray_table = _ray_table(ray_index)
+    else:
+        ray_table = _empty_tile_table(ray_tile_size)
     return TrackTable(
         centerline=_spline_table(track.centerline),
         raceline=_spline_table(track.raceline),
         walls=_wall_table(walls),
-        contact_tiles=_contact_table(contact_index),
-        ray_tiles=_ray_table(ray_index),
+        contact_tiles=contact_table,
+        ray_tiles=ray_table,
     )
 
 
