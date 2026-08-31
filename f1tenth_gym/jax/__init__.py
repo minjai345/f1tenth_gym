@@ -4,8 +4,10 @@ The functional environment is intentionally assembled in layers. This
 namespace exposes pure dynamics, control, state, reference-line, reset,
 geometry, sensing, and episode kernels. Host-only map extraction lives in
 :mod:`f1tenth_gym.jax.preprocess`, and ``EnvConfig`` conversion lives in the
-deep-import :mod:`f1tenth_gym.jax.builder`. Importing this package does not
-resolve maps, construct a Gymnasium environment, or initialize rendering.
+deep-import :mod:`f1tenth_gym.jax.builder`. Gymnasium observation packaging is
+also a deep import from :mod:`f1tenth_gym.jax.gym_observation`. Importing this
+package does not resolve maps, construct a Gymnasium environment, or initialize
+rendering.
 """
 
 from .dynamics import (

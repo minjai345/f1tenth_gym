@@ -653,8 +653,45 @@ pass independently.
   its half extents, including independent domain-randomization endpoints.
 - Mapping, rejection, device placement, dtype, disabled-allocation, reset/
   jitted-step smoke and CoG-relative contact-budget tests are executable gates.
-  Phase 5 remains open for reset overrides, observation packaging, key-driven
-  parameter draws and Gymnasium/device-batched framework adapters.
+  At this checkpoint Phase 5 remained open for reset overrides, observation
+  packaging, key-driven parameter draws and Gymnasium/device-batched framework
+  adapters.
+
+#### Phase 5e implementation record — 2026-08-31
+
+- Explicit pose and full-native-state reset functions now share the sampled
+  core's complete initializer. Pose overrides zero every motion channel; state
+  overrides preserve KS/ST values after production-dtype conversion. Both
+  globally seed Frenet/lap/progress references, clear controls/FIFOs/contact
+  events, draw sensor bias, return a real first scan and never solve contact at
+  spawn.
+- Every reset path reserves the same named pose/bias/scan key children. An
+  override discards only the sampling child, so choosing a reset mode does not
+  shift functional sensor streams. This is intentionally different from the
+  mutable environment's sequential NumPy generator and remains deterministic
+  under ``jit`` and environment ``vmap``.
+- Shared component-based observation bound/space helpers let host adapters
+  preserve the mutable provider's finite spaces without constructing a fake
+  simulator. The deep-import ``GymObservationAdapter`` resolves all six current
+  observation types, gates scan/Frenet fields, transfers only selected canonical
+  dependencies, computes established derived fields, and returns independent
+  float32 NumPy leaves with the documented agent dictionaries or ``DIRECT``
+  batched keys.
+- The internal disabled-LiDAR beam and disabled-Frenet values never enter a
+  public layout. Widest domain-randomization limits, integrator-step overshoot,
+  state dimension, track extents and configured sensor geometry feed the same
+  space construction as the mutable environment. Observation time comes only
+  from ``CoreObservation`` so the deliberate metrics/info clock split survives.
+- Observation layout construction consumes the paired ``CoreBundle`` rather
+  than independently supplied topology. The bundle retains its source
+  ``EnvConfig`` and resolved host ``Track``; an optional ``ObservationConfig``
+  changes only the public view. The adapter also validates the traced scan
+  range, preventing stale pieces from declaring bounds the core can violate.
+- This slice provides reusable reset and packaging boundaries, not a new
+  Gymnasium environment. Seed continuation, reset-option parsing, actions,
+  scalar ego rewards, final info, custom callbacks, configure/update behavior,
+  rendering, device-batched policy layouts and key-driven parameter draws remain
+  Phase 5 adapter work.
 
 ### Phase 6 — batched training and performance decisions
 

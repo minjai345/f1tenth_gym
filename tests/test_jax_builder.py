@@ -328,6 +328,8 @@ class TestDomainRandomizationMapping(unittest.TestCase):
         self.assertAlmostEqual(float(params.transition.dynamics.m), 3.5)
 
         bundle = build_core(self.host, self.track, vehicle_params=sampled)
+        self.assertIs(bundle.env_config, self.host)
+        self.assertIs(bundle.track, self.track)
         self.assertAlmostEqual(float(bundle.params.transition.dynamics.m), 3.5)
         for leaf in jax.tree.leaves((bundle.tables, bundle.params)):
             self.assertEqual(leaf.device, bundle.device)

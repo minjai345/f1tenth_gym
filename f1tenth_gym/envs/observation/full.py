@@ -3,10 +3,16 @@ from __future__ import annotations
 import gymnasium as gym
 import numpy as np
 
-from .base import Observation, scan_space
+from .base import Observation, scan_space_from
 from .fields import ALL_FIELDS, BASE_FIELDS, DERIVED_FIELDS
 
-__all__ = ["FullObservation", "field_space", "physical_bounds"]
+__all__ = [
+    "FullObservation",
+    "field_space",
+    "field_space_from",
+    "physical_bounds",
+    "physical_bounds_from",
+]
 
 # the single vocabulary lives in fields.py, shared with the factory
 _BASE_FIELDS = BASE_FIELDS
@@ -26,22 +32,15 @@ _EY_LIMIT = 20.0     # metres of lateral Frenet deviation
 _BETA_LIMIT = _PI    # slip angle (physically < pi/2; pi is a safe cap)
 
 
-def physical_bounds(env) -> dict:
-    """Finite, roughly-physical bounds for the observation fields, derived from
-    the vehicle limits and track extents.
+def physical_bounds_from(params, track, integrator_dt: float) -> dict:
+    """Derive finite observation bounds from explicit environment parts."""
 
-    Module-level so RawObservation can reuse the derivation instead of building a
-    throwaway FullObservation just to reach a private method.
-    """
-    env = env.unwrapped
-    # Widest params across the DR bounds, so randomized episodes stay inside the
-    # fixed space. No fallback: it would substitute the nominal params silently.
-    p = env.space_vehicle_params
+    p = params
     v_min, v_max = float(p.v_min), float(p.v_max)
     s_min, s_max = float(p.s_min), float(p.s_max)
     # The constraints zero the actuator RATE only after the limit is crossed, so
     # one step can overshoot by rate * integrator_dt. Pad by that worst case.
-    idt = float(getattr(env.sim, "integrator_dt", env.timestep))
+    idt = float(integrator_dt)
     s_min -= float(p.sv_max) * idt
     s_max += float(p.sv_max) * idt
     v_min -= float(p.a_max) * idt
@@ -52,7 +51,6 @@ def physical_bounds(env) -> dict:
     steer_hi = max(abs(s_min), abs(s_max))
     yaw_rate = 1.5 * spd_hi * float(np.tan(steer_hi)) / wheelbase
 
-    track = env.track
     cl = getattr(track, "centerline", None) if track is not None else None
     if cl is not None:
         xs = np.asarray(cl.xs, dtype=float)
@@ -67,14 +65,48 @@ def physical_bounds(env) -> dict:
         s_arc = _TIME_LIMIT
     return dict(
         v_min=v_min, v_max=v_max, spd_hi=spd_hi, s_min=s_min, s_max=s_max,
-        yaw_rate=yaw_rate, x_lo=x_lo, x_hi=x_hi, y_lo=y_lo, y_hi=y_hi, s_arc=s_arc,
+        yaw_rate=yaw_rate, x_lo=x_lo, x_hi=x_hi, y_lo=y_lo, y_hi=y_hi,
+        s_arc=s_arc,
     )
 
-def field_space(field: str, sim, b: dict) -> gym.Space:
+
+def physical_bounds(env) -> dict:
+    """Finite, roughly-physical bounds for the observation fields, derived from
+    the vehicle limits and track extents.
+
+    Module-level so RawObservation can reuse the derivation instead of building a
+    throwaway FullObservation just to reach a private method.
+    """
+    env = env.unwrapped
+    # Widest params across the DR bounds, so randomized episodes stay inside the
+    # fixed space. No fallback: it would substitute the nominal params silently.
+    idt = float(getattr(env.sim, "integrator_dt", env.timestep))
+    return physical_bounds_from(
+        params=env.space_vehicle_params,
+        track=env.track,
+        integrator_dt=idt,
+    )
+
+
+def field_space_from(
+    field: str,
+    state_dim: int,
+    scan_enabled: bool,
+    scan_num_beams: int,
+    scan_max_range: float,
+    bounds: dict,
+) -> gym.Space:
+    """Build one field space from explicit simulator components."""
+
+    b = bounds
     f32 = np.float32
     Box = gym.spaces.Box
     if field == "scan":
-        return scan_space(sim)
+        return scan_space_from(
+            enabled=scan_enabled,
+            num_beams=scan_num_beams,
+            range_max=scan_max_range,
+        )
     if field == "collision":
         return _scalar_box(0.0, 1.0)
     if field in ("lap_time", "lap_count", "sim_time"):
@@ -108,12 +140,25 @@ def field_space(field: str, sim, b: dict) -> gym.Space:
     if field == "state":  # KS: [x,y,delta,v,yaw]; ST adds [yaw_rate, beta]
         lo = [b["x_lo"], b["y_lo"], b["s_min"], b["v_min"], -_PI, -b["yaw_rate"], -_BETA_LIMIT]
         hi = [b["x_hi"], b["y_hi"], b["s_max"], b["v_max"], _PI, b["yaw_rate"], _BETA_LIMIT]
-        n = sim.state_dim
+        n = state_dim
         while len(lo) < n:  # pad any extra dims (e.g. MB) with a finite fallback
             lo.append(-_TIME_LIMIT)
             hi.append(_TIME_LIMIT)
         return Box(low=np.array(lo[:n], f32), high=np.array(hi[:n], f32), dtype=f32)
     raise ValueError(f"no space builder for observation field {field!r}")
+
+
+def field_space(field: str, sim, b: dict) -> gym.Space:
+    """Build one field space from a mutable simulator."""
+
+    return field_space_from(
+        field=field,
+        state_dim=sim.state_dim,
+        scan_enabled=sim.scan_enabled,
+        scan_num_beams=sim.scan_num_beams,
+        scan_max_range=sim.scan_max_range,
+        bounds=b,
+    )
 
 
 class FullObservation(Observation):
@@ -222,6 +267,3 @@ class FullObservation(Observation):
             observations[agent_id] = agent_obs
 
         return observations
-
-
-

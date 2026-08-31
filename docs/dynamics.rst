@@ -59,11 +59,13 @@ per-agent events; collisions never latch or freeze a vehicle.
 
 ``reset_core`` and ``step_core`` compose those layers into one immutable,
 explicit-key environment transition. Reset samples poses, projects Frenet state
-and produces a real first scan. Each step advances actuation/dynamics, resolves
-optional contact, projects the corrected pose, observes LiDAR and updates
-progress, laps, rewards and end status. ``CoreObservation`` is a fixed batched
-vocabulary for later adapters; ``CoreMetrics`` distinguishes termination from
-timeout truncation. The core does not auto-reset.
+and produces a real first scan. ``reset_core_from_poses`` and
+``reset_core_from_state`` provide fixed-shape override entry points with the
+same episode and sensor initialization. Each step advances actuation/dynamics,
+resolves optional contact, projects the corrected pose, observes LiDAR and
+updates progress, laps, rewards and end status. ``CoreObservation`` is a fixed
+batched vocabulary for later adapters; ``CoreMetrics`` distinguishes
+termination from timeout truncation. The core does not auto-reset.
 
 These functions support ``jax.jit``, environment-level ``jax.vmap``,
 ``lax.scan`` and differentiation away from geometry switches. The standalone
@@ -79,14 +81,21 @@ already-resolved ``Track`` into a device-placed bundle::
    bundle = build_core(config, track)
 
 ``bundle.config``, ``bundle.tables`` and ``bundle.params`` can be passed to
-``reset_core`` and ``step_core``. This is construction for the functional core,
-not a Gymnasium adapter: it does not package observation presets, render, or
-turn ``EnvConfig.seed`` into JAX keys. ``CUSTOM`` rewards, winding-angle laps,
-``MAP_RANDOM_STATIC`` and reset pose/state overrides remain adapter work. When
-domain-randomization bounds vary, callers currently pass one already-sampled
-shared ``VehicleParameters``; key-driven parameter sampling is not yet composed.
-Active contact and LiDAR must select the same JAX device, and functional contact
-currently requires the default wall-extraction tolerance.
+``reset_core`` and ``step_core``; ``bundle.track`` keeps the resolved host track
+paired with those device arrays for adapters. This is construction for the
+functional core, not a Gymnasium environment: it does not render or turn
+``EnvConfig.seed`` into JAX keys. The deep-import ``GymObservationAdapter``
+packages every current observation preset and ``DIRECT`` layout with finite
+Gymnasium spaces, selective device transfer and independent float32 copies, but
+does not own an environment lifecycle. Construct it with
+``GymObservationAdapter.from_bundle(bundle)``; an optional
+``ObservationConfig`` selects another view without replacing the bundle's
+source configuration, so sensor values and declared bounds cannot diverge.
+``CUSTOM`` rewards, winding-angle laps and ``MAP_RANDOM_STATIC`` remain adapter
+work. When domain-randomization bounds vary, callers currently pass one
+already-sampled shared ``VehicleParameters``; key-driven parameter sampling is
+not yet composed. Active contact and LiDAR must select the same JAX device, and
+functional contact currently requires the default wall-extraction tolerance.
 Use the Gymnasium API for training until the framework adapters land.
 
 ``delta`` is the steering angle, ``v`` the longitudinal speed, ``yaw`` the

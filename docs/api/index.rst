@@ -63,7 +63,8 @@ Functional JAX kernels
 ----------------------
 
 These device-compatible pytrees and pure functions include a complete explicit-
-key transition core. They are not yet a Gymnasium environment or adapter.
+key transition core. They do not themselves implement a Gymnasium environment;
+host construction and observation packaging are listed below.
 
 .. autosummary::
 
@@ -112,6 +113,7 @@ key transition core. They are not yet a Gymnasium environment or adapter.
    f1tenth_gym.jax.cartesian_to_frenet_local
    f1tenth_gym.jax.frenet_to_cartesian
    f1tenth_gym.jax.sample_reset_poses
+   f1tenth_gym.jax.model_state_from_poses
    f1tenth_gym.jax.reset_dynamics_state
    f1tenth_gym.jax.body_vertices
    f1tenth_gym.jax.lidar_poses
@@ -129,6 +131,8 @@ key transition core. They are not yet a Gymnasium environment or adapter.
    f1tenth_gym.jax.advance_episode
    f1tenth_gym.jax.observe_core
    f1tenth_gym.jax.reset_core
+   f1tenth_gym.jax.reset_core_from_poses
+   f1tenth_gym.jax.reset_core_from_state
    f1tenth_gym.jax.step_core
 
 .. automodule:: f1tenth_gym.jax
@@ -163,8 +167,8 @@ Host JAX construction
 ---------------------
 
 These helpers run outside compiled transitions. They convert a resolved host
-track and the supported ``EnvConfig`` surface into fixed arrays and a
-device-placed functional core bundle.
+track and the supported ``EnvConfig`` surface into fixed device arrays paired
+with their source host configuration and track.
 
 .. autosummary::
 
@@ -173,6 +177,7 @@ device-placed functional core bundle.
    f1tenth_gym.jax.builder.build_core_config
    f1tenth_gym.jax.builder.build_core_tables
    f1tenth_gym.jax.builder.build_core_params
+   f1tenth_gym.jax.gym_observation.GymObservationAdapter
    f1tenth_gym.jax.preprocess.build_track_table
    f1tenth_gym.jax.preprocess.build_track_table_set
    f1tenth_gym.jax.preprocess.build_reset_table
@@ -185,6 +190,8 @@ device-placed functional core bundle.
 .. automodule:: f1tenth_gym.jax.builder
 
 .. automodule:: f1tenth_gym.jax.preprocess
+
+.. automodule:: f1tenth_gym.jax.gym_observation
 
 Actions
 -------

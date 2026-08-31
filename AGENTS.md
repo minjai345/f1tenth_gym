@@ -5,7 +5,7 @@ work, then read the named source and tests before changing a subsystem. The
 published Sphinx pages are the user-facing source of truth for behavior and
 examples; this file focuses on architecture, invariants, and change seams.
 
-Baseline reviewed: Phase 5d on 2026-08-31, based on `839441e`. Treat counts
+Baseline reviewed: Phase 5e on 2026-08-31, based on `9a6d88f`. Treat counts
 and the known-rough-edges section as a snapshot and re-check them against
 `HEAD`.
 
@@ -228,6 +228,7 @@ rather than equality.
 | `envs/contact/` | JAX manifolds/solvers and the NumPy/JAX adapter |
 | `f1tenth_gym/jax/` | pure functional reset/step plus dynamics, sensing, contact and episode layers |
 | `f1tenth_gym/jax/builder.py` | host `EnvConfig`/`Track` conversion and device placement |
+| `f1tenth_gym/jax/gym_observation.py` | host Gym observation layout, spaces and device-to-NumPy packaging |
 | `f1tenth_gym/jax/preprocess.py` | host fixed-shape track/reset/pair table construction |
 | `envs/track/track.py` | map/reference-line loading and Frenet transforms |
 | `envs/track/walls.py` | oriented wall extraction from occupancy maps |
@@ -238,7 +239,7 @@ rather than equality.
 | `envs/rendering/` | PyQt6/OpenGL renderer, objects, callbacks |
 | `envs/wrappers.py` | single-agent and observation-delay wrappers |
 | `examples/` | waypoint following, video, telemetry, synthetic tracks |
-| `tests/` | 613 collected tests across 46 `test_*.py` files |
+| `tests/` | 630 collected tests across 47 `test_*.py` files |
 | `docs/` | Sphinx user documentation plus behavioral measurements |
 
 ## Configuration model
@@ -358,15 +359,29 @@ that vary under environment-level `vmap` without recompilation.
 `CoreTables` holds reset, track and pair arrays; `CoreParams` keeps every varying
 value traced; and `CoreState` is the full immutable rollout carry. `reset_core`
 samples poses and fixed scan bias, globally projects Frenet state and returns a
-real first scan. `step_core` executes dynamics, optional wall/pair response,
-corrected-pose local Frenet projection, optional observed scanning and episode
-bookkeeping in the mutable simulator's order. Its canonical batched observation
-keeps the deliberate pre-transition time while metrics expose post-transition
-time. Contact `NONE` emits fresh false events without response; disabled LiDAR
-uses one internal beam; disabling Frenet also disables lap termination and is
-incompatible with the PROGRESS reward. The core never auto-resets or freezes a
-terminated agent. Gymnasium packaging, reset overrides, winding-angle laps and
-key-driven domain-randomization sampling remain adapter work.
+real first scan. Separate pose and full-native-state reset entry points reuse the
+same initialization, reserve the same named key children, zero controls/FIFOs
+and never adjudicate contact at spawn. `step_core` executes dynamics, optional
+wall/pair response, corrected-pose local Frenet projection, optional observed
+scanning and episode bookkeeping in the mutable simulator's order. Its canonical
+batched observation keeps the deliberate pre-transition time while metrics
+expose post-transition time. Contact `NONE` emits fresh false events without
+response; disabled LiDAR uses one internal beam; disabling Frenet also disables
+lap termination and is incompatible with the PROGRESS reward. The core never
+auto-resets or freezes a terminated agent.
+
+The deep-import `jax/gym_observation.py` resolves all current observation
+presets and gates from `EnvConfig`, shares finite-bound builders with the mutable
+providers, transfers only the canonical leaves a layout consumes, and emits
+independent float32 NumPy copies. It deliberately omits the disabled-sensor
+placeholder and preserves the lagged observation clock. Construct it through
+`GymObservationAdapter.from_bundle()`: the bundle retains its source
+`EnvConfig`, resolved host `Track`, traced scan range and static topology. An
+optional `ObservationConfig` can choose another view without independently
+mixing config/core pieces and making the declared space false. It is a packaging
+utility, not a Gymnasium environment; seeding/lifecycle, info dictionaries,
+custom rewards, action validation and render integration remain future adapter
+work. Key-driven domain-randomization sampling also remains open.
 
 The deep-import host builder maps supported ``EnvConfig`` topology and traced
 values plus one resolved ``Track`` into a device-placed ``CoreBundle``. It
@@ -384,8 +399,9 @@ active component devices.
 
 Keep the kernel/core modules pure JAX/array math, fixed-shape,
 jittable/vmappable, free of Gym and package-local imports, and free of NumPy
-marshalling. Host conversion, device selection, map preprocessing, and caches
-belong in the host builder or adapters. The contract is enforced by
+marshalling. Host conversion, device selection, map preprocessing, observation
+spaces/packaging and caches belong in the host builder or adapters. The
+contract is enforced by
 `tests/test_migration_seam.py`.
 
 JAX initializes multithreaded runtime state. Async Gymnasium vector workers

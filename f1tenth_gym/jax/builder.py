@@ -68,12 +68,14 @@ from .track import FrenetProjectionConfig, TrackTable
 
 @dataclass(frozen=True)
 class CoreBundle:
-    """Device-placed aggregate ready for ``reset_core`` and ``step_core``."""
+    """Paired resolved track and device arrays ready for core/adapters."""
 
+    env_config: EnvConfig
     config: CoreConfig
     tables: CoreTables
     params: CoreParams
     device: Any
+    track: Track
 
 
 def _float32_tree(tree: Any):
@@ -518,10 +520,12 @@ def build_core(
         vehicle_params=vehicle_params,
     )
     return CoreBundle(
+        env_config=config,
         config=core_config,
         tables=_put_on_device(tables, device),
         params=_put_on_device(params, device),
         device=device,
+        track=track,
     )
 
 
