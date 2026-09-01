@@ -889,6 +889,34 @@ throughput are published, and defaults follow the measured final program.
   methodology, command shapes, CPU/GPU tables and placement guidance are
   published in ``docs/jax_performance.rst``. Phase 6 is complete.
 
+#### Phase 6d responsibility-first cleanup record — 2026-09-01
+
+- The Phase 1 through Phase 6c records above preserve the names and paths that
+  existed when each slice landed. They are historical, not the current import
+  surface. The separate ``f1tenth_gym.jax`` namespace was subsequently removed
+  and its implementation redistributed beside the owning environment,
+  dynamics, action, integration, contact, LiDAR, reset, track, episode,
+  observation and batching subsystems under ``f1tenth_gym.envs``.
+- ``JaxSimulator(config, track, device=...)`` now owns host configuration,
+  preprocessing, validation, placement and compiled single-environment reset/
+  step entry points. ``IndexedJaxSimulator`` owns exact-shape indexed-map
+  construction, and ``GymObservationAdapter.from_simulator()`` derives a host
+  observation view from that configured simulator. These surfaces supersede
+  the staged ``build_core``/``build_indexed_core`` functions, ``CoreBundle``
+  facade and ``from_bundle()`` adapter construction described in the earlier
+  implementation records; the necessary ``CoreConfig``/``CoreTables``/
+  ``CoreParams`` split remains internal and explicit for JAX tracing.
+- The current parameter names describe their ownership directly:
+  ``DynamicsRuntimeParams(vehicle=...)`` holds traced dynamics values,
+  ``EpisodeParams`` holds episode bookkeeping, and ``CoreParams`` exposes them
+  as ``dynamics`` and ``episode``.
+- The repository-only native PPO CPU gate and full-rollout CPU/RTX 3080 gates
+  were rerun successfully immediately before removal. The
+  ``benchmarks`` and ``validation`` directories and their 18 harness-only tests
+  were then deleted. ``docs/jax_performance.rst`` retains the protocol, measured
+  tables and placement conclusions as historical migration evidence without
+  presenting deleted commands as a supported interface.
+
 ---
 
 ## 05 · Numerical and architectural traps

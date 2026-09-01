@@ -1,12 +1,15 @@
 JAX training and throughput measurements
 ========================================
 
-The functional core has two performance claims with different evidence.  A
-complete native PPO job proves that rollout, reset, terminal targets and an
-optimizer can remain in one JAX program.  A separate rollout harness compares
-the functional batch with the mutable Gymnasium reference on equivalent
-physics.  Neither result predicts the Python-facing ``JaxF110Env`` adapter,
-which transfers observations to NumPy on every step.
+The functional JAX simulator's historical Phase 6 migration used two separate
+forms of evidence.  A complete native PPO job demonstrated that rollout, reset,
+terminal targets and an optimizer could remain in one JAX program.  A rollout
+harness compared the functional batch with the mutable Gymnasium reference on
+equivalent physics.  The native PPO CPU gate and the full-rollout CPU/RTX 3080
+gates were rerun successfully immediately before their removal; they are not
+shipped interfaces or current commands.  Neither result predicts the
+Python-facing ``JaxF110Env`` adapter, which transfers observations to NumPy on
+every step.
 
 Measurement protocol
 --------------------
@@ -16,8 +19,8 @@ production state and Python 3.13.11.  The CPU is an Intel Core i9-11980HK with
 8 cores, 16 threads and 62 GiB of RAM.  The accelerator is an NVIDIA GeForce
 RTX 3080 Laptop GPU with 16 GiB; CPU and GPU results are reported separately.
 
-``benchmarks/phase6_rollout.py`` constructs the same track, poses, controls,
-actions, model, integrator and episode settings for both implementations.
+The rollout harness constructed the same track, poses, controls, actions,
+model, integrator and episode settings for both implementations.
 State-only work uses a wall-free synthetic circuit because sensing and contact
 are disabled.  LiDAR, contact and full transitions use a deterministic annular
 road whose sub-pixel extraction produces 154 wall segments.  LiDAR starts on
@@ -25,12 +28,12 @@ the centerline, so beams intersect real walls.  Contact and full workloads
 place every body 4 cm into the outer wall; resting slop keeps every agent in
 contact for every measured transition.
 
-The schema requires zero colliding-agent steps for state/LiDAR and exactly
-``batch * agents * rollout_length`` for contact/full.  It rejects an empty or
-partly inactive contact workload.  Both implementations consume every numeric
+The schema required zero colliding-agent steps for state/LiDAR and exactly
+``batch * agents * rollout_length`` for contact/full.  It rejected an empty or
+partly inactive contact workload.  Both implementations consumed every numeric
 and boolean element of every transition in a checksum.  Construction and reset
-are outside the steady timer, JAX compilation is separate, and every warm-up
-and measured call is synchronized.  Mutable environments reset before each
+were outside the steady timer, JAX compilation was separate, and every warm-up
+and measured call was synchronized.  Mutable environments reset before each
 run.  Each row is the median of three runs after one warm-up:
 
 .. list-table::
@@ -62,37 +65,21 @@ run.  Each row is the median of three runs after one warm-up:
      - 96
      - persistent contact plus 1080 beams
 
-The common command pattern is:
+CPU runs forced the CPU JAX platform and compared both implementations.  GPU
+runs exercised only the functional JAX implementation and used one batch size
+per process so the allocator's process-lifetime peak was not inherited from a
+previous compilation.  Indexed rows used translated equal-shape maps, while
+the reference-table experiments varied their track-point count.  The rates are
+measurements on this machine, not API guarantees.
 
-.. code-block:: bash
-
-   env -u PYTHONPATH JAX_PLATFORMS=cpu \
-     UV_CACHE_DIR=/tmp/f1tenth-gym-uv-cache \
-     uv run --no-sync python -m benchmarks.phase6_rollout \
-     --scenario full --model ST --agents 2 --beams 1080 \
-     --batch-sizes 1,8,16,64 --rollout-length 32 \
-     --repetitions 3 --warmup-runs 1 --device cpu --backend both \
-     --output phase6-full-cpu.json
-
-Use ``--device gpu --backend jax`` for accelerator-only runs.  GPU rows below
-were run one batch size per process so the allocator's process-lifetime peak is
-not inherited from another compiled batch.  ``--unique-maps`` selects
-translated equal-shape maps through the indexed runtime; ``--track-points``
-changes reference-table size.  The rates are measurements on this machine,
-not API guarantees.
-
-Native PPO gate
----------------
+Native PPO measurement
+----------------------
 
 The validation policy observes steering angle and speed, emits a joint latent
 Gaussian action followed by ``tanh``, and tracks a 3 m/s target with direct
 steering-rate and acceleration control.  It is deliberately a small validation
-task rather than a racing benchmark.  The job uses 64 environments, 64 steps
-per rollout and 24 updates, or 98,304 environment transitions:
-
-.. code-block:: bash
-
-   uv run --no-sync python validation/jax_native_ppo.py --device cpu
+task rather than a racing benchmark.  The recorded job used 64 environments,
+64 steps per rollout and 24 updates, or 98,304 environment transitions.
 
 On the reviewed CPU, deterministic fixed-key evaluation changed as follows:
 
@@ -116,9 +103,9 @@ On the reviewed CPU, deterministic fixed-key evaluation changed as follows:
 The first rollout/update compilation and execution took 1.62 s.  Later updates
 sustained about 49,229 environment-steps/s including PPO optimization, and
 every parameter, optimizer, loss and reported metric remained finite.  The
-test oracle separately proves that natural termination zero-bootstraps, timeout
-truncation bootstraps the terminal transition observation, and both stop GAE
-recurrence across auto-reset.
+migration-time mathematical checks separately verified that natural
+termination zero-bootstraps, timeout truncation bootstraps the terminal
+transition observation, and both stop GAE recurrence across auto-reset.
 
 The same fixed job passed on the RTX 3080.  Its objective improved from
 0.000000 to 0.929017, final mean speed was 2.881180 m/s, the first compiled

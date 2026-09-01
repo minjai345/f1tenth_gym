@@ -36,7 +36,7 @@ jobs:
       # exit-zero treats all errors as warnings; advisory only
       run: >-
         uv run --no-sync flake8
-        f1tenth_gym tests examples benchmarks validation docs/style_lint.py
+        f1tenth_gym tests examples docs/style_lint.py
         --statistics --exit-zero
 
     - name: Check the docs house style
