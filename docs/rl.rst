@@ -78,7 +78,7 @@ it directly and use the same wrappers:
    from gymnasium.wrappers import FlattenObservation
 
    from f1tenth_gym.envs.wrappers import SingleAgentWrapper
-   from f1tenth_gym.jax.gym_env import JaxF110Env
+   from f1tenth_gym.envs.jax_env import JaxF110Env
 
    env = JaxF110Env(cfg)
    env = SingleAgentWrapper(env)
@@ -167,16 +167,15 @@ The pure batch adapters add an environment axis without changing the physics
 core.  The shared-map entry points below use one ``CoreConfig`` and one map
 table; state and episode parameters have an independent leading row for every
 environment.  The indexed variant described afterward selects among stacked
-equal-shape tables.  Build a shared bundle on the requested device, then close
-it over compiled reset and step functions:
+equal-shape tables.  Construct a simulator on the requested device, then close
+over its tables, topology and parameters in compiled reset and step functions:
 
 .. code-block:: python
 
    import jax
    import jax.numpy as jnp
 
-   from f1tenth_gym.envs.track import Track
-   from f1tenth_gym.jax import (
+   from f1tenth_gym.envs.batching import (
        PolicyField,
        PolicyLayout,
        policy_observation,
@@ -184,10 +183,11 @@ it over compiled reset and step functions:
        scale_normalized_actions,
        step_batch_autoreset,
    )
-   from f1tenth_gym.jax.builder import build_core
+   from f1tenth_gym.envs.jax_simulator import JaxSimulator
+   from f1tenth_gym.envs.track import Track
 
    track = Track.from_track_name("Spielberg", 1.0)
-   bundle = build_core(cfg, track, target_device="cpu")
+   simulator = JaxSimulator(cfg, track, device="cpu")
    batch_size = 64
    layout = PolicyLayout((PolicyField.KINEMATIC_STATE,))
 
@@ -195,10 +195,10 @@ it over compiled reset and step functions:
    def reset(keys):
        return reset_batch(
            keys,
-           bundle.tables,
-           bundle.config,
-           bundle.params,
-           bundle.randomization,
+           simulator.tables,
+           simulator.config,
+           simulator.params,
+           simulator.randomization,
        )
 
    @jax.jit
@@ -208,25 +208,25 @@ it over compiled reset and step functions:
            reset_keys,
            state,
            actions,
-           bundle.tables,
-           bundle.config,
-           bundle.params,
-           bundle.randomization,
+           simulator.tables,
+           simulator.config,
+           simulator.params,
+           simulator.randomization,
        )
 
    root = jax.random.key(42)
    reset_keys = jax.random.split(jax.random.fold_in(root, 0), batch_size)
    observation, state = reset(reset_keys)
-   policy_input = policy_observation(observation, bundle.config, layout)
+   policy_input = policy_observation(observation, simulator.config, layout)
    assert policy_input.shape == (batch_size, cfg.num_agents, 5)
 
    normalized = jnp.zeros((batch_size, cfg.num_agents, 2), dtype=jnp.float32)
-   actions = scale_normalized_actions(normalized, state, bundle.config)
+   actions = scale_normalized_actions(normalized, state, simulator.config)
    step_keys = jax.random.split(jax.random.fold_in(root, 1), batch_size)
    next_reset_keys = jax.random.split(jax.random.fold_in(root, 2), batch_size)
    transition = step(step_keys, next_reset_keys, state, actions)
    policy_input = policy_observation(
-       transition.next_observation, bundle.config, layout
+       transition.next_observation, simulator.config, layout
    )
 
 Use time-major key/action arrays around ``step`` in ``jax.lax.scan`` for a
@@ -248,7 +248,7 @@ environment and receives ``(observation, actions, events, metrics, params)``;
 it must return one value per agent using JAX operations only.
 
 Policy distributions usually produce normalized actions.  The helper
-``batch_action_bounds(state, bundle.config)`` returns the active
+``batch_action_bounds(state, simulator.config)`` returns the active
 ``(batch, agents, 2)`` physical limits, including each environment's current
 domain-randomization draw.  ``scale_normalized_actions`` maps ``-1`` and ``1``
 to those limits and zero to their midpoint.  It deliberately does not clip:
@@ -257,7 +257,7 @@ not hidden.  Target-angle versus steering-rate control selects ``s_min/s_max``
 versus ``sv_min/sv_max``; target-speed versus acceleration selects
 ``v_min/v_max`` versus ``-a_max/a_max``.
 
-``bundle.randomization`` contains the finite active vehicle bounds.  Each reset
+``simulator.randomization`` contains the finite active vehicle bounds.  Each reset
 key draws one parameter row shared by every agent in that environment, and
 different environment rows can draw different physics without recompilation.
 The draw updates correlated dynamics and body geometry together.  A named
@@ -265,7 +265,7 @@ folded key keeps pose and sensor reset streams unchanged when randomization is
 toggled.  The contact table is already sized for the configured full bound
 envelope; substituting wider bounds at runtime is unsupported.
 
-``build_indexed_core(cfg, tracks)`` accepts one resolved ``Track`` per
+``IndexedJaxSimulator(cfg, tracks)`` accepts one resolved ``Track`` per
 environment row.  It preprocesses repeated object identities once, groups
 unique complete reset/track/pair tables by exact leaf shape, and returns one
 ``IndexedCoreBucket`` per compilation shape.  Within a bucket,
@@ -274,17 +274,15 @@ unique complete reset/track/pair tables by exact leaf shape, and returns one
 compile once per bucket, and stitch same-shaped outputs back into source order.
 This keeps small maps out of a globally padded worst-map table.  Direct callers
 must pass in-range indices: traced entry points validate shape and integer dtype,
-while ``build_indexed_core`` is the host boundary that validates values.
+while ``IndexedJaxSimulator`` is the host boundary that validates values.
 
-``target_device`` is authoritative when provided; without it, the builder
+``device`` is authoritative when provided; without it, the simulator
 follows active LiDAR/contact device settings and otherwise selects CPU.  The
-repository-only ``validation/jax_native_ppo.py`` job exercises a complete
-rollout, termination-correct GAE and PPO update without making a trainer part of
-the package API.  ``benchmarks/phase6_rollout.py`` separately measures compile
-latency, synchronized steady throughput and available allocator memory for
-state, LiDAR, contact, full and indexed-map scenarios.  See
-:doc:`jax_performance` for the measured baseline, workload definitions and
-command pattern.
+Phase 6 migration validated a complete native PPO rollout and update, then
+measured synchronized state, LiDAR, contact, full and indexed-map workloads on
+CPU and GPU.  Those repository-only harnesses were removed after the cleanup
+reran them successfully; see :doc:`jax_performance` for the retained protocol,
+measurements and placement guidance.
 
 JaxMARL status
 --------------

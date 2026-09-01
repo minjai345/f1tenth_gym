@@ -16,8 +16,8 @@ from f1tenth_gym.envs.lidar import ray_cast
 from f1tenth_gym.envs.lidar.segment_scan import SegmentScanSimulator2D
 from f1tenth_gym.envs.simulator import F110Simulator
 from f1tenth_gym.envs.track import Track
-from f1tenth_gym.jax.geometry import BodyParams, body_vertices
-from f1tenth_gym.jax.lidar import (
+from f1tenth_gym.envs.contact.geometry import BodyParams, body_vertices
+from f1tenth_gym.envs.lidar.functional import (
     ScanConfig,
     ScanParams,
     beam_angles,
@@ -25,8 +25,8 @@ from f1tenth_gym.jax.lidar import (
     lidar_poses,
     opponent_ranges,
 )
-from f1tenth_gym.jax.preprocess import build_scan_params, build_track_table
-from f1tenth_gym.jax.track import TileTable, WallTable
+from f1tenth_gym.envs.track.preprocessing import preprocess_track
+from f1tenth_gym.envs.track.functional import TileTable, WallTable
 
 
 HALF_FOV = 2.3561945
@@ -94,10 +94,10 @@ class TestFunctionalWallScan(unittest.TestCase):
         cls.lidar = LiDARConfig(num_beams=120, noise_std=0.0)
         cls.config = scan_config(1, cls.lidar.num_beams,
                                  cls.lidar.angle_min, cls.lidar.angle_max)
-        cls.table = build_track_table(
+        cls.table = preprocess_track(
             cls.track, cls.vehicle, ray_max_range=cls.lidar.range_max
         )
-        cls.params = build_scan_params(cls.lidar, cls.table)
+        cls.params = ScanParams.from_lidar_config(cls.lidar)
         cls.host = SegmentScanSimulator2D(
             cls.lidar.num_beams,
             cls.lidar.field_of_view,
@@ -134,8 +134,8 @@ class TestFunctionalWallScan(unittest.TestCase):
 
     def test_an_empty_map_returns_max_range(self):
         blank = Track.from_track_name("Spielberg_blank", 1.0)
-        table = build_track_table(blank, self.vehicle, ray_max_range=MAX_RANGE)
-        params = build_scan_params(self.lidar, table)
+        table = preprocess_track(blank, self.vehicle, ray_max_range=MAX_RANGE)
+        params = ScanParams.from_lidar_config(self.lidar)
         got = clean_scan(
             model_states([[0.0, 0.0, 0.0]]),
             table,
@@ -178,16 +178,6 @@ class TestFunctionalWallScan(unittest.TestCase):
         np.testing.assert_array_equal(
             np.asarray(beam_angles(config)), np.asarray([-0.73], dtype=np.float32)
         )
-
-    def test_ray_table_reach_is_validated_on_the_host(self):
-        short = replace(
-            self.table,
-            ray_tiles=replace(
-                self.table.ray_tiles, reach=jnp.asarray(10.0, jnp.float32)
-            ),
-        )
-        with self.assertRaisesRegex(ValueError, "exceeds the ray-table reach"):
-            build_scan_params(self.lidar, short)
 
 
 class TestOpponentOcclusion(unittest.TestCase):
@@ -266,8 +256,9 @@ class TestTransformability(unittest.TestCase):
     def setUpClass(cls):
         cls.track = Track.from_track_name("Spielberg", 1.0)
         cls.vehicle = F1TENTH_VEHICLE_PARAMETERS
-        cls.table = build_track_table(cls.track, cls.vehicle,
-                                      ray_max_range=MAX_RANGE)
+        cls.table = preprocess_track(
+            cls.track, cls.vehicle, ray_max_range=MAX_RANGE
+        )
         cls.body = BodyParams.from_vehicle_parameters(cls.vehicle)
         cls.config = scan_config(1, 48)
         cls.params = ScanParams.from_lidar_config(
@@ -318,10 +309,14 @@ class TestTransformability(unittest.TestCase):
         self.assertEqual(got.shape, (2, 1, 48))
         self.assertFalse(np.allclose(np.asarray(got[0]), np.asarray(got[1])))
 
-    def test_pure_scan_modules_do_not_import_numpy_gym_or_envs(self):
-        root = pathlib.Path(__file__).resolve().parents[1] / "f1tenth_gym" / "jax"
-        for name in ("geometry.py", "lidar.py", "lidar_kernels.py"):
-            source = (root / name).read_text()
+    def test_functional_scan_modules_do_not_import_numpy_gym_or_callbacks(self):
+        envs = pathlib.Path(__file__).resolve().parents[1] / "f1tenth_gym" / "envs"
+        for path in (
+            envs / "contact" / "geometry.py",
+            envs / "lidar" / "functional.py",
+            envs / "lidar" / "kernels.py",
+        ):
+            source = path.read_text()
             tree = ast.parse(source)
             imported = []
             for node in ast.walk(tree):
@@ -330,8 +325,8 @@ class TestTransformability(unittest.TestCase):
                 elif isinstance(node, ast.ImportFrom):
                     imported.append(("." * node.level) + (node.module or ""))
             self.assertFalse(any(value.startswith("numpy") for value in imported))
-            self.assertFalse(any("envs" in value for value in imported))
             self.assertNotIn("gymnasium", source)
+            self.assertNotIn("pure_callback", source)
 
 
 class TestValidation(unittest.TestCase):
@@ -342,7 +337,7 @@ class TestValidation(unittest.TestCase):
                 ScanConfig(*args)
         config = scan_config(2, 4)
         vehicle = F1TENTH_VEHICLE_PARAMETERS
-        track = build_track_table(
+        track = preprocess_track(
             Track.from_track_name("Spielberg", 1.0), vehicle,
             ray_max_range=MAX_RANGE,
         )

@@ -8,13 +8,13 @@ from typing import Any, Callable
 import jax
 import jax.numpy as jnp
 
-from .controls import (
+from ..action_jax import (
     LongitudinalControlMode,
     SteeringControlMode,
     adapt_actions,
 )
-from .dynamics import DynamicsParams
-from .integrators import StepFn, integrate_substeps
+from .jax import DynamicsParams
+from ..integrators_jax import StepFn, integrate_substeps
 
 
 DynamicsFn = Callable[[jax.Array, jax.Array, DynamicsParams], jax.Array]
@@ -61,10 +61,10 @@ class DynamicsConfig:
 
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
-class EpisodeParams:
-    """Traced values that may vary between environments without recompiling."""
+class DynamicsRuntimeParams:
+    """Traced dynamics values that may vary without recompiling."""
 
-    dynamics: DynamicsParams
+    vehicle: DynamicsParams
     timestep: Any
     steer_kp: Any = 0.0
     steer_noise_std: Any = 0.0
@@ -83,6 +83,23 @@ class DynamicsState:
     throttle_delay_buffer: jax.Array
     throttle_delay_head: jax.Array
     sim_time: jax.Array
+
+
+def model_state_from_poses(
+    poses: jax.Array,
+    config: DynamicsConfig,
+) -> jax.Array:
+    """Build zero-motion native KS/ST rows from CoG ``[x, y, yaw]`` poses."""
+    poses = jnp.asarray(poses)
+    expected = (config.num_agents, 3)
+    if poses.shape != expected:
+        raise ValueError(f"poses must have shape {expected}, got {poses.shape}")
+    model = jnp.zeros(
+        (config.num_agents, config.state_dim),
+        dtype=poses.dtype,
+    )
+    model = model.at[:, :2].set(poses[:, :2])
+    return model.at[:, 4].set(poses[:, 2])
 
 
 def make_dynamics_state(
@@ -127,7 +144,7 @@ def step_dynamics(
     state: DynamicsState,
     actions: jax.Array,
     config: DynamicsConfig,
-    episode: EpisodeParams,
+    runtime: DynamicsRuntimeParams,
 ) -> DynamicsState:
     """Advance control adapters, FIFO delays, and all agents by one timestep."""
     expected_state = (config.num_agents, config.state_dim)
@@ -139,10 +156,10 @@ def step_dynamics(
 
     actions = jnp.asarray(actions, dtype=state.model.dtype)
     steer_key, accel_key = jax.random.split(key)
-    steer_commands = actions[:, 0] + episode.steer_noise_std * jax.random.normal(
+    steer_commands = actions[:, 0] + runtime.steer_noise_std * jax.random.normal(
         steer_key, (config.num_agents,), dtype=state.model.dtype
     )
-    accel_commands = actions[:, 1] + episode.accel_noise_std * jax.random.normal(
+    accel_commands = actions[:, 1] + runtime.accel_noise_std * jax.random.normal(
         accel_key, (config.num_agents,), dtype=state.model.dtype
     )
 
@@ -164,15 +181,15 @@ def step_dynamics(
     if config.derive_steer_kp:
         steer_kp = (
             10.0
-            * episode.dynamics.sv_max
-            / (episode.dynamics.s_max - episode.dynamics.s_min)
+            * runtime.vehicle.sv_max
+            / (runtime.vehicle.s_max - runtime.vehicle.s_min)
         )
     else:
-        steer_kp = episode.steer_kp
+        steer_kp = runtime.steer_kp
     efforts = adapt_actions(
         delayed_actions,
         state.model,
-        episode.dynamics,
+        runtime.vehicle,
         longitudinal_mode=config.longitudinal_mode,
         steering_mode=config.steering_mode,
         steer_kp=steer_kp,
@@ -184,8 +201,8 @@ def step_dynamics(
             config.dynamics_fn,
             one_state,
             one_effort,
-            episode.timestep,
-            episode.dynamics,
+            runtime.timestep,
+            runtime.vehicle,
             num_substeps=config.num_substeps,
         )
 
@@ -197,7 +214,7 @@ def step_dynamics(
         steer_delay_head=steer_head,
         throttle_delay_buffer=throttle_buffer,
         throttle_delay_head=throttle_head,
-        sim_time=state.sim_time + episode.timestep,
+        sim_time=state.sim_time + runtime.timestep,
     )
 
 
@@ -206,7 +223,7 @@ def rollout_dynamics(
     state: DynamicsState,
     actions: jax.Array,
     config: DynamicsConfig,
-    episode: EpisodeParams,
+    runtime: DynamicsRuntimeParams,
 ) -> tuple[DynamicsState, DynamicsState]:
     """Run a time-major action sequence with one compiled ``lax.scan``."""
     if actions.ndim != 3 or actions.shape[1:] != (config.num_agents, 2):
@@ -218,7 +235,7 @@ def rollout_dynamics(
 
     def body(carry: DynamicsState, inputs: tuple[jax.Array, jax.Array]):
         step_key, step_actions = inputs
-        next_state = step_dynamics(step_key, carry, step_actions, config, episode)
+        next_state = step_dynamics(step_key, carry, step_actions, config, runtime)
         return next_state, next_state
 
     return jax.lax.scan(body, state, (keys, actions))
@@ -226,9 +243,10 @@ def rollout_dynamics(
 
 __all__ = [
     "DynamicsConfig",
+    "DynamicsRuntimeParams",
     "DynamicsState",
-    "EpisodeParams",
     "make_dynamics_state",
+    "model_state_from_poses",
     "rollout_dynamics",
     "step_dynamics",
 ]

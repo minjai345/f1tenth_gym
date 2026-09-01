@@ -1,4 +1,4 @@
-"""Pure JAX action adapters matching the Gymnasium control semantics."""
+"""Pure JAX action adapters matching the environment control semantics."""
 
 from __future__ import annotations
 

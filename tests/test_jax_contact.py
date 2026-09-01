@@ -12,37 +12,43 @@ import jax.numpy as jnp
 import numpy as np
 
 from f1tenth_gym.envs.action import LongitudinalActionType, SteerActionType
+from f1tenth_gym.envs.action_jax import (
+    LongitudinalControlMode,
+    SteeringControlMode,
+)
 from f1tenth_gym.envs.collision_models import CollisionCheckMode
 from f1tenth_gym.envs.contact import ContactParams
+from f1tenth_gym.envs.contact.functional import (
+    WallContactConfig,
+    apply_contact_response,
+    resolve_wall_contacts,
+    world_velocity,
+)
+from f1tenth_gym.envs.contact.geometry import BodyParams
 from f1tenth_gym.envs.dynamic_models import (
     DynamicModel,
     F1TENTH_VEHICLE_PARAMETERS,
 )
+from f1tenth_gym.envs.dynamic_models.jax import (
+    DynamicsParams,
+    kinematic_single_track,
+    single_track,
+)
+from f1tenth_gym.envs.dynamic_models.jax_core import (
+    DynamicsConfig,
+    DynamicsRuntimeParams,
+    make_dynamics_state,
+    step_dynamics,
+)
 from f1tenth_gym.envs.env_config import ControlConfig, EnvConfig, SimulationConfig
 from f1tenth_gym.envs.integrators import IntegratorType, rk4_integration
+from f1tenth_gym.envs.integrators_jax import rk4_step
 from f1tenth_gym.envs.lidar import LiDARConfig
 from f1tenth_gym.envs.simulator import F110Simulator
 from f1tenth_gym.envs.track import Track
+from f1tenth_gym.envs.track.functional import TileTable, WallTable
+from f1tenth_gym.envs.track.preprocessing import preprocess_track
 from f1tenth_gym.envs.track.walls import wall_segments
-from f1tenth_gym.jax import (
-    BodyParams,
-    DynamicsConfig,
-    DynamicsParams,
-    EpisodeParams,
-    LongitudinalControlMode,
-    SteeringControlMode,
-    WallContactConfig,
-    apply_contact_response,
-    kinematic_single_track,
-    make_dynamics_state,
-    resolve_wall_contacts,
-    rk4_step,
-    single_track,
-    step_dynamics,
-    world_velocity,
-)
-from f1tenth_gym.jax.preprocess import build_track_table
-from f1tenth_gym.jax.track import TileTable, WallTable
 
 
 DT = 0.01
@@ -149,7 +155,7 @@ class TestWallContactParity(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.track = Track.from_track_name("Spielberg", 1.0)
-        cls.table = build_track_table(cls.track, VEHICLE)
+        cls.table = preprocess_track(cls.track, VEHICLE)
         cls.body = BodyParams.from_vehicle_parameters(VEHICLE)
         cls.dynamics = DynamicsParams.from_vehicle_parameters(VEHICLE)
 
@@ -205,7 +211,7 @@ class TestWallContactParity(unittest.TestCase):
                     make_dynamics_state(initial, dynamics_config),
                     jnp.asarray(actions),
                     dynamics_config,
-                    EpisodeParams(self.dynamics, DT),
+                    DynamicsRuntimeParams(self.dynamics, DT),
                 )
                 model_state, events = resolve_wall_contacts(
                     device_state.model,
@@ -243,7 +249,7 @@ class TestWallContactParity(unittest.TestCase):
 class TestWallContactContracts(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.base = build_track_table(
+        cls.base = preprocess_track(
             Track.from_track_name("Spielberg", 1.0), VEHICLE
         )
         cls.dynamics = DynamicsParams.from_vehicle_parameters(VEHICLE)
@@ -320,7 +326,7 @@ class TestTransformability(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.track = Track.from_track_name("Spielberg", 1.0)
-        cls.table = build_track_table(cls.track, VEHICLE)
+        cls.table = preprocess_track(cls.track, VEHICLE)
         cls.dynamics = DynamicsParams.from_vehicle_parameters(VEHICLE)
         cls.body = BodyParams.from_vehicle_parameters(VEHICLE)
         cls.state = jnp.asarray(contact_state(cls.track, 7))
@@ -372,7 +378,7 @@ class TestTransformability(unittest.TestCase):
     def test_functional_orchestration_contains_no_numpy_or_host_callback(self):
         path = (
             pathlib.Path(__file__).resolve().parents[1]
-            / "f1tenth_gym" / "jax" / "contact.py"
+            / "f1tenth_gym" / "envs" / "contact" / "functional.py"
         )
         source = path.read_text()
         tree = ast.parse(source)
@@ -393,7 +399,7 @@ class TestValidation(unittest.TestCase):
             with self.assertRaises(ValueError):
                 WallContactConfig(*args)
         self.assertEqual(WallContactConfig(1, 7, 3.9).solver_iterations, 3)
-        table = build_track_table(
+        table = preprocess_track(
             Track.from_track_name("Spielberg", 1.0), VEHICLE
         )
         body = BodyParams.from_vehicle_parameters(VEHICLE)

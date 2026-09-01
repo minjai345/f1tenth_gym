@@ -7,28 +7,29 @@ from dataclasses import dataclass, replace
 import jax
 import jax.numpy as jnp
 
-from .contact import ContactParams, WallContactConfig
-from .core import (
+from .contact.functional import ContactParams, WallContactConfig
+from .dynamic_models.jax_core import (
     DynamicsConfig,
+    DynamicsRuntimeParams,
     DynamicsState,
-    EpisodeParams,
     make_dynamics_state,
+    model_state_from_poses,
     step_dynamics,
 )
-from .dynamics import standardize_state
+from .dynamic_models.jax import standardize_state
 from .episode import (
-    BookkeepingParams,
     BuiltinRewardMode,
     EpisodeConfig,
     EpisodeEvents,
     EpisodeMetrics,
+    EpisodeParams,
     EpisodeState,
     EpisodeStatus,
     advance_episode,
     reset_episode_state,
 )
-from .geometry import BodyParams
-from .lidar import (
+from .contact.geometry import BodyParams
+from .lidar.functional import (
     ScanConfig,
     ScanParams,
     ScanState,
@@ -36,14 +37,13 @@ from .lidar import (
     observed_scan,
     reset_scan_state,
 )
-from .pairs import PairContactConfig, PairTable, resolve_contacts
-from .reset import (
-    ResetConfig,
+from .contact.pairs import PairContactConfig, PairTable, resolve_contacts
+from .reset.functional import (
+    ResetSamplingConfig,
     ResetTable,
-    model_state_from_poses,
-    reset_dynamics_state,
+    sample_reset_poses,
 )
-from .track import (
+from .track.functional import (
     FrenetProjectionConfig,
     TrackTable,
     cartesian_to_frenet,
@@ -56,7 +56,7 @@ class CoreConfig:
     """Hashable structural choices for one compiled environment topology."""
 
     dynamics: DynamicsConfig
-    reset: ResetConfig
+    reset: ResetSamplingConfig
     scan: ScanConfig
     wall_contact: WallContactConfig
     pair_contact: PairContactConfig
@@ -110,11 +110,11 @@ class CoreTables:
 class CoreParams:
     """Traced physical, sensor, contact, and episode values."""
 
-    transition: EpisodeParams
+    dynamics: DynamicsRuntimeParams
     body: BodyParams
     contact: ContactParams
     scan: ScanParams
-    bookkeeping: BookkeepingParams
+    episode: EpisodeParams
 
 
 @jax.tree_util.register_dataclass
@@ -276,12 +276,9 @@ def reset_core(
 ) -> tuple[CoreObservation, CoreState]:
     """Sample and initialize one environment, including its first real scan."""
     pose_key, bias_key, scan_key = jax.random.split(key, 3)
-    _poses, dynamics = reset_dynamics_state(
-        pose_key,
-        tables.reset,
-        config.reset,
-        config.dynamics,
-    )
+    poses = sample_reset_poses(pose_key, tables.reset, config.reset)
+    model = model_state_from_poses(poses, config.dynamics)
+    dynamics = make_dynamics_state(model, config.dynamics)
     return _finish_reset(
         bias_key,
         scan_key,
@@ -367,7 +364,7 @@ def step_core(
         state.dynamics,
         actions,
         config.dynamics,
-        params.transition,
+        params.dynamics,
     )
     if config.contact_enabled:
         model, collisions = resolve_contacts(
@@ -375,9 +372,9 @@ def step_core(
             tables.track,
             tables.pairs,
             params.body,
-            params.transition.dynamics,
+            params.dynamics.vehicle,
             params.contact,
-            params.transition.timestep,
+            params.dynamics.timestep,
             config.wall_contact,
             config.pair_contact,
         )
@@ -396,12 +393,12 @@ def step_core(
         config,
         params,
     )
-    bookkeeping = params.bookkeeping
+    episode_params = params.episode
     if not config.frenet_enabled:
         # No winding-angle implementation exists in the functional core.  A
         # disabled Frenet frame therefore has no lap counter; collision and
         # timeout policies remain active, while lap termination is explicit off.
-        bookkeeping = replace(bookkeeping, lap_limit_enabled=False)
+        episode_params = replace(episode_params, lap_limit_enabled=False)
     episode, rewards, events, metrics, status = advance_episode(
         state.episode,
         frenet,
@@ -410,9 +407,9 @@ def step_core(
         tables.track.centerline.length,
         state.dynamics.sim_time,
         dynamics.sim_time,
-        params.transition.timestep,
+        params.dynamics.timestep,
         config.episode,
-        bookkeeping,
+        episode_params,
     )
     next_state = CoreState(
         dynamics=dynamics,

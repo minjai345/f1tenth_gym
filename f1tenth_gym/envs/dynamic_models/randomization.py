@@ -8,9 +8,9 @@ from typing import Any
 import jax
 import jax.numpy as jnp
 
-from .dynamics import DynamicsParams
-from .environment import CoreParams
-from .geometry import BodyParams
+from .jax import DynamicsParams
+from ..jax_core import CoreParams
+from ..contact.geometry import BodyParams
 
 
 # This literal mirrors the active prefix of the host VehicleParameters wire ABI.
@@ -172,8 +172,8 @@ def replace_core_vehicle_params(
     vehicle: ActiveVehicleParams,
 ) -> CoreParams:
     """Replace only the correlated dynamics and body leaves of core params."""
-    transition = replace(base.transition, dynamics=vehicle.to_dynamics())
-    return replace(base, transition=transition, body=vehicle.to_body())
+    runtime = replace(base.dynamics, vehicle=vehicle.to_dynamics())
+    return replace(base, dynamics=runtime, body=vehicle.to_body())
 
 
 def sample_core_params(

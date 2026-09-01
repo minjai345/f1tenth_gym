@@ -2,7 +2,7 @@
 
 This module is intentionally a deep import.  It owns device-to-host transfer,
 NumPy copies, public field selection, and Gymnasium spaces; none of those
-concerns belong in the pure :mod:`f1tenth_gym.jax` transition.
+concerns belong in the pure :mod:`f1tenth_gym.envs.jax_core` transition.
 """
 
 from __future__ import annotations
@@ -33,8 +33,8 @@ from f1tenth_gym.envs.observation.full import (
 )
 from f1tenth_gym.envs.track import Track
 
-from .builder import CoreBundle
-from .environment import CoreConfig, CoreObservation
+from ..jax_simulator import JaxSimulator
+from ..jax_core import CoreConfig, CoreObservation
 
 
 _ALL_FIELDS = frozenset(ALL_FIELDS)
@@ -252,19 +252,21 @@ def _validate_topology(config: EnvConfig, core_config: CoreConfig) -> None:
         raise ValueError("EnvConfig and CoreConfig Frenet topology do not match")
 
 
-def _validate_bundle(config: EnvConfig, bundle: CoreBundle) -> None:
-    if not isinstance(bundle, CoreBundle):
-        raise TypeError("bundle must be a CoreBundle instance")
-    if not isinstance(bundle.track, Track):
-        raise TypeError("bundle.track must be a resolved Track instance")
-    _validate_topology(config, bundle.config)
+def _validate_simulator(config: EnvConfig, simulator: JaxSimulator) -> None:
+    if not isinstance(simulator, JaxSimulator):
+        raise TypeError("simulator must be a JaxSimulator instance")
+    if not isinstance(simulator.track, Track):
+        raise TypeError("simulator.track must be a resolved Track instance")
+    _validate_topology(config, simulator.config)
     configured_range = float(config.lidar_config.range_max)
-    core_range = float(np.asarray(jax.device_get(bundle.params.scan.range_max)))
+    core_range = float(
+        np.asarray(jax.device_get(simulator.params.scan.range_max))
+    )
     if not math.isclose(
         core_range, configured_range, rel_tol=1.0e-6, abs_tol=1.0e-6
     ):
         raise ValueError(
-            "EnvConfig and CoreBundle LiDAR range do not match: "
+            "EnvConfig and JaxSimulator LiDAR range do not match: "
             f"{configured_range} != {core_range}"
         )
 
@@ -284,16 +286,16 @@ class GymObservationAdapter:
     scan_num_beams: int
 
     @classmethod
-    def from_bundle(
+    def from_simulator(
         cls,
-        bundle: CoreBundle,
+        simulator: JaxSimulator,
         observation_config: ObservationConfig | None = None,
     ) -> "GymObservationAdapter":
-        """Resolve one immutable public layout for a paired core bundle."""
-        if not isinstance(bundle, CoreBundle):
-            raise TypeError("bundle must be a CoreBundle instance")
-        if not isinstance(bundle.env_config, EnvConfig):
-            raise TypeError("bundle.env_config must be an EnvConfig instance")
+        """Resolve one immutable public layout for a configured simulator."""
+        if not isinstance(simulator, JaxSimulator):
+            raise TypeError("simulator must be a JaxSimulator instance")
+        if not isinstance(simulator.env_config, EnvConfig):
+            raise TypeError("simulator.env_config must be an EnvConfig instance")
         if observation_config is not None and not isinstance(
             observation_config, ObservationConfig
         ):
@@ -301,15 +303,15 @@ class GymObservationAdapter:
                 "observation_config must be an ObservationConfig or None"
             )
         config = (
-            bundle.env_config
+            simulator.env_config
             if observation_config is None
-            else bundle.env_config.with_updates(
+            else simulator.env_config.with_updates(
                 observation_config=observation_config
             )
         )
-        _validate_bundle(config, bundle)
-        core_config = bundle.config
-        track = bundle.track
+        _validate_simulator(config, simulator)
+        core_config = simulator.config
+        track = simulator.track
         fields = _resolve_fields(
             config,
             scan_enabled=core_config.scan_enabled,
@@ -319,9 +321,8 @@ class GymObservationAdapter:
             scan_enabled=core_config.scan_enabled,
             frenet_enabled=core_config.frenet_enabled,
         )
-        widest = config.domain_randomization_config.widest_params(config.params)
         bounds = physical_bounds_from(
-            widest,
+            simulator.space_vehicle_params,
             track,
             config.simulation_config.integrator_timestep,
         )

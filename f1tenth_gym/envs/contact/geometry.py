@@ -1,4 +1,4 @@
-"""Pure JAX rigid-body geometry shared by sensing and contact."""
+"""Functional JAX rigid-body geometry shared by sensing and contact."""
 
 from __future__ import annotations
 

@@ -50,7 +50,7 @@ class EpisodeConfig:
 
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
-class BookkeepingParams:
+class EpisodeParams:
     """Traced episode limits, enables, and built-in reward weights."""
 
     terminate_on_collision: Any = True
@@ -172,7 +172,7 @@ def _builtin_rewards(
     collisions: jax.Array,
     timestep: jax.Array,
     config: EpisodeConfig,
-    params: BookkeepingParams,
+    params: EpisodeParams,
 ) -> jax.Array:
     if config.reward_mode is BuiltinRewardMode.SURVIVAL:
         return jnp.full(progress.shape, timestep, dtype=progress.dtype)
@@ -197,7 +197,7 @@ def advance_episode(
     sim_time_after: jax.Array,
     timestep: jax.Array,
     config: EpisodeConfig,
-    params: BookkeepingParams,
+    params: EpisodeParams,
 ) -> tuple[
     EpisodeState,
     jax.Array,
@@ -320,7 +320,7 @@ def advance_episode(
 
 
 __all__ = [
-    "BookkeepingParams",
+    "EpisodeParams",
     "BuiltinRewardMode",
     "EpisodeConfig",
     "EpisodeEvents",

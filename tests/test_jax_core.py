@@ -25,22 +25,26 @@ from f1tenth_gym.envs.dynamic_models.utils import pid_accl, pid_steer
 from f1tenth_gym.envs.integrators import IntegratorType, rk4_integration
 from f1tenth_gym.envs.lidar import LiDARConfig
 from f1tenth_gym.envs.simulator import F110Simulator
-from f1tenth_gym.jax import (
-    DynamicsConfig,
-    DynamicsParams,
-    EpisodeParams,
+from f1tenth_gym.envs.action_jax import (
     LongitudinalControlMode,
     SteeringControlMode,
     adapt_actions,
-    kinematic_single_track,
-    make_dynamics_state,
-    rk4_step,
-    rollout_dynamics,
-    single_track,
     speed_control,
     steering_angle_control,
+)
+from f1tenth_gym.envs.dynamic_models.jax import (
+    DynamicsParams,
+    kinematic_single_track,
+    single_track,
+)
+from f1tenth_gym.envs.dynamic_models.jax_core import (
+    DynamicsConfig,
+    DynamicsRuntimeParams,
+    make_dynamics_state,
+    rollout_dynamics,
     step_dynamics,
 )
+from f1tenth_gym.envs.integrators_jax import rk4_step
 
 
 class TestJaxControls(unittest.TestCase):
@@ -119,10 +123,10 @@ class TestJaxDynamicsState(unittest.TestCase):
             dtype=np.float32,
         )
         actions = np.array([[0.25, 5.0], [-0.1, -2.0]], dtype=np.float32)
-        episode = EpisodeParams(dynamics=self.params, timestep=0.02)
+        runtime = DynamicsRuntimeParams(vehicle=self.params, timestep=0.02)
         state = make_dynamics_state(initial, config)
         actual = jax.jit(step_dynamics, static_argnums=3)(
-            jax.random.key(0), state, actions, config, episode
+            jax.random.key(0), state, actions, config, runtime
         )
 
         expected = initial.astype(np.float64)
@@ -200,7 +204,10 @@ class TestJaxDynamicsState(unittest.TestCase):
                     num_substeps=2,
                 )
                 device_state = make_dynamics_state(initial, config)
-                episode = EpisodeParams(dynamics=self.params, timestep=0.02)
+                runtime = DynamicsRuntimeParams(
+                    vehicle=self.params,
+                    timestep=0.02,
+                )
                 compiled = jax.jit(step_dynamics, static_argnums=3)
                 for step_index in range(25):
                     actions = np.array(
@@ -216,7 +223,7 @@ class TestJaxDynamicsState(unittest.TestCase):
                         device_state,
                         actions,
                         config,
-                        episode,
+                        runtime,
                     )
                 np.testing.assert_allclose(
                     device_state.model,
@@ -240,9 +247,9 @@ class TestJaxDynamicsState(unittest.TestCase):
         actions = jnp.asarray(
             [[[1.0, 10.0]], [[2.0, 20.0]], [[3.0, 30.0]], [[4.0, 40.0]]]
         )
-        episode = EpisodeParams(dynamics=self.params, timestep=0.01)
+        runtime = DynamicsRuntimeParams(vehicle=self.params, timestep=0.01)
         final, history = jax.jit(rollout_dynamics, static_argnums=3)(
-            jax.random.key(2), state, actions, config, episode
+            jax.random.key(2), state, actions, config, runtime
         )
         expected = np.array(
             [[[0.0, 0.0]], [[0.0, 0.0]], [[1.0, 0.0]], [[2.0, 10.0]]]
@@ -254,13 +261,13 @@ class TestJaxDynamicsState(unittest.TestCase):
     def test_noise_uses_only_the_explicit_key(self):
         config = self._st_config(num_substeps=1)
         state = make_dynamics_state(jnp.zeros((2, 7)), config)
-        episode = EpisodeParams(
-            dynamics=self.params,
+        runtime = DynamicsRuntimeParams(
+            vehicle=self.params,
             timestep=0.01,
             steer_noise_std=0.2,
             accel_noise_std=0.7,
         )
-        step = partial(step_dynamics, config=config, episode=episode)
+        step = partial(step_dynamics, config=config, runtime=runtime)
         compiled = jax.jit(step)
         actions = jnp.zeros((2, 2))
         first = compiled(jax.random.key(9), state, actions)
@@ -269,12 +276,12 @@ class TestJaxDynamicsState(unittest.TestCase):
         np.testing.assert_array_equal(first.control_input, replay.control_input)
         self.assertFalse(np.array_equal(first.control_input, other.control_input))
 
-        quiet = replace(episode, steer_noise_std=0.0, accel_noise_std=0.0)
+        quiet = replace(runtime, steer_noise_std=0.0, accel_noise_std=0.0)
         a = step_dynamics(jax.random.key(1), state, actions, config, quiet)
         b = step_dynamics(jax.random.key(2), state, actions, config, quiet)
         np.testing.assert_array_equal(a.model, b.model)
 
-    def test_vmap_accepts_different_episode_parameters(self):
+    def test_vmap_accepts_different_runtime_parameters(self):
         config = DynamicsConfig(
             num_agents=1,
             state_dim=5,
@@ -292,8 +299,8 @@ class TestJaxDynamicsState(unittest.TestCase):
             params,
             lr=jnp.asarray([self.params.lr, 1.25 * self.params.lr]),
         )
-        episodes = EpisodeParams(
-            dynamics=params,
+        runtimes = DynamicsRuntimeParams(
+            vehicle=params,
             timestep=jnp.asarray([0.01, 0.01]),
             steer_kp=jnp.zeros(2),
             steer_noise_std=jnp.zeros(2),
@@ -306,7 +313,7 @@ class TestJaxDynamicsState(unittest.TestCase):
             jax.vmap(lambda key, state, action, ep: step_dynamics(
                 key, state, action, config, ep
             ))
-        )(keys, states, actions, episodes)
+        )(keys, states, actions, runtimes)
         self.assertEqual(vmapped.model.shape, (2, 1, 5))
         self.assertNotEqual(float(vmapped.model[0, 0, 4]), float(vmapped.model[1, 0, 4]))
 
@@ -322,21 +329,21 @@ class TestJaxDynamicsState(unittest.TestCase):
         )
         traces = []
 
-        def transition(current, episode):
+        def transition(current, runtime):
             traces.append(None)
             return step_dynamics(
                 jax.random.key(0),
                 current,
                 jnp.asarray([[0.1, 4.0]]),
                 config,
-                episode,
+                runtime,
             )
 
         compiled = jax.jit(transition)
-        nominal = EpisodeParams(dynamics=self.params, timestep=0.01)
+        nominal = DynamicsRuntimeParams(vehicle=self.params, timestep=0.01)
         randomized = replace(
             nominal,
-            dynamics=replace(
+            vehicle=replace(
                 self.params,
                 mu=0.8 * self.params.mu,
                 lr=1.1 * self.params.lr,
@@ -360,11 +367,11 @@ class TestJaxDynamicsState(unittest.TestCase):
         state = make_dynamics_state(
             jnp.asarray([[0.0, 0.0, 0.1, 2.0, 0.2]]), config
         )
-        episode = EpisodeParams(dynamics=self.params, timestep=0.02)
+        runtime = DynamicsRuntimeParams(vehicle=self.params, timestep=0.02)
         actions = jnp.zeros((12, 1, 2))
         shaped = jax.eval_shape(
             lambda s, a: rollout_dynamics(
-                jax.random.key(0), s, a, config, episode
+                jax.random.key(0), s, a, config, runtime
             ),
             state,
             actions,
@@ -373,7 +380,7 @@ class TestJaxDynamicsState(unittest.TestCase):
 
         def loss(commands):
             final, _history = rollout_dynamics(
-                jax.random.key(0), state, commands, config, episode
+                jax.random.key(0), state, commands, config, runtime
             )
             return final.model[0, 0] + final.model[0, 1]
 
@@ -385,9 +392,9 @@ class TestJaxDynamicsState(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "model_state must have shape"):
             make_dynamics_state(jnp.zeros((1, 7)), config)
         state = make_dynamics_state(jnp.zeros((2, 7)), config)
-        episode = EpisodeParams(dynamics=self.params, timestep=0.01)
+        runtime = DynamicsRuntimeParams(vehicle=self.params, timestep=0.01)
         with self.assertRaisesRegex(ValueError, "actions must have shape"):
-            step_dynamics(jax.random.key(0), state, jnp.zeros((1, 2)), config, episode)
+            step_dynamics(jax.random.key(0), state, jnp.zeros((1, 2)), config, runtime)
 
 
 if __name__ == "__main__":

@@ -58,7 +58,7 @@ class SegmentScanSimulator2D:
         from jax.sharding import SingleDeviceSharding
 
         from ..contact.adapter import resolve_device
-        from f1tenth_gym.jax.lidar_kernels import ray_segment_range
+        from f1tenth_gym.envs.lidar.kernels import ray_segment_range
 
         self.track = track
         self.map_scale = float(map_scale)

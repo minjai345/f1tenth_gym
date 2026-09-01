@@ -1,7 +1,8 @@
-"""Host conversion from ``EnvConfig`` and ``Track`` to the functional JAX core.
+"""Host-side construction for the functional JAX simulator.
 
-This module is intentionally a deep import: unlike :mod:`f1tenth_gym.jax`, it
-loads host configuration and map types and performs device selection.
+The public entry point is :class:`JaxSimulator`.  Static topology, fixed-shape
+tables, and traced parameters remain separate internally, but callers no
+longer need to assemble those implementation stages themselves.
 """
 
 from __future__ import annotations
@@ -38,52 +39,189 @@ from f1tenth_gym.envs.track import Track
 from f1tenth_gym.envs.track.budget import DEFAULT_MAX_BYTES
 from f1tenth_gym.envs.track.walls import DEFAULT_TOL_PX
 
-from .contact import WallContactConfig
-from .controls import LongitudinalControlMode, SteeringControlMode
-from .core import DynamicsConfig, EpisodeParams
-from .dynamics import (
+from .contact.functional import WallContactConfig
+from .action_jax import LongitudinalControlMode, SteeringControlMode
+from .dynamic_models.jax_core import DynamicsConfig, DynamicsRuntimeParams
+from .dynamic_models.jax import (
     DynamicsParams,
     kinematic_single_track,
     single_track,
 )
-from .environment import CoreConfig, CoreParams, CoreTables
+from .jax_core import (
+    CoreConfig,
+    CoreObservation,
+    CoreParams,
+    CoreState,
+    CoreTables,
+    reset_core,
+    reset_core_from_poses,
+    reset_core_from_state,
+    step_core,
+)
 from .episode import (
-    BookkeepingParams,
     BuiltinRewardMode,
     EpisodeConfig,
+    EpisodeParams,
     TerminationMode,
 )
-from .geometry import BodyParams
-from .integrators import euler_step, rk4_step
-from .indexed import IndexedCoreTables, stack_core_tables
-from .lidar import ScanConfig, ScanParams
-from .pairs import PairContactConfig, PairTable
-from .preprocess import (
-    build_pair_table,
-    build_reset_table,
-    build_scan_params,
-    build_track_table,
-)
-from .randomization import (
+from .contact.geometry import BodyParams
+from .integrators_jax import euler_step, rk4_step
+from .indexed_batching import IndexedCoreTables, stack_core_tables
+from .lidar.functional import ScanConfig, ScanParams
+from .contact.pairs import PairContactConfig, PairTable, make_pair_table
+from .dynamic_models.randomization import (
     ACTIVE_VEHICLE_FIELDS,
     ActiveVehicleParams,
     VehicleRandomizationParams,
 )
-from .reset import ResetConfig
-from .track import FrenetProjectionConfig, TrackTable
+from .reset.functional import ResetSamplingConfig
+from .reset.preprocessing import preprocess_reset
+from .track.functional import FrenetProjectionConfig, TrackTable
+from .track.preprocessing import preprocess_track
 
 
-@dataclass(frozen=True)
-class CoreBundle:
-    """Paired resolved track and device arrays ready for core/adapters."""
+_RESET = jax.jit(reset_core, static_argnums=2)
+_RESET_FROM_POSES = jax.jit(reset_core_from_poses, static_argnums=3)
+_RESET_FROM_STATE = jax.jit(reset_core_from_state, static_argnums=3)
+_STEP = jax.jit(step_core, static_argnums=4)
+
+
+class JaxSimulator:
+    """Configured functional simulator with device-ready core components.
+
+    ``CoreConfig``, ``CoreTables``, and ``CoreParams`` deliberately remain
+    distinct because JAX treats static topology and traced values differently.
+    This host object hides their construction without hiding that execution
+    contract from code that calls the pure reset and step functions.
+    """
 
     env_config: EnvConfig
     config: CoreConfig
     tables: CoreTables
     params: CoreParams
     randomization: VehicleRandomizationParams
-    device: Any
+    device: jax.Device
     track: Track
+    effective_vehicle_params: VehicleParameters
+    space_vehicle_params: VehicleParameters
+
+    def __init__(
+        self,
+        config: EnvConfig,
+        track: Track,
+        *,
+        device: str | jax.Device | None = None,
+        vehicle_params: VehicleParameters | None = None,
+        max_table_bytes: int = DEFAULT_MAX_BYTES,
+        _custom_reward_fallback: BuiltinRewardMode | None = None,
+    ) -> None:
+        _validate_host_surface(config)
+        if not isinstance(track, Track):
+            raise TypeError("track must be a resolved Track instance")
+
+        effective_vehicle = _effective_vehicle(config, vehicle_params)
+        randomization = _make_randomization(config, effective_vehicle)
+        space_vehicle = _space_vehicle_params(config, effective_vehicle)
+        core_config = _make_config(config, _custom_reward_fallback)
+        core_device = _core_device(config, device)
+        tables = _make_tables(
+            config,
+            track,
+            effective_vehicle,
+            max_bytes=max_table_bytes,
+        )
+        params = _make_params(config, tables.track, effective_vehicle)
+
+        self.env_config = config
+        self.config = core_config
+        self.tables = _put_on_device(tables, core_device)
+        self.params = _put_on_device(params, core_device)
+        self.randomization = _put_on_device(randomization, core_device)
+        self.device = core_device
+        self.track = track
+        self.effective_vehicle_params = effective_vehicle
+        self.space_vehicle_params = space_vehicle
+        self._parameter_track_table = tables.track
+
+    def params_for_vehicle(self, vehicle: VehicleParameters) -> CoreParams:
+        """Build device parameters for one validated episode vehicle draw."""
+        if not isinstance(vehicle, VehicleParameters):
+            raise TypeError("vehicle must be a VehicleParameters instance")
+        _validate_vehicle_draw(
+            self.env_config,
+            vehicle,
+            effective_vehicle=self.effective_vehicle_params,
+        )
+        params = _make_params(
+            self.env_config,
+            self._parameter_track_table,
+            vehicle,
+        )
+        return _put_on_device(params, self.device)
+
+    def reset(
+        self,
+        key: jax.Array,
+        *,
+        params: CoreParams | None = None,
+    ) -> tuple[CoreObservation, CoreState]:
+        """Reset from the configured sampler using an explicit JAX key."""
+        return _RESET(
+            key,
+            self.tables,
+            self.config,
+            self.params if params is None else params,
+        )
+
+    def reset_from_poses(
+        self,
+        key: jax.Array,
+        poses: jax.Array,
+        *,
+        params: CoreParams | None = None,
+    ) -> tuple[CoreObservation, CoreState]:
+        """Reset from explicit CoG ``[x, y, yaw]`` poses."""
+        return _RESET_FROM_POSES(
+            key,
+            poses,
+            self.tables,
+            self.config,
+            self.params if params is None else params,
+        )
+
+    def reset_from_state(
+        self,
+        key: jax.Array,
+        state: jax.Array,
+        *,
+        params: CoreParams | None = None,
+    ) -> tuple[CoreObservation, CoreState]:
+        """Reset from complete native KS/ST state rows."""
+        return _RESET_FROM_STATE(
+            key,
+            state,
+            self.tables,
+            self.config,
+            self.params if params is None else params,
+        )
+
+    def step(
+        self,
+        key: jax.Array,
+        state: CoreState,
+        actions: jax.Array,
+        *,
+        params: CoreParams | None = None,
+    ):
+        """Advance one compiled functional transition."""
+        return _STEP(
+            key,
+            state,
+            actions,
+            self.tables,
+            self.config,
+            self.params if params is None else params,
+        )
 
 
 @dataclass(frozen=True)
@@ -144,50 +282,83 @@ class IndexedCoreBucket:
         object.__setattr__(self, "map_indices", map_indices)
 
 
-@dataclass(frozen=True)
-class IndexedCoreBundle:
-    """Host-orchestrated exact-shape map buckets sharing one core topology."""
+class IndexedJaxSimulator:
+    """Exact-shape indexed-map buckets sharing one simulator topology."""
 
     env_config: EnvConfig
     config: CoreConfig
     params: CoreParams
     randomization: VehicleRandomizationParams
-    device: Any
+    device: jax.Device
+    tracks: tuple[Track, ...]
     buckets: tuple[IndexedCoreBucket, ...]
     num_environments: int
     num_unique_tracks: int
+    effective_vehicle_params: VehicleParameters
+    space_vehicle_params: VehicleParameters
 
-    def __post_init__(self) -> None:
-        buckets = tuple(self.buckets)
-        num_environments = int(self.num_environments)
-        num_unique_tracks = int(self.num_unique_tracks)
-        if num_environments < 1:
-            raise ValueError("num_environments must be >= 1")
-        if num_unique_tracks < 1:
-            raise ValueError("num_unique_tracks must be >= 1")
-        if not buckets or any(
-            not isinstance(bucket, IndexedCoreBucket) for bucket in buckets
-        ):
-            raise TypeError(
-                "buckets must contain at least one IndexedCoreBucket"
+    def __init__(
+        self,
+        config: EnvConfig,
+        tracks: Iterable[Track],
+        *,
+        device: str | jax.Device | None = None,
+        vehicle_params: VehicleParameters | None = None,
+        max_table_bytes: int = DEFAULT_MAX_BYTES,
+        _custom_reward_fallback: BuiltinRewardMode | None = None,
+    ) -> None:
+        _validate_host_surface(config)
+        unique_tracks, source_to_unique = _deduplicate_tracks(tracks)
+        effective_vehicle = _effective_vehicle(config, vehicle_params)
+        randomization = _make_randomization(config, effective_vehicle)
+        space_vehicle = _space_vehicle_params(config, effective_vehicle)
+        core_config = _make_config(config, _custom_reward_fallback)
+        core_device = _core_device(config, device)
+        unique_tables = tuple(
+            _make_tables(
+                config,
+                track,
+                effective_vehicle,
+                max_bytes=max_table_bytes,
             )
-        routed = tuple(
-            source
-            for bucket in buckets
-            for source in bucket.source_indices
+            for track in unique_tracks
         )
-        if sorted(routed) != list(range(num_environments)):
-            raise ValueError(
-                "bucket source_indices must partition every environment row "
-                "exactly once"
-            )
-        if sum(bucket.tables.num_maps for bucket in buckets) != num_unique_tracks:
-            raise ValueError(
-                "bucket map counts must equal num_unique_tracks"
-            )
-        object.__setattr__(self, "buckets", buckets)
-        object.__setattr__(self, "num_environments", num_environments)
-        object.__setattr__(self, "num_unique_tracks", num_unique_tracks)
+        params = _make_params(config, unique_tables[0].track, effective_vehicle)
+        buckets = _indexed_buckets(
+            unique_tracks,
+            source_to_unique,
+            unique_tables,
+            core_device,
+        )
+
+        self.env_config = config
+        self.config = core_config
+        self.params = _put_on_device(params, core_device)
+        self.randomization = _put_on_device(randomization, core_device)
+        self.device = core_device
+        self.tracks = unique_tracks
+        self.buckets = buckets
+        self.num_environments = len(source_to_unique)
+        self.num_unique_tracks = len(unique_tracks)
+        self.effective_vehicle_params = effective_vehicle
+        self.space_vehicle_params = space_vehicle
+        self._parameter_track_table = unique_tables[0].track
+
+    def params_for_vehicle(self, vehicle: VehicleParameters) -> CoreParams:
+        """Build device parameters for one validated episode vehicle draw."""
+        if not isinstance(vehicle, VehicleParameters):
+            raise TypeError("vehicle must be a VehicleParameters instance")
+        _validate_vehicle_draw(
+            self.env_config,
+            vehicle,
+            effective_vehicle=self.effective_vehicle_params,
+        )
+        params = _make_params(
+            self.env_config,
+            self._parameter_track_table,
+            vehicle,
+        )
+        return _put_on_device(params, self.device)
 
 
 def _float32_tree(tree: Any):
@@ -276,25 +447,24 @@ def _validate_randomization_intervals(
             )
 
 
-def build_vehicle_randomization_params(
+def _make_randomization(
     config: EnvConfig,
+    effective_vehicle: VehicleParameters,
 ) -> VehicleRandomizationParams:
-    """Build the pure-JAX active vehicle and per-episode DR bounds.
+    """Create the active vehicle and per-episode randomization bounds.
 
     Disabled randomization and enabled-but-constant bounds collapse to one
     nominal vehicle with a false enable flag. A varying configuration keeps
     all twenty active bounds so dynamics and collision geometry are sampled
     from one correlated vehicle draw on device.
     """
-    if not isinstance(config, EnvConfig):
-        raise TypeError("config must be an EnvConfig instance")
     if tuple(PARAMETER_ORDER[:20]) != ACTIVE_VEHICLE_FIELDS:
         raise RuntimeError(
             "the functional active-vehicle fields no longer match the first "
             "20 entries of the VehicleParameters ABI"
         )
 
-    nominal_host = config.params
+    nominal_host = effective_vehicle
     _validate_active_values(nominal_host, prefix="params")
     nominal = _active_vehicle_params(nominal_host)
     randomization = config.domain_randomization_config
@@ -397,8 +567,8 @@ def _reward(
 
     A Python ``CUSTOM`` callback cannot execute in the functional transition.
     Host adapters that run that callback after device-to-host conversion may
-    provide an explicit built-in fallback whose result they discard.  Keeping
-    this opt-in makes the standalone core builder reject callbacks by default
+    provide an explicit built-in fallback whose result they discard. Keeping
+    this opt-in makes standalone construction reject callbacks by default
     instead of silently changing their meaning.
     """
     if custom_reward_fallback is not None and not isinstance(
@@ -428,7 +598,7 @@ def _reward(
 
 def _reset_settings(
     config: EnvConfig,
-) -> tuple[ResetConfig, ReferenceLine, float, float, float | None]:
+) -> tuple[ResetSamplingConfig, ReferenceLine, float, float, float | None]:
     host = config.reset_config
     strategy = host.strategy
     if strategy is ResetStrategy.MAP_RANDOM_STATIC:
@@ -462,7 +632,7 @@ def _reset_settings(
         1.0 if host.start_width is None else float(host.start_width)
     ) if grid else None
     return (
-        ResetConfig(
+        ResetSamplingConfig(
             num_agents=config.num_agents,
             move_laterally=move_laterally,
             shuffle=shuffle,
@@ -496,13 +666,11 @@ def _validate_host_surface(config: EnvConfig) -> None:
         )
 
 
-def build_core_config(
+def _make_config(
     config: EnvConfig,
-    *,
     custom_reward_fallback: BuiltinRewardMode | None = None,
 ) -> CoreConfig:
-    """Translate validated host enums and topology into one static core config."""
-    _validate_host_surface(config)
+    """Translate validated host values into one static core configuration."""
     state_dim, dynamics_fn = _dynamics(config)
     reset, _reference, _minimum, _maximum, _start_width = _reset_settings(config)
     control = config.control_config
@@ -555,34 +723,19 @@ def build_core_config(
     )
 
 
-def build_core_tables(
+def _make_tables(
     config: EnvConfig,
     track: Track,
+    vehicle_params: VehicleParameters,
     *,
-    vehicle_params: VehicleParameters | None = None,
     max_bytes: int = DEFAULT_MAX_BYTES,
 ) -> CoreTables:
-    """Preprocess one resolved track for selected reset and geometry modes.
-
-    ``vehicle_params`` is the effective episode draw when supplied. Contact
-    allocation also includes the config's complete domain-randomization bounds.
-    Disabled geometry receives constant-size masked placeholders.
-    """
-    _validate_host_surface(config)
-    if not isinstance(track, Track):
-        raise TypeError("track must be a resolved Track instance")
-    explicit_draw = vehicle_params is not None
-    if vehicle_params is None:
-        vehicle_params = config.params
-    if not isinstance(vehicle_params, VehicleParameters):
-        raise TypeError("vehicle_params must be a VehicleParameters instance")
-    if explicit_draw:
-        _validate_vehicle_draw(config, vehicle_params)
+    """Preprocess one resolved track for enabled reset and geometry modes."""
     _reset, reference, minimum, maximum, start_width = _reset_settings(config)
     line = track.centerline if reference is ReferenceLine.CENTERLINE else track.raceline
     contact_enabled = config.collision_check is CollisionCheckMode.SEGMENT_CONTACT
     scan_enabled = config.lidar_config.enabled
-    track_table = build_track_table(
+    track_table = preprocess_track(
         track,
         vehicle_params,
         domain_randomization=config.domain_randomization_config,
@@ -593,7 +746,7 @@ def build_core_tables(
         max_bytes=max_bytes,
     )
     return CoreTables(
-        reset=build_reset_table(
+        reset=preprocess_reset(
             line,
             min_dist=minimum,
             max_dist=maximum,
@@ -601,17 +754,81 @@ def build_core_tables(
         ),
         track=track_table,
         pairs=(
-            build_pair_table(config.num_agents)
+            make_pair_table(config.num_agents)
             if contact_enabled
             else _disabled_pair_table(config.num_agents)
         ),
     )
 
 
-def _validate_vehicle_draw(config: EnvConfig, params: VehicleParameters) -> None:
+def _effective_vehicle(
+    config: EnvConfig,
+    vehicle_params: VehicleParameters | None,
+) -> VehicleParameters:
+    """Return the nominal vehicle or validate one explicit episode draw."""
+    effective = config.params if vehicle_params is None else vehicle_params
+    if not isinstance(effective, VehicleParameters):
+        raise TypeError("vehicle_params must be a VehicleParameters instance")
+    _validate_active_values(effective, prefix="vehicle_params")
+    return effective
+
+
+def _space_vehicle_params(
+    config: EnvConfig,
+    effective_vehicle: VehicleParameters,
+) -> VehicleParameters:
+    """Return one host vehicle whose limits cover every runtime vehicle."""
+    randomization = config.domain_randomization_config
+    if not randomization.randomized_fields():
+        return effective_vehicle
+    low = randomization.low
+    high = randomization.high
+    if low is None or high is None:  # guarded by host config
+        raise ValueError("enabled domain randomization requires low/high bounds")
+
+    widest = randomization.widest_params(effective_vehicle)
+    widen_at_low = ("v_min", "s_min", "sv_min", "lf", "lr")
+    widen_at_high = ("v_max", "s_max", "sv_max", "a_max")
+    changes = {
+        name: min(
+            getattr(effective_vehicle, name),
+            getattr(low, name),
+            getattr(high, name),
+        )
+        for name in widen_at_low
+    }
+    changes.update(
+        {
+            name: max(
+                getattr(effective_vehicle, name),
+                getattr(low, name),
+                getattr(high, name),
+            )
+            for name in widen_at_high
+        }
+    )
+    return widest.with_updates(**changes)
+
+
+def _validate_vehicle_draw(
+    config: EnvConfig,
+    params: VehicleParameters,
+    *,
+    effective_vehicle: VehicleParameters,
+) -> None:
     _validate_active_values(params, prefix="vehicle_params")
     randomization = config.domain_randomization_config
     if not randomization.randomized_fields():
+        for name in ACTIVE_VEHICLE_FIELDS:
+            value = getattr(params, name)
+            expected = getattr(effective_vehicle, name)
+            if value != expected:
+                raise ValueError(
+                    f"vehicle_params.{name}={value} does not match this "
+                    f"simulator's fixed vehicle envelope ({expected}); "
+                    "construct a new JaxSimulator or IndexedJaxSimulator "
+                    "with vehicle_params=... to rebuild fixed tables"
+                )
         return
     low_params = randomization.low
     high_params = randomization.high
@@ -623,49 +840,47 @@ def _validate_vehicle_draw(config: EnvConfig, params: VehicleParameters) -> None
     # sized from the configured bounds.
     for name in ACTIVE_VEHICLE_FIELDS:
         value = getattr(params, name)
-        low = getattr(low_params, name)
-        high = getattr(high_params, name)
+        effective = getattr(effective_vehicle, name)
+        low = min(effective, getattr(low_params, name))
+        high = max(effective, getattr(high_params, name))
         if not low <= value <= high:
             raise ValueError(
-                f"vehicle_params.{name}={value} lies outside DR bounds "
-                f"[{low}, {high}]"
+                f"vehicle_params.{name}={value} lies outside the runtime "
+                "envelope formed by the effective vehicle and DR bounds "
+                f"[{low}, {high}]; construct a new JaxSimulator or "
+                "IndexedJaxSimulator with a compatible domain-randomization "
+                "envelope to rebuild fixed tables"
             )
 
 
-def build_core_params(
+def _make_params(
     config: EnvConfig,
     track_table: TrackTable,
-    *,
-    vehicle_params: VehicleParameters | None = None,
-    custom_reward_fallback: BuiltinRewardMode | None = None,
+    vehicle_params: VehicleParameters,
 ) -> CoreParams:
-    """Translate one nominal or already-sampled vehicle parameter episode.
+    """Translate one validated vehicle into traced core parameters.
 
     Continuous production leaves are normalized to float32, counters to int32
     and enable flags to booleans independently of process-wide JAX x64 mode.
     """
-    _validate_host_surface(config)
-    _reward(config, custom_reward_fallback)
     if not isinstance(track_table, TrackTable):
         raise TypeError("track_table must be a TrackTable instance")
-    explicit_draw = vehicle_params is not None
-    if vehicle_params is None:
-        vehicle_params = config.params
-    if not isinstance(vehicle_params, VehicleParameters):
-        raise TypeError("vehicle_params must be a VehicleParameters instance")
-    if explicit_draw:
-        _validate_vehicle_draw(config, vehicle_params)
     control = config.control_config
     contact = config.contact_config
     lidar = config.lidar_config
     simulation = config.simulation_config
     termination = config.termination_config
     reward = config.reward_config
-    scan = (
-        build_scan_params(lidar, track_table)
-        if lidar.enabled
-        else ScanParams.from_lidar_config(lidar)
-    )
+    if lidar.enabled:
+        reach = float(np.asarray(track_table.ray_tiles.reach))
+        requested = float(lidar.range_max)
+        if requested > reach + 1.0e-6:
+            raise ValueError(
+                f"LiDAR range_max ({requested}) exceeds the ray-table reach "
+                f"({reach}); preprocess the track for at least the configured "
+                "range"
+            )
+    scan = ScanParams.from_lidar_config(lidar)
     dynamics = _float32_tree(
         DynamicsParams.from_vehicle_parameters(vehicle_params)
     )
@@ -680,8 +895,8 @@ def build_core_params(
         )
     )
     return CoreParams(
-        transition=EpisodeParams(
-            dynamics=dynamics,
+        dynamics=DynamicsRuntimeParams(
+            vehicle=dynamics,
             timestep=np.float32(simulation.timestep),
             steer_kp=np.float32(
                 0.0 if control.steer_kp is None else control.steer_kp
@@ -692,7 +907,7 @@ def build_core_params(
         body=body,
         contact=contact_params,
         scan=_float32_tree(scan),
-        bookkeeping=BookkeepingParams(
+        episode=EpisodeParams(
             terminate_on_collision=np.bool_(termination.terminate_on_collision),
             lap_limit_enabled=np.bool_(simulation.max_laps is not None),
             max_laps=np.int32(
@@ -727,14 +942,14 @@ def _platform_device(platform: str):
     return devices[0]
 
 
-def _core_device(config: EnvConfig, target_device: Any = None):
-    if target_device is not None:
-        if isinstance(target_device, str):
-            return _platform_device(target_device)
-        if isinstance(target_device, jax.Device):
-            return target_device
+def _core_device(config: EnvConfig, device: Any = None):
+    if device is not None:
+        if isinstance(device, str):
+            return _platform_device(device)
+        if isinstance(device, jax.Device):
+            return device
         raise TypeError(
-            "target_device must be a JAX platform string, jax.Device, or None"
+            "device must be a JAX platform string, jax.Device, or None"
         )
 
     requested = []
@@ -800,54 +1015,13 @@ def _deduplicate_tracks(
     return tuple(unique_tracks), tuple(source_to_unique)
 
 
-def build_indexed_core(
-    config: EnvConfig,
-    tracks: Iterable[Track],
-    *,
-    vehicle_params: VehicleParameters | None = None,
-    max_bytes: int = DEFAULT_MAX_BYTES,
-    custom_reward_fallback: BuiltinRewardMode | None = None,
-    target_device: str | jax.Device | None = None,
-) -> IndexedCoreBundle:
-    """Build exact-shape indexed-map buckets for one environment topology.
-
-    ``tracks`` has one entry per desired environment row. Repeated object
-    identities are preprocessed once. Distinct maps are then grouped by every
-    leaf shape and dtype in their complete ``CoreTables`` values, including
-    reset and pair topology as well as track geometry. Each returned bucket is
-    ready for the pure functions in :mod:`f1tenth_gym.jax.indexed`; callers
-    slice inputs by ``source_indices`` and pass ``map_indices`` unchanged.
-
-    Core topology, nominal parameters and randomization bounds are shared by
-    all buckets because this builder accepts one ``EnvConfig`` and one optional
-    episode vehicle draw. Heterogeneous configuration topologies belong in
-    separate calls.
-    """
-    _validate_host_surface(config)
-    unique_tracks, source_to_unique = _deduplicate_tracks(tracks)
-    randomization = build_vehicle_randomization_params(config)
-    core_config = build_core_config(
-        config,
-        custom_reward_fallback=custom_reward_fallback,
-    )
-    device = _core_device(config, target_device)
-
-    unique_tables = tuple(
-        build_core_tables(
-            config,
-            track,
-            vehicle_params=vehicle_params,
-            max_bytes=max_bytes,
-        )
-        for track in unique_tracks
-    )
-    params = build_core_params(
-        config,
-        unique_tables[0].track,
-        vehicle_params=vehicle_params,
-        custom_reward_fallback=custom_reward_fallback,
-    )
-
+def _indexed_buckets(
+    unique_tracks: tuple[Track, ...],
+    source_to_unique: tuple[int, ...],
+    unique_tables: tuple[CoreTables, ...],
+    device: jax.Device,
+) -> tuple[IndexedCoreBucket, ...]:
+    """Group complete tables by exact shape and build their routing metadata."""
     groups: dict[tuple, list[int]] = defaultdict(list)
     for unique_index, table in enumerate(unique_tables):
         groups[_core_table_signature(table)].append(unique_index)
@@ -881,78 +1055,11 @@ def build_indexed_core(
                 map_indices=jax.device_put(map_indices, device),
             )
         )
-
-    return IndexedCoreBundle(
-        env_config=config,
-        config=core_config,
-        params=_put_on_device(params, device),
-        randomization=_put_on_device(randomization, device),
-        device=device,
-        buckets=tuple(buckets),
-        num_environments=len(source_to_unique),
-        num_unique_tracks=len(unique_tracks),
-    )
-
-
-def build_core(
-    config: EnvConfig,
-    track: Track,
-    *,
-    vehicle_params: VehicleParameters | None = None,
-    max_bytes: int = DEFAULT_MAX_BYTES,
-    custom_reward_fallback: BuiltinRewardMode | None = None,
-    target_device: str | jax.Device | None = None,
-) -> CoreBundle:
-    """Build and place one complete functional core from a resolved track.
-
-    With no explicit episode draw, ``params`` contains the nominal vehicle and
-    ``randomization`` carries device-sampleable active bounds. An explicit
-    ``vehicle_params`` remains useful for host-managed episodes and is checked
-    against the same bounds. Active contact and LiDAR must select the same
-    available JAX device unless authoritative ``target_device`` is supplied.
-    A host adapter that executes a Python custom reward after conversion may
-    opt into a ``custom_reward_fallback`` whose compiled result it ignores.
-    """
-    _validate_host_surface(config)
-    if not isinstance(track, Track):
-        raise TypeError("track must be a resolved Track instance")
-    randomization = build_vehicle_randomization_params(config)
-    core_config = build_core_config(
-        config,
-        custom_reward_fallback=custom_reward_fallback,
-    )
-    device = _core_device(config, target_device)
-    tables = build_core_tables(
-        config,
-        track,
-        vehicle_params=vehicle_params,
-        max_bytes=max_bytes,
-    )
-    params = build_core_params(
-        config,
-        tables.track,
-        vehicle_params=vehicle_params,
-        custom_reward_fallback=custom_reward_fallback,
-    )
-    return CoreBundle(
-        env_config=config,
-        config=core_config,
-        tables=_put_on_device(tables, device),
-        params=_put_on_device(params, device),
-        randomization=_put_on_device(randomization, device),
-        device=device,
-        track=track,
-    )
+    return tuple(buckets)
 
 
 __all__ = [
-    "CoreBundle",
     "IndexedCoreBucket",
-    "IndexedCoreBundle",
-    "build_core",
-    "build_core_config",
-    "build_core_params",
-    "build_core_tables",
-    "build_indexed_core",
-    "build_vehicle_randomization_params",
+    "IndexedJaxSimulator",
+    "JaxSimulator",
 ]

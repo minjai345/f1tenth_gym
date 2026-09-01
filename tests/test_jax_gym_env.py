@@ -33,7 +33,7 @@ from f1tenth_gym.envs.observation import ObservationType
 from f1tenth_gym.envs.reset import ResetStrategy
 from f1tenth_gym.envs.track import Track
 from f1tenth_gym.envs.wrappers import SingleAgentWrapper
-from f1tenth_gym.jax.gym_env import JaxF110Env
+from f1tenth_gym.envs.jax_env import JaxF110Env
 
 
 VEHICLE = F1TENTH_VEHICLE_PARAMETERS
@@ -491,6 +491,16 @@ class TestJaxF110Env(unittest.TestCase):
         self.assertEqual(set(observation), {"agent_0", "agent_1"})
         self.assertTrue(env.observation_space.contains(observation))
 
+        installed_config = env.env_config
+        installed_simulator = env.sim
+        installed_state = env.core_state
+        invalid = changed.with_updates(map_name=object())
+        with self.assertRaisesRegex(TypeError, "map must be"):
+            env.configure(invalid)
+        self.assertIs(env.env_config, installed_config)
+        self.assertIs(env.sim, installed_simulator)
+        self.assertIs(env.core_state, installed_state)
+
         with self.assertRaises(TypeError):
             env.configure(object())
 
@@ -507,7 +517,12 @@ class TestJaxF110Env(unittest.TestCase):
         with self.assertRaises(TypeError):
             env.update_params(object())
 
+        env.reset(seed=9)
+        state = env.core_state
+        transition_key = env._transition_key
         env.update_params(updated)
+        self.assertIs(env.core_state, state)
+        self.assertIs(env._transition_key, transition_key)
         self.assertEqual(env.vehicle_params, updated)
         self.assertEqual(env.env_config.params, updated)
         self.assertGreater(float(env.action_space.high[0, 1]), before_action)
@@ -544,7 +559,7 @@ class TestJaxF110Env(unittest.TestCase):
             render_enabled=True,
         )
         with mock.patch(
-            "f1tenth_gym.jax.gym_env.make_renderer",
+            "f1tenth_gym.envs.jax_env.make_renderer",
             return_value=(renderer, config.render_config),
         ):
             env = JaxF110Env(config, render_mode="rgb_array")

@@ -272,32 +272,35 @@ by re-running ``configure`` with the new ``map_name``, which rebuilds the
 simulator, the spaces and the renderer around it — so any render callbacks have
 to be registered again afterwards (:doc:`rendering`).
 
-Device tables during the JAX migration
----------------------------------------
+Functional device tables
+------------------------
 
 The functional JAX layer never loads a map inside a compiled function.
-``f1tenth_gym.jax.preprocess.build_track_table`` runs on the host and converts
-an existing ``Track`` into fixed-shape spline coefficients, reference points,
-oriented walls, contact/ray tile candidates and explicit masks. The returned
-``TrackTable`` is a JAX pytree; pure transforms in ``f1tenth_gym.jax`` evaluate
-its splines and convert global Cartesian/Frenet poses without NumPy conversion.
+``f1tenth_gym.envs.track.preprocessing.preprocess_track`` runs on the host and
+converts an existing ``Track`` into fixed-shape spline coefficients, reference
+points, oriented walls, contact/ray tile candidates and explicit masks. The
+returned ``TrackTable`` is a JAX pytree; pure transforms in
+``f1tenth_gym.envs.track.functional`` evaluate its splines and convert global
+Cartesian/Frenet poses without NumPy conversion.
 
-Heterogeneous tracks default to exact-shape buckets rather than padding every
-map to the largest spline, wall and tile dimensions. ``build_track_table_set``
-stores repeated references to the same ``Track`` once and returns integer map
-indexes for their environments. ``compare_batch_layout`` reports the exact
-versus global-padding bytes so a caller can make a measured alternative choice.
+``IndexedJaxSimulator`` preprocesses repeated ``Track`` object identities once
+and groups heterogeneous maps by exact table shape and dtype. Each group gets
+its own compiled indexed transition, avoiding a second stand-alone bucketing
+API and avoiding global padding to the largest map.
 
-``build_reset_table`` similarly preprocesses current grid/all-track waypoint
-and spacing choices. ``sample_reset_poses`` consumes only an explicit JAX key
-and fixed arrays. ``MAP_RANDOM_STATIC`` is not yet part of this device surface;
-its current host sampler has a known row/column bug that must be resolved as an
-explicit behavior decision rather than copied into the new backend.
+``f1tenth_gym.envs.reset.preprocessing.preprocess_reset`` separately
+preprocesses current grid/all-track waypoint and spacing choices.
+``sample_reset_poses`` consumes only an explicit JAX key, fixed arrays and the
+internal ``ResetSamplingConfig`` topology. That name deliberately distinguishes
+the compiled sampling choices from the user-facing ``EnvConfig.reset_config``
+and its public ``ResetConfig`` type.
+``MAP_RANDOM_STATIC`` is not yet part of this device surface; its current host
+sampler has a known row/column bug that must be resolved as an explicit behavior
+decision rather than copied into the new backend.
 
-The host builder selects the centerline or raceline, spacing, grid window,
-shuffle and lateral reset policy from ``EnvConfig``;
-``f1tenth_gym.jax.builder.build_core_tables`` materializes the reference-line
-choices. It builds an acceleration table only for an enabled subsystem:
+``JaxSimulator`` selects the centerline or raceline, spacing, grid window,
+shuffle and lateral reset policy from ``EnvConfig`` and materializes those
+reference-line choices. It builds an acceleration table only for an enabled subsystem:
 collision ``NONE`` gets constant-size masked contact and pair placeholders,
 and disabled LiDAR gets a masked ray placeholder. When both are disabled, wall
 extraction is skipped as well. An enabled contact table is sized to the
@@ -315,9 +318,9 @@ beams)`` array. ``reset_scan_state`` samples the episode-fixed per-beam bias;
 ``observed_scan`` then adds per-step Gaussian noise and that bias, clips ranges,
 and applies dropout. Collision response uses independent contact geometry.
 
-Build the ray table for at least the sensor's longest range. The host helper
-``build_scan_params(lidar_config, track_table)`` rejects a smaller table because
-it could silently omit a reachable wall. A larger preprocessed reach is safe.
-The functional calculation deliberately preserves the current simulator's
-numerical mounting transform: ``base_link_to_lidar_tf`` is applied directly to
-the supported model's CoG-referenced pose.
+Build the ray table for at least the sensor's longest range. ``JaxSimulator``
+checks that invariant before constructing the traced scan parameters because a
+smaller table could silently omit a reachable wall. A larger preprocessed reach
+is safe. The functional calculation deliberately preserves the current
+simulator's numerical mounting transform: ``base_link_to_lidar_tf`` is applied
+directly to the supported model's CoG-referenced pose.

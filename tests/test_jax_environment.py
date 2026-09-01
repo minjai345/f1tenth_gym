@@ -28,46 +28,54 @@ from f1tenth_gym.envs.integrators import IntegratorType
 from f1tenth_gym.envs.lidar import LiDARConfig
 from f1tenth_gym.envs.observation import ObservationType
 from f1tenth_gym.envs.track import Track
-from f1tenth_gym.jax import (
-    BodyParams,
-    BookkeepingParams,
+from f1tenth_gym.envs.action_jax import (
+    LongitudinalControlMode,
+    SteeringControlMode,
+)
+from f1tenth_gym.envs.contact.functional import WallContactConfig
+from f1tenth_gym.envs.contact.geometry import BodyParams
+from f1tenth_gym.envs.contact.pairs import PairContactConfig, make_pair_table
+from f1tenth_gym.envs.contact.solver import ContactParams
+from f1tenth_gym.envs.dynamic_models.jax import (
+    DynamicsParams,
+    kinematic_single_track,
+    single_track,
+    standardize_state,
+)
+from f1tenth_gym.envs.dynamic_models.jax_core import (
+    DynamicsConfig,
+    DynamicsRuntimeParams,
+    make_dynamics_state,
+)
+from f1tenth_gym.envs.episode import (
     BuiltinRewardMode,
-    ContactParams,
+    EpisodeConfig,
+    EpisodeParams,
+    TerminationMode,
+    reset_episode_state,
+)
+from f1tenth_gym.envs.integrators_jax import rk4_step
+from f1tenth_gym.envs.jax_core import (
     CoreConfig,
     CoreParams,
     CoreTables,
-    DynamicsConfig,
-    DynamicsParams,
-    EpisodeConfig,
-    EpisodeParams,
-    FrenetProjectionConfig,
-    LongitudinalControlMode,
-    PairContactConfig,
-    ResetConfig,
-    ScanConfig,
-    SteeringControlMode,
-    TerminationMode,
-    WallContactConfig,
-    cartesian_to_frenet,
-    kinematic_single_track,
-    make_dynamics_state,
     observe_core,
     reset_core,
     reset_core_from_poses,
     reset_core_from_state,
-    reset_episode_state,
-    rk4_step,
-    sample_reset_poses,
-    single_track,
-    standardize_state,
     step_core,
 )
-from f1tenth_gym.jax.preprocess import (
-    build_pair_table,
-    build_reset_table,
-    build_scan_params,
-    build_track_table,
+from f1tenth_gym.envs.lidar.functional import ScanConfig, ScanParams
+from f1tenth_gym.envs.reset.functional import (
+    ResetSamplingConfig,
+    sample_reset_poses,
 )
+from f1tenth_gym.envs.reset.preprocessing import preprocess_reset
+from f1tenth_gym.envs.track.functional import (
+    FrenetProjectionConfig,
+    cartesian_to_frenet,
+)
+from f1tenth_gym.envs.track.preprocessing import preprocess_track
 
 
 VEHICLE = F1TENTH_VEHICLE_PARAMETERS
@@ -103,7 +111,7 @@ def core_fixture(
         range_bias_std=range_bias_std,
         dropout_prob=dropout_prob,
     )
-    track_table = build_track_table(
+    track_table = preprocess_track(
         track,
         VEHICLE,
         ray_max_range=lidar.range_max,
@@ -118,7 +126,7 @@ def core_fixture(
             longitudinal_mode=LongitudinalControlMode.ACCELERATION,
             steering_mode=SteeringControlMode.STEERING_RATE,
         ),
-        reset=ResetConfig(num_agents=num_agents),
+        reset=ResetSamplingConfig(num_agents=num_agents),
         scan=ScanConfig(
             num_agents,
             lidar.num_beams if scan_enabled else 1,
@@ -146,23 +154,23 @@ def core_fixture(
         frenet_enabled=frenet_enabled,
     )
     tables = CoreTables(
-        reset=build_reset_table(
+        reset=preprocess_reset(
             track.raceline,
             min_dist=1.0,
             max_dist=2.0,
         ),
         track=track_table,
-        pairs=build_pair_table(num_agents),
+        pairs=make_pair_table(num_agents),
     )
     params = CoreParams(
-        transition=EpisodeParams(
-            dynamics=DynamicsParams.from_vehicle_parameters(VEHICLE),
+        dynamics=DynamicsRuntimeParams(
+            vehicle=DynamicsParams.from_vehicle_parameters(VEHICLE),
             timestep=0.01,
         ),
         body=BodyParams.from_vehicle_parameters(VEHICLE),
         contact=ContactParams(),
-        scan=build_scan_params(lidar, track_table),
-        bookkeeping=BookkeepingParams(),
+        scan=ScanParams.from_lidar_config(lidar),
+        episode=EpisodeParams(),
     )
     return track, lidar, config, tables, params
 
@@ -366,8 +374,8 @@ class TestCoreResetAndStep(unittest.TestCase):
         )
         params = replace(
             params,
-            transition=replace(
-                params.transition,
+            dynamics=replace(
+                params.dynamics,
                 steer_noise_std=0.1,
                 accel_noise_std=0.2,
             ),
@@ -433,8 +441,8 @@ class TestCoreContactComposition(unittest.TestCase):
         )
         params = replace(
             params,
-            bookkeeping=replace(
-                params.bookkeeping,
+            episode=replace(
+                params.episode,
                 lap_limit_enabled=False,
             ),
         )
@@ -538,8 +546,8 @@ class TestCoreTransforms(unittest.TestCase):
         )
         batched_params = replace(
             batched_params,
-            transition=replace(
-                batched_params.transition,
+            dynamics=replace(
+                batched_params.dynamics,
                 timestep=jnp.asarray([0.01, 0.02], dtype=jnp.float32),
             ),
         )

@@ -16,10 +16,10 @@ from f1tenth_gym.envs.env_config import (
     TerminationConfig,
 )
 from f1tenth_gym.envs.lidar import LiDARConfig
-from f1tenth_gym.jax import (
-    BookkeepingParams,
+from f1tenth_gym.envs.episode import (
     BuiltinRewardMode,
     EpisodeConfig,
+    EpisodeParams,
     TerminationMode,
     advance_episode,
     reset_episode_state,
@@ -35,7 +35,7 @@ def frenet_at(*values):
 
 
 def params(**updates):
-    base = BookkeepingParams(lap_limit_enabled=False)
+    base = EpisodeParams(lap_limit_enabled=False)
     return replace(base, **updates)
 
 
@@ -393,7 +393,7 @@ class TestMutableEnvironmentParity(unittest.TestCase):
                 count_partial_first_lap=False,
                 reward_mode=BuiltinRewardMode.PROGRESS,
             )
-            episode_params = BookkeepingParams(
+            episode_params = EpisodeParams(
                 terminate_on_collision=True,
                 lap_limit_enabled=True,
                 max_laps=1,

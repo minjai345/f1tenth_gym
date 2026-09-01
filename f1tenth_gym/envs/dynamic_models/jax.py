@@ -1,4 +1,4 @@
-"""Pure JAX kernels for the supported CoG-referenced vehicle models."""
+"""Pure JAX kernels for supported CoG-referenced vehicle models."""
 
 from __future__ import annotations
 

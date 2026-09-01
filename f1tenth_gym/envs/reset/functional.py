@@ -7,8 +7,6 @@ from dataclasses import dataclass
 import jax
 import jax.numpy as jnp
 
-from .core import DynamicsConfig, DynamicsState, make_dynamics_state
-
 
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
@@ -22,7 +20,7 @@ class ResetTable:
 
 
 @dataclass(frozen=True)
-class ResetConfig:
+class ResetSamplingConfig:
     """Structural reset choices shared by every environment in one executable."""
 
     num_agents: int
@@ -37,7 +35,7 @@ class ResetConfig:
 def sample_reset_poses(
     key: jax.Array,
     table: ResetTable,
-    config: ResetConfig,
+    config: ResetSamplingConfig,
 ) -> jax.Array:
     """Sample current RL grid/all-track reset semantics with explicit keys."""
     keys = jax.random.split(key, config.num_agents + 3)
@@ -78,41 +76,8 @@ def sample_reset_poses(
     return poses
 
 
-def model_state_from_poses(
-    poses: jax.Array,
-    dynamics_config: DynamicsConfig,
-) -> jax.Array:
-    """Build zero-motion native KS/ST rows from CoG ``[x, y, yaw]`` poses."""
-    poses = jnp.asarray(poses)
-    expected = (dynamics_config.num_agents, 3)
-    if poses.shape != expected:
-        raise ValueError(f"poses must have shape {expected}, got {poses.shape}")
-    model = jnp.zeros(
-        (dynamics_config.num_agents, dynamics_config.state_dim),
-        dtype=poses.dtype,
-    )
-    model = model.at[:, :2].set(poses[:, :2])
-    return model.at[:, 4].set(poses[:, 2])
-
-
-def reset_dynamics_state(
-    key: jax.Array,
-    table: ResetTable,
-    reset_config: ResetConfig,
-    dynamics_config: DynamicsConfig,
-) -> tuple[jax.Array, DynamicsState]:
-    """Sample poses and initialize zero-velocity native KS/ST state."""
-    if reset_config.num_agents != dynamics_config.num_agents:
-        raise ValueError("reset and dynamics configs must use the same num_agents")
-    poses = sample_reset_poses(key, table, reset_config)
-    model = model_state_from_poses(poses, dynamics_config)
-    return poses, make_dynamics_state(model, dynamics_config)
-
-
 __all__ = [
-    "ResetConfig",
+    "ResetSamplingConfig",
     "ResetTable",
-    "model_state_from_poses",
-    "reset_dynamics_state",
     "sample_reset_poses",
 ]

@@ -12,7 +12,7 @@ import numpy as np
 from f1tenth_gym.envs.dynamic_models import F1TENTH_VEHICLE_PARAMETERS
 from f1tenth_gym.envs.lidar import LiDARConfig
 from f1tenth_gym.envs.track import Track
-from f1tenth_gym.jax.batched import (
+from f1tenth_gym.envs.batching import (
     AutoResetBatchStep,
     BatchState,
     BatchStep,
@@ -29,15 +29,17 @@ from f1tenth_gym.jax.batched import (
     step_batch,
     step_batch_autoreset,
 )
-from f1tenth_gym.jax.contact import ContactParams, WallContactConfig
-from f1tenth_gym.jax.core import (
-    DynamicsConfig,
-    EpisodeParams,
+from f1tenth_gym.envs.contact.functional import ContactParams, WallContactConfig
+from f1tenth_gym.envs.action_jax import (
     LongitudinalControlMode,
     SteeringControlMode,
 )
-from f1tenth_gym.jax.dynamics import DynamicsParams, kinematic_single_track
-from f1tenth_gym.jax.environment import (
+from f1tenth_gym.envs.dynamic_models.jax_core import (
+    DynamicsConfig,
+    DynamicsRuntimeParams,
+)
+from f1tenth_gym.envs.dynamic_models.jax import DynamicsParams, kinematic_single_track
+from f1tenth_gym.envs.jax_core import (
     CoreConfig,
     CoreObservation,
     CoreParams,
@@ -45,28 +47,24 @@ from f1tenth_gym.jax.environment import (
     reset_core,
     step_core,
 )
-from f1tenth_gym.jax.episode import (
-    BookkeepingParams,
+from f1tenth_gym.envs.episode import (
     BuiltinRewardMode,
     EpisodeConfig,
+    EpisodeParams,
     TerminationMode,
 )
-from f1tenth_gym.jax.geometry import BodyParams
-from f1tenth_gym.jax.integrators import rk4_step
-from f1tenth_gym.jax.lidar import ScanConfig
-from f1tenth_gym.jax.pairs import PairContactConfig
-from f1tenth_gym.jax.preprocess import (
-    build_pair_table,
-    build_reset_table,
-    build_scan_params,
-    build_track_table,
-)
-from f1tenth_gym.jax.randomization import (
+from f1tenth_gym.envs.contact.geometry import BodyParams
+from f1tenth_gym.envs.integrators_jax import rk4_step
+from f1tenth_gym.envs.lidar.functional import ScanConfig, ScanParams
+from f1tenth_gym.envs.contact.pairs import PairContactConfig, make_pair_table
+from f1tenth_gym.envs.dynamic_models.randomization import (
     ActiveVehicleParams,
     VehicleRandomizationParams,
 )
-from f1tenth_gym.jax.reset import ResetConfig
-from f1tenth_gym.jax.track import FrenetProjectionConfig
+from f1tenth_gym.envs.reset.functional import ResetSamplingConfig
+from f1tenth_gym.envs.reset.preprocessing import preprocess_reset
+from f1tenth_gym.envs.track.functional import FrenetProjectionConfig
+from f1tenth_gym.envs.track.preprocessing import preprocess_track
 
 
 VEHICLE = F1TENTH_VEHICLE_PARAMETERS
@@ -85,7 +83,7 @@ def _circle_track(count=64, radius=8.0):
 def _fixture(num_agents=2):
     track = _circle_track()
     lidar = LiDARConfig(num_beams=5, range_max=5.0)
-    track_table = build_track_table(
+    track_table = preprocess_track(
         track,
         VEHICLE,
         ray_max_range=lidar.range_max,
@@ -99,7 +97,7 @@ def _fixture(num_agents=2):
             longitudinal_mode=LongitudinalControlMode.ACCELERATION,
             steering_mode=SteeringControlMode.STEERING_RATE,
         ),
-        reset=ResetConfig(num_agents=num_agents),
+        reset=ResetSamplingConfig(num_agents=num_agents),
         scan=ScanConfig(num_agents, 1, lidar.angle_min, lidar.angle_max),
         wall_contact=WallContactConfig(num_agents, 5),
         pair_contact=PairContactConfig(num_agents, 5),
@@ -115,19 +113,19 @@ def _fixture(num_agents=2):
         frenet_enabled=True,
     )
     tables = CoreTables(
-        reset=build_reset_table(track.raceline, min_dist=1.0, max_dist=2.0),
+        reset=preprocess_reset(track.raceline, min_dist=1.0, max_dist=2.0),
         track=track_table,
-        pairs=build_pair_table(num_agents),
+        pairs=make_pair_table(num_agents),
     )
     params = CoreParams(
-        transition=EpisodeParams(
-            dynamics=DynamicsParams.from_vehicle_parameters(VEHICLE),
+        dynamics=DynamicsRuntimeParams(
+            vehicle=DynamicsParams.from_vehicle_parameters(VEHICLE),
             timestep=0.01,
         ),
         body=BodyParams.from_vehicle_parameters(VEHICLE),
         contact=ContactParams(),
-        scan=build_scan_params(lidar, track_table),
-        bookkeeping=BookkeepingParams(
+        scan=ScanParams.from_lidar_config(lidar),
+        episode=EpisodeParams(
             terminate_on_collision=False,
             lap_limit_enabled=False,
         ),
@@ -136,7 +134,7 @@ def _fixture(num_agents=2):
 
 
 def _active_vehicle(params):
-    dynamics = params.transition.dynamics
+    dynamics = params.dynamics.vehicle
     body = params.body
     return ActiveVehicleParams(
         mu=dynamics.mu,
@@ -211,7 +209,7 @@ class TestBatchedResetAndStep(unittest.TestCase):
         )
         self.assertIsInstance(state, BatchState)
         self.assertEqual(observation.state.shape, (3, 2, 5))
-        self.assertEqual(state.params.transition.timestep.shape, (3,))
+        self.assertEqual(state.params.dynamics.timestep.shape, (3,))
         for index in range(self.batch_size):
             params = jax.tree.map(lambda value: value[index], state.params)
             scalar = reset_core(
@@ -304,7 +302,7 @@ class TestBatchedResetAndStep(unittest.TestCase):
                 observation.standard_state[:, 3]
                 + action[:, 1]
                 + metrics.episode.progress
-                + params.transition.timestep
+                + params.dynamics.timestep
             )
 
         custom = step(
@@ -392,8 +390,8 @@ class TestBatchedResetAndStep(unittest.TestCase):
             state,
             params=replace(
                 state.params,
-                bookkeeping=replace(
-                    state.params.bookkeeping,
+                episode=replace(
+                    state.params.episode,
                     step_limit_enabled=jnp.ones((3,), dtype=jnp.bool_),
                     max_episode_steps=jnp.ones((3,), dtype=jnp.int32),
                 ),
@@ -436,7 +434,7 @@ class TestNormalizedActions(unittest.TestCase):
             _randomization(cls.params),
         )
         dynamics = replace(
-            state.params.transition.dynamics,
+            state.params.dynamics.vehicle,
             s_min=jnp.asarray([-0.1, -0.2, -0.3], dtype=jnp.float32),
             s_max=jnp.asarray([0.4, 0.5, 0.6], dtype=jnp.float32),
             sv_min=jnp.asarray([-1.0, -2.0, -3.0], dtype=jnp.float32),
@@ -449,7 +447,7 @@ class TestNormalizedActions(unittest.TestCase):
             state,
             params=replace(
                 state.params,
-                transition=replace(state.params.transition, dynamics=dynamics),
+                dynamics=replace(state.params.dynamics, vehicle=dynamics),
             ),
         )
 
@@ -464,7 +462,7 @@ class TestNormalizedActions(unittest.TestCase):
         )
 
     def test_all_controller_modes_use_their_active_parameter_bounds(self):
-        dynamics = self.state.params.transition.dynamics
+        dynamics = self.state.params.dynamics.vehicle
         steering_cases = (
             (
                 SteeringControlMode.TARGET_ANGLE,
@@ -545,10 +543,10 @@ class TestNormalizedActions(unittest.TestCase):
 
         malformed_params = replace(
             self.state.params,
-            transition=replace(
-                self.state.params.transition,
-                dynamics=replace(
-                    self.state.params.transition.dynamics,
+            dynamics=replace(
+                self.state.params.dynamics,
+                vehicle=replace(
+                    self.state.params.dynamics.vehicle,
                     s_min=jnp.asarray(-0.1, dtype=jnp.float32),
                 ),
             ),
@@ -578,10 +576,10 @@ class TestSelectiveAutoReset(unittest.TestCase):
             self.params,
             self.randomization,
         )
-        self.assertEqual(state.params.transition.dynamics.m.shape, (3,))
+        self.assertEqual(state.params.dynamics.vehicle.m.shape, (3,))
         self.assertEqual(state.params.body.length.shape, (3,))
         self.assertEqual(
-            np.unique(np.asarray(state.params.transition.dynamics.m)).size,
+            np.unique(np.asarray(state.params.dynamics.vehicle.m)).size,
             3,
         )
         terminated_agents = state.core.episode.terminated_agents.at[0, 1].set(
@@ -598,8 +596,8 @@ class TestSelectiveAutoReset(unittest.TestCase):
             ),
             params=replace(
                 state.params,
-                bookkeeping=replace(
-                    state.params.bookkeeping,
+                episode=replace(
+                    state.params.episode,
                     step_limit_enabled=jnp.ones((3,), dtype=jnp.bool_),
                     max_episode_steps=jnp.asarray([3, 3, 1], dtype=jnp.int32),
                 ),
@@ -857,7 +855,7 @@ class TestValidationAndPurity(unittest.TestCase):
             jax.block_until_ready(result.state.core.dynamics.model)
 
     def test_module_has_no_host_or_framework_imports(self):
-        path = ROOT / "f1tenth_gym" / "jax" / "batched.py"
+        path = ROOT / "f1tenth_gym" / "envs" / "batching.py"
         tree = ast.parse(path.read_text())
         imports = set()
         for node in ast.walk(tree):

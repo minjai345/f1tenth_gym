@@ -1,6 +1,6 @@
 """Pure exact-shape indexed-map batching for device-native rollouts.
 
-The shared-map functions in :mod:`.batched` close over one ``CoreTables``
+The shared-map functions in :mod:`.batching` close over one ``CoreTables``
 value.  This module keeps the same state and result contracts while selecting
 one complete, exact-shape table row for every environment.  Different table
 shapes still belong in separate host-orchestrated compilation buckets.
@@ -15,29 +15,26 @@ from typing import Any
 import jax
 import jax.numpy as jnp
 
-from .batched import (
+from .batching import (
     AutoResetBatchStep,
     BatchState,
     BatchStep,
     RewardFn,
-    _select_batch_rows,
+    _reset_rows,
+    _step_and_autoreset_rows,
+    _step_rows,
+    _validate_autoreset_inputs,
     _validate_base_inputs,
     _validate_step_inputs,
 )
-from .environment import (
+from .jax_core import (
     CoreConfig,
     CoreParams,
     CoreTables,
-    reset_core,
     reset_core_from_poses,
     reset_core_from_state,
-    step_core,
 )
-from .randomization import (
-    VehicleRandomizationParams,
-    domain_randomization_key,
-    sample_core_params,
-)
+from .dynamic_models.randomization import VehicleRandomizationParams
 
 
 @partial(
@@ -82,7 +79,10 @@ def stack_core_tables(tables: Any) -> IndexedCoreTables:
             raise ValueError("core tables must have identical pytree structure")
         leaves = jax.tree.leaves(table)
         for first, leaf in zip(first_leaves, leaves, strict=True):
-            if jnp.shape(leaf) != jnp.shape(first) or jnp.asarray(leaf).dtype != jnp.asarray(first).dtype:
+            if (
+                jnp.shape(leaf) != jnp.shape(first)
+                or jnp.asarray(leaf).dtype != jnp.asarray(first).dtype
+            ):
                 raise ValueError(
                     "core tables must have identical leaf shapes and dtypes"
                 )
@@ -111,25 +111,9 @@ def _validate_map_indices(
     return indices
 
 
-def _table_row(indexed: IndexedCoreTables, map_index: jax.Array) -> CoreTables:
-    return jax.tree.map(lambda leaf: leaf[map_index], indexed.tables)
-
-
-def _sample_and_reset(
-    key: jax.Array,
-    map_index: jax.Array,
-    indexed: IndexedCoreTables,
-    config: CoreConfig,
-    base_params: CoreParams,
-    randomization: VehicleRandomizationParams,
-):
-    params, _vehicle = sample_core_params(
-        domain_randomization_key(key), base_params, randomization
-    )
-    observation, core = reset_core(
-        key, _table_row(indexed, map_index), config, params
-    )
-    return observation, core, params
+def _table_rows(indexed: IndexedCoreTables, map_indices: jax.Array) -> CoreTables:
+    """Gather selected exact-shape table rows for the common batch kernels."""
+    return jax.tree.map(lambda leaf: leaf[map_indices], indexed.tables)
 
 
 def reset_indexed_batch(
@@ -143,22 +127,15 @@ def reset_indexed_batch(
     """Reset a batch whose rows select among exact-shape map tables.
 
     ``map_indices`` values must lie in ``[0, indexed.num_maps)``.  The host
-    ``build_indexed_core`` route validates that invariant before compilation;
+    ``IndexedJaxSimulator`` validates that invariant before compilation;
     this pure traced entry point validates only shape and integer dtype.
     """
     batch_size = _validate_base_inputs(keys, config)
     indices = _validate_map_indices(map_indices, batch_size, indexed)
-    observation, core, params = jax.vmap(
-        lambda key, map_index: _sample_and_reset(
-            key,
-            map_index,
-            indexed,
-            config,
-            base_params,
-            randomization,
-        )
-    )(keys, indices)
-    return observation, BatchState(core=core, params=params)
+    return _reset_rows(
+        keys, _table_rows(indexed, indices), config, base_params, randomization,
+        tables_batched=True,
+    )
 
 
 def reset_indexed_batch_from_poses(
@@ -177,22 +154,12 @@ def reset_indexed_batch_from_poses(
     expected = (batch_size, config.dynamics.num_agents, 3)
     if poses.shape != expected:
         raise ValueError(f"poses must have shape {expected}, got {poses.shape}")
-
-    def reset_one(key, map_index, environment_poses):
-        params, _vehicle = sample_core_params(
-            domain_randomization_key(key), base_params, randomization
-        )
-        observation, core = reset_core_from_poses(
-            key,
-            environment_poses,
-            _table_row(indexed, map_index),
-            config,
-            params,
-        )
-        return observation, core, params
-
-    observation, core, params = jax.vmap(reset_one)(keys, indices, poses)
-    return observation, BatchState(core=core, params=params)
+    return _reset_rows(
+        keys, _table_rows(indexed, indices), config, base_params, randomization,
+        reset_fn=reset_core_from_poses,
+        overrides=poses,
+        tables_batched=True,
+    )
 
 
 def reset_indexed_batch_from_state(
@@ -217,24 +184,12 @@ def reset_indexed_batch_from_state(
         raise ValueError(
             f"model_state must have shape {expected}, got {model_state.shape}"
         )
-
-    def reset_one(key, map_index, environment_state):
-        params, _vehicle = sample_core_params(
-            domain_randomization_key(key), base_params, randomization
-        )
-        observation, core = reset_core_from_state(
-            key,
-            environment_state,
-            _table_row(indexed, map_index),
-            config,
-            params,
-        )
-        return observation, core, params
-
-    observation, core, params = jax.vmap(reset_one)(
-        keys, indices, model_state
+    return _reset_rows(
+        keys, _table_rows(indexed, indices), config, base_params, randomization,
+        reset_fn=reset_core_from_state,
+        overrides=model_state,
+        tables_batched=True,
     )
-    return observation, BatchState(core=core, params=params)
 
 
 def step_indexed_batch(
@@ -249,37 +204,9 @@ def step_indexed_batch(
     """Step indexed map rows once without reset or freezing."""
     batch_size = _validate_step_inputs(keys, state, actions, config)
     indices = _validate_map_indices(map_indices, batch_size, indexed)
-    actions = jnp.asarray(actions)
-
-    def step_one(key, map_index, core, action, params):
-        return step_core(
-            key,
-            core,
-            action,
-            _table_row(indexed, map_index),
-            config,
-            params,
-        )
-
-    observation, core, rewards, events, metrics = jax.vmap(step_one)(
-        keys, indices, state.core, actions, state.params
-    )
-    if reward_fn is not None:
-        rewards = jax.vmap(reward_fn)(
-            observation, actions, events, metrics, state.params
-        )
-        expected = (batch_size, config.dynamics.num_agents)
-        if rewards.shape != expected:
-            raise ValueError(
-                f"reward_fn must return shape {(config.dynamics.num_agents,)}, "
-                f"giving batched shape {expected}; got {rewards.shape}"
-            )
-    return BatchStep(
-        observation=observation,
-        state=BatchState(core=core, params=state.params),
-        rewards=rewards,
-        events=events,
-        metrics=metrics,
+    return _step_rows(
+        keys, state, actions, _table_rows(indexed, indices), config, reward_fn,
+        tables_batched=True,
     )
 
 
@@ -296,46 +223,19 @@ def step_indexed_batch_autoreset(
     reward_fn: RewardFn | None = None,
 ) -> AutoResetBatchStep:
     """Step indexed rows and selectively reset them on the same selected map."""
-    batch_size = _validate_step_inputs(
-        step_keys, state, actions, config, key_name="step_keys"
-    )
-    reset_size = _validate_base_inputs(reset_keys, config, "reset_keys")
-    if reset_size != batch_size:
-        raise ValueError(
-            "step_keys and reset_keys must contain the same number of environments"
-        )
-    indices = _validate_map_indices(map_indices, batch_size, indexed)
-    transition = step_indexed_batch(
+    batch_size = _validate_autoreset_inputs(
         step_keys,
-        indices,
+        reset_keys,
         state,
         actions,
-        indexed,
         config,
-        reward_fn=reward_fn,
     )
-    reset_observation, reset_state = reset_indexed_batch(
-        reset_keys,
-        indices,
-        indexed,
-        config,
-        base_params,
-        randomization,
-    )
-    reset = (
-        transition.metrics.status.terminated
-        | transition.metrics.status.truncated
-    )
-    return AutoResetBatchStep(
-        transition_observation=transition.observation,
-        next_observation=_select_batch_rows(
-            reset, reset_observation, transition.observation
-        ),
-        state=_select_batch_rows(reset, reset_state, transition.state),
-        rewards=transition.rewards,
-        events=transition.events,
-        metrics=transition.metrics,
-        reset=reset.astype(jnp.bool_),
+    indices = _validate_map_indices(map_indices, batch_size, indexed)
+    return _step_and_autoreset_rows(
+        step_keys, reset_keys, state, actions,
+        _table_rows(indexed, indices), config,
+        base_params, randomization, reward_fn,
+        tables_batched=True,
     )
 
 

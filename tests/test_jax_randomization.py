@@ -14,11 +14,11 @@ from f1tenth_gym.envs.dynamic_models import (
     F1TENTH_VEHICLE_PARAMETERS,
     PARAMETER_ORDER,
 )
-from f1tenth_gym.jax.core import EpisodeParams
-from f1tenth_gym.jax.environment import CoreParams
-from f1tenth_gym.jax.episode import BookkeepingParams
-from f1tenth_gym.jax.lidar import ScanParams
-from f1tenth_gym.jax.randomization import (
+from f1tenth_gym.envs.dynamic_models.jax_core import DynamicsRuntimeParams
+from f1tenth_gym.envs.jax_core import CoreParams
+from f1tenth_gym.envs.episode import EpisodeParams
+from f1tenth_gym.envs.lidar.functional import ScanParams
+from f1tenth_gym.envs.dynamic_models.randomization import (
     ACTIVE_VEHICLE_FIELDS,
     ActiveVehicleParams,
     VehicleRandomizationParams,
@@ -54,8 +54,8 @@ def randomization_spec(enabled=True):
 def core_params():
     vehicle = active()
     return CoreParams(
-        transition=EpisodeParams(
-            dynamics=vehicle.to_dynamics(),
+        dynamics=DynamicsRuntimeParams(
+            vehicle=vehicle.to_dynamics(),
             timestep=jnp.asarray(0.01, dtype=jnp.float32),
             steer_kp=jnp.asarray(2.5, dtype=jnp.float32),
             steer_noise_std=jnp.asarray(0.03, dtype=jnp.float32),
@@ -74,7 +74,7 @@ def core_params():
             offset_y=jnp.asarray(0.0, dtype=jnp.float32),
             offset_yaw=jnp.asarray(0.0, dtype=jnp.float32),
         ),
-        bookkeeping=BookkeepingParams(
+        episode=EpisodeParams(
             max_laps=jnp.asarray(2, dtype=jnp.int32),
             progress_weight=jnp.asarray(3.0, dtype=jnp.float32),
         ),
@@ -243,15 +243,17 @@ class TestCoreReplacement(unittest.TestCase):
 
         self.assertIs(updated.contact, base.contact)
         self.assertIs(updated.scan, base.scan)
-        self.assertIs(updated.bookkeeping, base.bookkeeping)
-        self.assertIsNot(updated.transition, base.transition)
-        self.assertIs(updated.transition.timestep, base.transition.timestep)
-        self.assertIs(updated.transition.steer_kp, base.transition.steer_kp)
-        self.assertEqual(float(updated.transition.dynamics.mu), 0.75)
-        self.assertAlmostEqual(float(updated.transition.dynamics.lr), 0.42, places=6)
+        self.assertIs(updated.episode, base.episode)
+        self.assertIsNot(updated.dynamics, base.dynamics)
+        self.assertIs(updated.dynamics.timestep, base.dynamics.timestep)
+        self.assertIs(updated.dynamics.steer_kp, base.dynamics.steer_kp)
+        self.assertEqual(float(updated.dynamics.vehicle.mu), 0.75)
+        self.assertAlmostEqual(
+            float(updated.dynamics.vehicle.lr), 0.42, places=6
+        )
         self.assertAlmostEqual(float(updated.body.centre_x), -0.30, places=6)
         self.assertAlmostEqual(
-            float(base.transition.dynamics.mu), float(VEHICLE.mu), places=6
+            float(base.dynamics.vehicle.mu), float(VEHICLE.mu), places=6
         )
         self.assertAlmostEqual(
             float(base.body.centre_x),
@@ -277,7 +279,7 @@ class TestCoreReplacement(unittest.TestCase):
         )
 
         np.testing.assert_array_equal(sampled.as_array(), fixed.as_array())
-        self.assertEqual(float(updated.transition.dynamics.lr), float(sampled.lr))
+        self.assertEqual(float(updated.dynamics.vehicle.lr), float(sampled.lr))
         self.assertAlmostEqual(
             float(updated.body.centre_x),
             -float(sampled.lr) + float(sampled.collision_body_center_x),
@@ -294,7 +296,7 @@ class TestCoreReplacement(unittest.TestCase):
         batched_core, batched_vehicle = run(keys, base, spec)
 
         self.assertEqual(batched_vehicle.as_array().shape, (5, ACTIVE_COUNT))
-        self.assertEqual(batched_core.transition.dynamics.mu.shape, (5,))
+        self.assertEqual(batched_core.dynamics.vehicle.mu.shape, (5,))
         self.assertEqual(batched_core.body.centre_x.shape, (5,))
         expected_centres = (
             -batched_vehicle.lr + batched_vehicle.collision_body_center_x
@@ -308,7 +310,7 @@ class TestCoreReplacement(unittest.TestCase):
         for leaf in jax.tree_util.tree_leaves(sampled):
             self.assertEqual(leaf.shape, ())
             self.assertEqual(leaf.dtype, jnp.float32)
-        for tree in (updated.transition.dynamics, updated.body):
+        for tree in (updated.dynamics.vehicle, updated.body):
             for leaf in jax.tree_util.tree_leaves(tree):
                 self.assertEqual(leaf.dtype, jnp.float32)
 
@@ -318,7 +320,8 @@ class TestModulePurity(unittest.TestCase):
         path = (
             pathlib.Path(__file__).resolve().parents[1]
             / "f1tenth_gym"
-            / "jax"
+            / "envs"
+            / "dynamic_models"
             / "randomization.py"
         )
         tree = ast.parse(path.read_text())
@@ -333,7 +336,7 @@ class TestModulePurity(unittest.TestCase):
                 elif node.module:
                     absolute.add(node.module.split(".")[0])
         self.assertLessEqual(absolute, {"__future__", "dataclasses", "typing", "jax"})
-        self.assertEqual(relative, {"dynamics", "environment", "geometry"})
+        self.assertEqual(relative, {"jax", "jax_core", "contact.geometry"})
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-"""Functional JAX integration kernels."""
+"""Pure JAX integration kernels for functional simulation."""
 
 from __future__ import annotations
 

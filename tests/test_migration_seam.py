@@ -15,12 +15,11 @@ import jax.numpy as jnp
 import numpy as np
 
 ENVS = pathlib.Path(__file__).resolve().parents[1] / "f1tenth_gym" / "envs"
-JAX = ENVS.parent / "jax"
 CONTACT = ENVS / "contact"
 PORTABLE = (
     CONTACT / "kernels.py",
     CONTACT / "solver.py",
-    JAX / "lidar_kernels.py",
+    ENVS / "lidar" / "kernels.py",
 )
 ALLOWED_ROOTS = {"jax", "numpy", "typing", "math", "dataclasses", "functools"}
 
@@ -41,12 +40,16 @@ def imported_roots(path):
 
 
 class TestPortability(unittest.TestCase):
-    def test_root_jax_namespace_keeps_host_builders_as_deep_imports(self):
-        roots = imported_roots(JAX / "__init__.py")
-        self.assertNotIn(".builder", roots)
-        self.assertNotIn(".gym_env", roots)
-        self.assertNotIn(".gym_observation", roots)
-        self.assertNotIn(".preprocess", roots)
+    def test_feature_packages_keep_functional_runtime_as_deep_imports(self):
+        package_exclusions = {
+            CONTACT / "__init__.py": {".functional", ".geometry", ".pairs"},
+            ENVS / "lidar" / "__init__.py": {".functional", ".kernels"},
+            ENVS / "track" / "__init__.py": {".functional", ".preprocessing"},
+            ENVS / "reset" / "__init__.py": {".functional", ".preprocessing"},
+        }
+        for path, excluded in package_exclusions.items():
+            roots = imported_roots(path)
+            self.assertTrue(excluded.isdisjoint(roots), path)
 
     def test_the_portable_modules_import_nothing_local(self):
         for path in PORTABLE:

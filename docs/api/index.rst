@@ -59,177 +59,83 @@ Vehicle dynamics
 
 .. automodule:: f1tenth_gym.envs.dynamic_models
 
-Functional JAX kernels
-----------------------
+Functional JAX simulation
+-------------------------
 
-These device-compatible pytrees and pure functions include a complete explicit-
-key transition core. They do not themselves implement a Gymnasium environment;
-host construction and observation packaging are listed below.
-
-.. autosummary::
-
-   f1tenth_gym.jax.DynamicsParams
-   f1tenth_gym.jax.DynamicsConfig
-   f1tenth_gym.jax.DynamicsState
-   f1tenth_gym.jax.EpisodeParams
-   f1tenth_gym.jax.BookkeepingParams
-   f1tenth_gym.jax.EpisodeConfig
-   f1tenth_gym.jax.EpisodeState
-   f1tenth_gym.jax.EpisodeEvents
-   f1tenth_gym.jax.EpisodeMetrics
-   f1tenth_gym.jax.EpisodeStatus
-   f1tenth_gym.jax.CoreConfig
-   f1tenth_gym.jax.CoreTables
-   f1tenth_gym.jax.CoreParams
-   f1tenth_gym.jax.CoreState
-   f1tenth_gym.jax.CoreObservation
-   f1tenth_gym.jax.CoreMetrics
-   f1tenth_gym.jax.ActiveVehicleParams
-   f1tenth_gym.jax.VehicleRandomizationParams
-   f1tenth_gym.jax.BatchState
-   f1tenth_gym.jax.BatchStep
-   f1tenth_gym.jax.AutoResetBatchStep
-   f1tenth_gym.jax.PolicyField
-   f1tenth_gym.jax.PolicyLayout
-   f1tenth_gym.jax.SplineTable
-   f1tenth_gym.jax.TrackTable
-   f1tenth_gym.jax.ResetTable
-   f1tenth_gym.jax.ResetConfig
-   f1tenth_gym.jax.BodyParams
-   f1tenth_gym.jax.ScanConfig
-   f1tenth_gym.jax.ScanParams
-   f1tenth_gym.jax.ScanState
-   f1tenth_gym.jax.ContactParams
-   f1tenth_gym.jax.WallContactConfig
-   f1tenth_gym.jax.PairContactConfig
-   f1tenth_gym.jax.PairTable
-   f1tenth_gym.jax.LongitudinalControlMode
-   f1tenth_gym.jax.SteeringControlMode
-   f1tenth_gym.jax.kinematic_single_track
-   f1tenth_gym.jax.single_track
-   f1tenth_gym.jax.standardize_state
-   f1tenth_gym.jax.adapt_actions
-   f1tenth_gym.jax.euler_step
-   f1tenth_gym.jax.rk4_step
-   f1tenth_gym.jax.integrate_substeps
-   f1tenth_gym.jax.make_dynamics_state
-   f1tenth_gym.jax.step_dynamics
-   f1tenth_gym.jax.rollout_dynamics
-   f1tenth_gym.jax.evaluate_spline
-   f1tenth_gym.jax.cartesian_to_frenet
-   f1tenth_gym.jax.cartesian_to_frenet_local
-   f1tenth_gym.jax.frenet_to_cartesian
-   f1tenth_gym.jax.sample_reset_poses
-   f1tenth_gym.jax.model_state_from_poses
-   f1tenth_gym.jax.reset_dynamics_state
-   f1tenth_gym.jax.body_vertices
-   f1tenth_gym.jax.lidar_poses
-   f1tenth_gym.jax.clean_scan
-   f1tenth_gym.jax.reset_scan_state
-   f1tenth_gym.jax.observed_scan
-   f1tenth_gym.jax.world_velocity
-   f1tenth_gym.jax.apply_contact_response
-   f1tenth_gym.jax.resolve_wall_contacts
-   f1tenth_gym.jax.make_pair_table
-   f1tenth_gym.jax.solve_pair_impulses
-   f1tenth_gym.jax.resolve_pair_contacts
-   f1tenth_gym.jax.resolve_contacts
-   f1tenth_gym.jax.reset_episode_state
-   f1tenth_gym.jax.advance_episode
-   f1tenth_gym.jax.observe_core
-   f1tenth_gym.jax.reset_core
-   f1tenth_gym.jax.reset_core_from_poses
-   f1tenth_gym.jax.reset_core_from_state
-   f1tenth_gym.jax.step_core
-   f1tenth_gym.jax.sample_vehicle_params
-   f1tenth_gym.jax.sample_core_params
-   f1tenth_gym.jax.reset_batch
-   f1tenth_gym.jax.reset_batch_from_poses
-   f1tenth_gym.jax.reset_batch_from_state
-   f1tenth_gym.jax.step_batch
-   f1tenth_gym.jax.step_batch_autoreset
-   f1tenth_gym.jax.batch_action_bounds
-   f1tenth_gym.jax.scale_normalized_actions
-   f1tenth_gym.jax.stack_core_tables
-   f1tenth_gym.jax.reset_indexed_batch
-   f1tenth_gym.jax.reset_indexed_batch_from_poses
-   f1tenth_gym.jax.reset_indexed_batch_from_state
-   f1tenth_gym.jax.step_indexed_batch
-   f1tenth_gym.jax.step_indexed_batch_autoreset
-   f1tenth_gym.jax.policy_observation
-   f1tenth_gym.jax.flatten_joint_observation
-   f1tenth_gym.jax.select_ego_rewards
-
-.. automodule:: f1tenth_gym.jax
-
-.. automodule:: f1tenth_gym.jax.dynamics
-
-.. automodule:: f1tenth_gym.jax.controls
-
-.. automodule:: f1tenth_gym.jax.core
-
-.. automodule:: f1tenth_gym.jax.environment
-
-.. automodule:: f1tenth_gym.jax.randomization
-
-.. automodule:: f1tenth_gym.jax.batched
-
-.. automodule:: f1tenth_gym.jax.indexed
-
-.. automodule:: f1tenth_gym.jax.episode
-
-.. automodule:: f1tenth_gym.jax.contact
-
-.. automodule:: f1tenth_gym.jax.pairs
-
-.. automodule:: f1tenth_gym.jax.integrators
-
-.. automodule:: f1tenth_gym.jax.geometry
-
-.. automodule:: f1tenth_gym.jax.lidar
-
-.. automodule:: f1tenth_gym.jax.lidar_kernels
-
-.. automodule:: f1tenth_gym.jax.track
-
-.. automodule:: f1tenth_gym.jax.reset
-
-Host JAX construction
----------------------
-
-These helpers run outside compiled transitions. They convert a resolved host
-track and the supported ``EnvConfig`` surface into fixed device arrays paired
-with their source host configuration and track.
+JAX support follows the same responsibility-first package layout as the mutable
+simulator. :class:`JaxSimulator` is the single host construction surface;
+``CoreConfig``, ``CoreTables`` and ``CoreParams`` remain separate because JAX
+needs static topology, fixed map tables and traced episode values to have
+different compilation behavior.
 
 .. autosummary::
 
-   f1tenth_gym.jax.builder.CoreBundle
-   f1tenth_gym.jax.builder.IndexedCoreBucket
-   f1tenth_gym.jax.builder.IndexedCoreBundle
-   f1tenth_gym.jax.builder.build_core
-   f1tenth_gym.jax.builder.build_indexed_core
-   f1tenth_gym.jax.builder.build_core_config
-   f1tenth_gym.jax.builder.build_core_tables
-   f1tenth_gym.jax.builder.build_core_params
-   f1tenth_gym.jax.builder.build_vehicle_randomization_params
-   f1tenth_gym.jax.gym_env.JaxF110Env
-   f1tenth_gym.jax.gym_observation.GymObservationAdapter
-   f1tenth_gym.jax.preprocess.build_track_table
-   f1tenth_gym.jax.preprocess.build_track_table_set
-   f1tenth_gym.jax.preprocess.build_reset_table
-   f1tenth_gym.jax.preprocess.build_scan_params
-   f1tenth_gym.jax.preprocess.build_pair_table
-   f1tenth_gym.jax.preprocess.validate_pair_table
-   f1tenth_gym.jax.preprocess.bucket_track_tables
-   f1tenth_gym.jax.preprocess.compare_batch_layout
+   f1tenth_gym.envs.jax_simulator.JaxSimulator
+   f1tenth_gym.envs.jax_simulator.IndexedJaxSimulator
+   f1tenth_gym.envs.jax_simulator.JaxSimulator.reset
+   f1tenth_gym.envs.jax_simulator.JaxSimulator.step
+   f1tenth_gym.envs.jax_env.JaxF110Env
+   f1tenth_gym.envs.observation.jax_adapter.GymObservationAdapter
+   f1tenth_gym.envs.jax_core.CoreConfig
+   f1tenth_gym.envs.jax_core.CoreTables
+   f1tenth_gym.envs.jax_core.CoreParams
+   f1tenth_gym.envs.jax_core.CoreState
+   f1tenth_gym.envs.jax_core.reset_core
+   f1tenth_gym.envs.jax_core.step_core
+   f1tenth_gym.envs.batching.PolicyLayout
+   f1tenth_gym.envs.batching.reset_batch
+   f1tenth_gym.envs.batching.step_batch
+   f1tenth_gym.envs.batching.step_batch_autoreset
+   f1tenth_gym.envs.indexed_batching.reset_indexed_batch
+   f1tenth_gym.envs.indexed_batching.step_indexed_batch
 
-.. automodule:: f1tenth_gym.jax.builder
+.. automodule:: f1tenth_gym.envs.jax_simulator
 
-.. automodule:: f1tenth_gym.jax.preprocess
+.. automodule:: f1tenth_gym.envs.jax_env
 
-.. automodule:: f1tenth_gym.jax.gym_observation
+.. automodule:: f1tenth_gym.envs.observation.jax_adapter
 
-.. automodule:: f1tenth_gym.jax.gym_env
+.. automodule:: f1tenth_gym.envs.jax_core
+
+.. automodule:: f1tenth_gym.envs.batching
+
+.. automodule:: f1tenth_gym.envs.indexed_batching
+
+Feature-owned functional modules
+--------------------------------
+
+Advanced callers can deep-import the pure fixed-shape implementation from the
+subsystem that owns each operation. Package roots intentionally stay shallow.
+
+.. automodule:: f1tenth_gym.envs.dynamic_models.jax
+
+.. automodule:: f1tenth_gym.envs.dynamic_models.jax_core
+
+.. automodule:: f1tenth_gym.envs.dynamic_models.randomization
+
+.. automodule:: f1tenth_gym.envs.action_jax
+
+.. automodule:: f1tenth_gym.envs.integrators_jax
+
+.. automodule:: f1tenth_gym.envs.episode
+
+.. automodule:: f1tenth_gym.envs.contact.functional
+
+.. automodule:: f1tenth_gym.envs.contact.geometry
+
+.. automodule:: f1tenth_gym.envs.contact.pairs
+
+.. automodule:: f1tenth_gym.envs.lidar.functional
+
+.. automodule:: f1tenth_gym.envs.lidar.kernels
+
+.. automodule:: f1tenth_gym.envs.track.functional
+
+.. automodule:: f1tenth_gym.envs.track.preprocessing
+
+.. automodule:: f1tenth_gym.envs.reset.functional
+
+.. automodule:: f1tenth_gym.envs.reset.preprocessing
 
 Actions
 -------

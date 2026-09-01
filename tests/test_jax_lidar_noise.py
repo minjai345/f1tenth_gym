@@ -8,7 +8,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from f1tenth_gym.envs.lidar import LiDARConfig
-from f1tenth_gym.jax import (
+from f1tenth_gym.envs.lidar.functional import (
     ScanConfig,
     ScanParams,
     ScanState,

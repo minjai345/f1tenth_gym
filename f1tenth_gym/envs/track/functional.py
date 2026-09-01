@@ -1,4 +1,4 @@
-"""Pure JAX track tables and reference-line coordinate transforms."""
+"""Functional JAX track tables and reference-line coordinate transforms."""
 
 from __future__ import annotations
 

@@ -42,15 +42,19 @@ fixes both the derivative function and the width of the raw state vector:
 Pure JAX kernels
 ----------------
 
-The migration-in-progress functional layer is importable from
-:mod:`f1tenth_gym.jax`. It exposes CoG KS and ST derivatives, traced vehicle and
-episode parameters, controllers, actuator noise/FIFO delays, immutable
-fixed-shape state, Euler/RK4 substeps and ``lax.scan`` free-flight rollouts.
+The functional implementation follows the same responsibility-first layout as
+the mutable simulator. Dynamics live in
+:mod:`f1tenth_gym.envs.dynamic_models.jax`, controls beside
+:mod:`f1tenth_gym.envs.action`, and integration beside
+:mod:`f1tenth_gym.envs.integrators`. Together they expose CoG KS and ST
+derivatives, traced vehicle and episode parameters, controllers, actuator
+noise/FIFO delays, immutable fixed-shape state, Euler/RK4 substeps and
+``lax.scan`` free-flight rollouts.
 Structural choices live in ``DynamicsConfig`` while values such as physical
-parameters and noise scales remain traced in ``EpisodeParams``. The layer also
-exposes shared body geometry, clean exact LiDAR sensing, wall contact and
-simultaneous vehicle-pair contact over fixed tables. Wall response vmaps the
-manifold/Jacobi solve across agents. Pair response builds every manifold from
+parameters and noise scales remain traced in ``DynamicsRuntimeParams``. The
+layer also exposes shared body geometry, clean exact LiDAR sensing, wall
+contact and simultaneous vehicle-pair contact over fixed tables. Wall response
+vmaps the manifold/Jacobi solve across agents. Pair response builds every manifold from
 one shared state, computes each Jacobi sweep from common body velocities,
 scatter-adds equal-and-opposite impulses/corrections and writes one KS/ST
 response per body. The combined ``resolve_contacts`` function preserves the
@@ -73,39 +77,43 @@ layers remain available for focused use and testing. Host-preprocessed
 reference-line, reset and ray tables are described in :doc:`tracks`; pair-table
 construction is listed in :doc:`api/index`.
 
-The host-only builder converts the supported parts of an ``EnvConfig`` and an
-already-resolved ``Track`` into a device-placed bundle::
+The host-only simulator converts the supported parts of an ``EnvConfig`` and an
+already-resolved ``Track`` into device-placed functional state::
 
-   from f1tenth_gym.jax.builder import build_core
+   from f1tenth_gym.envs.jax_simulator import JaxSimulator
 
-   bundle = build_core(config, track)
+   simulator = JaxSimulator(config, track)
 
-``bundle.config``, ``bundle.tables`` and ``bundle.params`` can be passed to
-``reset_core`` and ``step_core``; ``bundle.track`` keeps the resolved host track
-paired with those device arrays for adapters. ``bundle.randomization`` contains
+``simulator.reset(key)`` and ``simulator.step(key, state, actions)`` own the
+compiled transition seam, matching the role of ``F110Simulator`` in the
+mutable environment. Advanced batched code can still use
+``simulator.config``, ``simulator.tables`` and ``simulator.params`` directly;
+``simulator.track`` keeps the host track paired with those device arrays for
+adapters.
+``simulator.randomization`` contains
 the finite active vehicle bounds used by device-native resets. This is
 construction for the functional core, not a Gymnasium environment: it does not
-render or turn ``EnvConfig.seed`` into JAX keys. An explicit ``target_device``
-can place even a sensing/contact-disabled bundle on an accelerator; otherwise
+render or turn ``EnvConfig.seed`` into JAX keys. An explicit ``device``
+can place even a sensing/contact-disabled simulator on an accelerator; otherwise
 the active subsystem device settings select the target and CPU is the fallback.
 The deep-import ``GymObservationAdapter``
 packages every current observation preset and ``DIRECT`` layout with finite
 Gymnasium spaces, selective device transfer and independent float32 copies, but
 does not own an environment lifecycle. Construct it with
-``GymObservationAdapter.from_bundle(bundle)``; an optional
-``ObservationConfig`` selects another view without replacing the bundle's
+``GymObservationAdapter.from_simulator(simulator)``; an optional
+``ObservationConfig`` selects another view without replacing the simulator's
 source configuration, so sensor values and declared bounds cannot diverge.
-Builder calls still reject ``CUSTOM`` rewards unless a host adapter supplies an
+Construction still rejects ``CUSTOM`` rewards unless a host adapter supplies an
 explicit built-in fallback whose result it discards. Varying domain-
 randomization bounds remain traced metadata rather than requiring a host draw;
 an optional explicit ``VehicleParameters`` still selects one checked host-
 managed episode. Active contact and LiDAR must select the same JAX device unless
-``target_device`` explicitly overrides both, and functional contact currently
+``device`` explicitly overrides both, and functional contact currently
 requires the default wall-extraction tolerance.
 
 The host-only Gymnasium boundary is a separate deep import::
 
-   from f1tenth_gym.jax.gym_env import JaxF110Env
+   from f1tenth_gym.envs.jax_env import JaxF110Env
 
    env = JaxF110Env(config)
 
@@ -126,8 +134,9 @@ but NumPy and JAX random streams are intentionally not byte-paired with
 ``F110Env``.  Functional pose/state overrides reserve and discard the same pose
 key child instead of shifting the bias and scan children.
 
-The root JAX namespace also exposes ``reset_batch``, ``step_batch`` and
-``step_batch_autoreset`` for shared-map device-native rollouts. Batched state
+The responsibility-first :mod:`f1tenth_gym.envs.batching` module exposes
+``reset_batch``, ``step_batch`` and ``step_batch_autoreset`` for shared-map
+device-native rollouts. Batched state
 and active parameters keep one leading environment axis; physical parameters
 remain scalar per environment and are shared across that environment's agents.
 ``PolicyLayout`` builds ordered decentralized arrays without NumPy conversion,

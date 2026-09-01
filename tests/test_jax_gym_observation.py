@@ -1,6 +1,5 @@
 """Gymnasium packaging contracts for functional JAX observations."""
 
-from dataclasses import replace
 import unittest
 import warnings
 
@@ -14,7 +13,6 @@ from f1tenth_gym.envs.dynamic_models import DynamicModel
 from f1tenth_gym.envs.env_config import (
     DomainRandomizationConfig,
     EnvConfig,
-    LoopCounterMode,
     ObservationConfig,
     SimulationConfig,
 )
@@ -26,12 +24,12 @@ from f1tenth_gym.envs.observation import (
 )
 from f1tenth_gym.envs.observation.fields import BASE_FIELDS, DERIVED_FIELDS
 from f1tenth_gym.envs.track import Track
-from f1tenth_gym.jax.builder import build_core
-from f1tenth_gym.jax.environment import (
+from f1tenth_gym.envs.jax_simulator import JaxSimulator
+from f1tenth_gym.envs.jax_core import (
     reset_core_from_state,
     step_core,
 )
-from f1tenth_gym.jax.gym_observation import GymObservationAdapter
+from f1tenth_gym.envs.observation.jax_adapter import GymObservationAdapter
 
 
 def circle_track(count: int = 64, radius: float = 5.0) -> Track:
@@ -71,7 +69,7 @@ class TestGymObservationAdapter(unittest.TestCase):
             collision_check=CollisionCheckMode.NONE,
             render_enabled=False,
         )
-        cls.bundle = build_core(cls.config, cls.track)
+        cls.simulator = JaxSimulator(cls.config, cls.track)
         # Both rows exercise every ST-derived field.  The first vehicle is in
         # reverse with a non-zero slip angle; the vehicles are farther apart
         # than LiDAR range so opponent occlusion does not complicate parity.
@@ -86,9 +84,9 @@ class TestGymObservationAdapter(unittest.TestCase):
         cls.core_observation, cls.core_state = reset(
             jax.random.key(101),
             cls.model_state,
-            cls.bundle.tables,
-            cls.bundle.config,
-            cls.bundle.params,
+            cls.simulator.tables,
+            cls.simulator.config,
+            cls.simulator.params,
         )
 
     def _config_for(
@@ -108,8 +106,8 @@ class TestGymObservationAdapter(unittest.TestCase):
         config = self._config_for(selected, features)
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", UserWarning)
-            return GymObservationAdapter.from_bundle(
-                self.bundle, config.observation_config
+            return GymObservationAdapter.from_simulator(
+                self.simulator, config.observation_config
             )
 
     def _assert_float32_tree(self, space: gym.Space, value) -> None:
@@ -184,22 +182,22 @@ class TestGymObservationAdapter(unittest.TestCase):
         direct = observation_config(ObservationType.DIRECT)
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
-            GymObservationAdapter.from_bundle(self.bundle, direct)
+            GymObservationAdapter.from_simulator(self.simulator, direct)
         self.assertTrue(
             any("changed meaning" in str(item.message) for item in caught)
         )
 
-    def test_default_and_direct_omit_disabled_features(self):
+    def test_default_and_direct_omit_disabled_lidar(self):
         lidar_off = self.config.with_updates(
-            lidar_config=replace(self.config.lidar_config, enabled=False)
+            lidar_config=self.config.lidar_config.with_updates(enabled=False)
         )
-        lidar_bundle = build_core(lidar_off, self.track)
+        lidar_simulator = JaxSimulator(lidar_off, self.track)
         lidar_observation, _state = reset_core_from_state(
             jax.random.key(105),
             self.model_state,
-            lidar_bundle.tables,
-            lidar_bundle.config,
-            lidar_bundle.params,
+            lidar_simulator.tables,
+            lidar_simulator.config,
+            lidar_simulator.params,
         )
         for selected in (ObservationType.DEFAULT, ObservationType.DIRECT):
             config = lidar_off.with_updates(
@@ -207,8 +205,8 @@ class TestGymObservationAdapter(unittest.TestCase):
             )
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", UserWarning)
-                adapter = GymObservationAdapter.from_bundle(
-                    lidar_bundle, config.observation_config
+                adapter = GymObservationAdapter.from_simulator(
+                    lidar_simulator, config.observation_config
                 )
             packaged = adapter.package(lidar_observation)
             keys = (
@@ -220,63 +218,31 @@ class TestGymObservationAdapter(unittest.TestCase):
             self.assertNotIn("scan", keys)
             self._assert_float32_tree(adapter.observation_space, packaged)
 
-        no_frenet = self.config.with_updates(
-            simulation_config=replace(
-                self.config.simulation_config,
-                loop_counter=LoopCounterMode.WINDING_ANGLE,
-                compute_frenet_frame=False,
-            )
-        )
-        no_frenet_core = replace(self.bundle.config, frenet_enabled=False)
-        no_frenet_bundle = replace(
-            self.bundle, env_config=no_frenet, config=no_frenet_core
-        )
-        for selected in (ObservationType.DEFAULT, ObservationType.DIRECT):
-            config = no_frenet.with_updates(
-                observation_config=observation_config(selected)
-            )
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore", UserWarning)
-                adapter = GymObservationAdapter.from_bundle(
-                    no_frenet_bundle, config.observation_config
-                )
-            packaged = adapter.package(self.core_observation)
-            keys = (
-                tuple(packaged)
-                if adapter.fields is None
-                else tuple(packaged["agent_0"])
-            )
-            self.assertNotIn("frenet", keys)
-            self.assertNotIn("frenet_pose", keys)
-            self._assert_float32_tree(adapter.observation_space, packaged)
-
-    def test_explicit_disabled_feature_requests_fail_loudly(self):
+    def test_explicit_disabled_lidar_request_fails_loudly(self):
         lidar_off = self.config.with_updates(
-            lidar_config=replace(self.config.lidar_config, enabled=False),
+            lidar_config=self.config.lidar_config.with_updates(enabled=False),
             observation_config=observation_config(
                 ObservationType.FEATURES, ("scan", "state")
             ),
         )
-        lidar_bundle = build_core(lidar_off, self.track)
+        lidar_simulator = JaxSimulator(lidar_off, self.track)
         with self.assertRaisesRegex(ValueError, "LiDAR is disabled"):
-            GymObservationAdapter.from_bundle(lidar_bundle)
+            GymObservationAdapter.from_simulator(lidar_simulator)
 
-        no_frenet = self.config.with_updates(
-            simulation_config=replace(
-                self.config.simulation_config,
-                loop_counter=LoopCounterMode.WINDING_ANGLE,
+    def test_public_frenet_lap_config_keeps_frenet_observations_enabled(self):
+        config = self.config.with_updates(
+            simulation_config=SimulationConfig(
+                dynamics_model=DynamicModel.ST,
                 compute_frenet_frame=False,
-            ),
-            observation_config=observation_config(
-                ObservationType.FEATURES, ("frenet_pose", "state")
+                max_laps=None,
             ),
         )
-        no_frenet_core = replace(self.bundle.config, frenet_enabled=False)
-        no_frenet_bundle = replace(
-            self.bundle, env_config=no_frenet, config=no_frenet_core
-        )
-        with self.assertRaisesRegex(ValueError, "does not compute the Frenet"):
-            GymObservationAdapter.from_bundle(no_frenet_bundle)
+        simulator = JaxSimulator(config, self.track)
+        adapter = GymObservationAdapter.from_simulator(simulator)
+
+        self.assertTrue(config.simulation_config.compute_frenet_frame)
+        self.assertTrue(simulator.config.frenet_enabled)
+        self.assertIn("frenet_pose", adapter.fields)
 
     def test_custom_feature_selection_is_validated(self):
         invalid = (
@@ -288,8 +254,8 @@ class TestGymObservationAdapter(unittest.TestCase):
             with self.subTest(features=features):
                 config = self._config_for(ObservationType.FEATURES, features)
                 with self.assertRaisesRegex(ValueError, message):
-                    GymObservationAdapter.from_bundle(
-                        self.bundle, config.observation_config
+                    GymObservationAdapter.from_simulator(
+                        self.simulator, config.observation_config
                     )
 
     def test_derived_fields_use_velocity_components_and_true_magnitude(self):
@@ -340,17 +306,6 @@ class TestGymObservationAdapter(unittest.TestCase):
                     np.testing.assert_array_equal(replay, snapshot)
 
     def test_state_presets_transfer_only_standard_state(self):
-        irrelevant = object()
-        projected = replace(
-            self.core_observation,
-            scans=irrelevant,
-            state=irrelevant,
-            collisions=irrelevant,
-            frenet=irrelevant,
-            lap_times=irrelevant,
-            lap_counts=irrelevant,
-            sim_time=irrelevant,
-        )
         for selected in (
             ObservationType.KINEMATIC_STATE,
             ObservationType.DYNAMIC_STATE,
@@ -359,77 +314,50 @@ class TestGymObservationAdapter(unittest.TestCase):
             with self.subTest(observation_type=selected.name):
                 adapter = self._adapter(selected)
                 self.assertEqual(adapter.dependencies, ("standard_state",))
-                packaged = adapter.package(projected)
+                packaged = adapter.package(self.core_observation)
                 self._assert_float32_tree(
                     adapter.observation_space, packaged
                 )
 
-    def test_config_and_core_topology_must_match(self):
-        mismatches = (
-            (self.config.with_updates(num_agents=1), "dynamics topology"),
-            (
-                self.config.with_updates(
-                    simulation_config=replace(
-                        self.config.simulation_config,
-                        dynamics_model=DynamicModel.KS,
-                    )
-                ),
-                "dynamics topology",
-            ),
-            (
-                self.config.with_updates(
-                    lidar_config=replace(
-                        self.config.lidar_config, num_beams=11
-                    )
-                ),
-                "LiDAR topology",
-            ),
-            (
-                self.config.with_updates(
-                    lidar_config=replace(
-                        self.config.lidar_config, angle_min=-1.0
-                    )
-                ),
-                "LiDAR topology",
-            ),
-            (
-                self.config.with_updates(
-                    simulation_config=replace(
-                        self.config.simulation_config,
-                        loop_counter=LoopCounterMode.WINDING_ANGLE,
-                        compute_frenet_frame=False,
-                    )
-                ),
-                "Frenet topology",
-            ),
-        )
-        for config, message in mismatches:
-            with self.subTest(message=message):
-                with self.assertRaisesRegex(ValueError, message):
-                    GymObservationAdapter.from_bundle(
-                        replace(self.bundle, env_config=config)
-                    )
-
-        with self.assertRaisesRegex(TypeError, "bundle must be a CoreBundle"):
-            GymObservationAdapter.from_bundle(object())
-        with self.assertRaisesRegex(TypeError, "bundle.env_config must be"):
-            GymObservationAdapter.from_bundle(
-                replace(self.bundle, env_config=object())
-            )
+    def test_public_inputs_and_real_simulator_topology_are_respected(self):
+        with self.assertRaisesRegex(TypeError, "JaxSimulator"):
+            GymObservationAdapter.from_simulator(object())
         with self.assertRaisesRegex(TypeError, "observation_config must be"):
-            GymObservationAdapter.from_bundle(self.bundle, object())
-        with self.assertRaisesRegex(TypeError, "bundle.track must be a resolved Track"):
-            GymObservationAdapter.from_bundle(
-                replace(self.bundle, track=object())
-            )
+            GymObservationAdapter.from_simulator(self.simulator, object())
 
-        mismatched_range = self.config.with_updates(
-            lidar_config=replace(self.config.lidar_config, range_max=0.5)
+        config = EnvConfig(
+            map_name=self.track,
+            num_agents=1,
+            simulation_config=SimulationConfig(
+                dynamics_model=DynamicModel.KS,
+                max_laps=None,
+            ),
+            observation_config=observation_config(
+                ObservationType.KINEMATIC_STATE
+            ),
+            lidar_config=LiDARConfig(enabled=False),
+            collision_check=CollisionCheckMode.NONE,
+            render_enabled=False,
         )
-        with self.assertRaisesRegex(ValueError, "LiDAR range do not match"):
-            GymObservationAdapter.from_bundle(
-                replace(self.bundle, env_config=mismatched_range)
-            )
+        simulator = JaxSimulator(config, self.track)
+        adapter = GymObservationAdapter.from_simulator(simulator)
+        self.assertEqual(adapter.state_dim, 5)
+        self.assertEqual(adapter.agent_ids, ("agent_0",))
+        self.assertFalse(adapter.scan_enabled)
+
+        override = observation_config(
+            ObservationType.FEATURES,
+            ("state", "sim_time"),
+        )
+        overridden = GymObservationAdapter.from_simulator(
+            simulator,
+            override,
+        )
+        self.assertEqual(overridden.fields, override.features)
+        self.assertIs(
+            simulator.env_config.observation_config.type,
+            ObservationType.KINEMATIC_STATE,
+        )
 
     def test_space_uses_widest_randomized_limits_and_integrator_overshoot(self):
         params = self.config.params
@@ -441,8 +369,7 @@ class TestGymObservationAdapter(unittest.TestCase):
             a_max=16.0,
         )
         config = self.config.with_updates(
-            simulation_config=replace(
-                self.config.simulation_config,
+            simulation_config=self.config.simulation_config.with_updates(
                 timestep=0.01,
                 integrator_timestep=0.002,
             ),
@@ -452,12 +379,12 @@ class TestGymObservationAdapter(unittest.TestCase):
                 high=high,
             ),
         )
-        bundle = build_core(
+        simulator = JaxSimulator(
             config,
             self.track,
             vehicle_params=config.params,
         )
-        adapter = GymObservationAdapter.from_bundle(bundle)
+        adapter = GymObservationAdapter.from_simulator(simulator)
         standard = adapter.observation_space["agent_0"]["std_state"]
         self.assertAlmostEqual(
             float(standard.low[2]), -0.55 - 4.0 * 0.002, places=6
@@ -472,6 +399,37 @@ class TestGymObservationAdapter(unittest.TestCase):
             float(standard.high[3]), 24.0 + 16.0 * 0.002, places=6
         )
 
+    def test_space_covers_explicit_constructor_vehicle(self):
+        low = self.config.params.with_updates(v_min=-8.0)
+        high = self.config.params.with_updates(v_max=24.0)
+        config = self.config.with_updates(
+            domain_randomization_config=DomainRandomizationConfig(
+                enabled=True,
+                low=low,
+                high=high,
+            )
+        )
+        explicit = config.params.with_updates(v_max=40.0)
+        simulator = JaxSimulator(
+            config,
+            self.track,
+            vehicle_params=explicit,
+        )
+
+        adapter = GymObservationAdapter.from_simulator(simulator)
+        standard = adapter.observation_space["agent_0"]["std_state"]
+        expected_max = (
+            explicit.v_max
+            + explicit.a_max
+            * config.simulation_config.integrator_timestep
+        )
+
+        self.assertEqual(simulator.effective_vehicle_params, explicit)
+        self.assertEqual(simulator.space_vehicle_params.v_min, -8.0)
+        self.assertEqual(simulator.space_vehicle_params.v_max, 40.0)
+        self.assertEqual(float(simulator.randomization.high.v_max), 24.0)
+        self.assertAlmostEqual(float(standard.high[3]), expected_max, places=6)
+
     def test_jitted_core_outputs_package_with_lagged_observation_clock(self):
         adapter = self._adapter(ObservationType.DEFAULT)
         step = jax.jit(step_core, static_argnums=4)
@@ -481,9 +439,9 @@ class TestGymObservationAdapter(unittest.TestCase):
             jax.random.key(102),
             self.core_state,
             action,
-            self.bundle.tables,
-            self.bundle.config,
-            self.bundle.params,
+            self.simulator.tables,
+            self.simulator.config,
+            self.simulator.params,
         )
         packaged = adapter.package(observation)
         self.assertEqual(float(packaged["agent_0"]["sim_time"]), 0.0)
@@ -495,9 +453,9 @@ class TestGymObservationAdapter(unittest.TestCase):
             jax.random.key(103),
             state,
             action,
-            self.bundle.tables,
-            self.bundle.config,
-            self.bundle.params,
+            self.simulator.tables,
+            self.simulator.config,
+            self.simulator.params,
         )
         packaged = adapter.package(observation)
         self.assertAlmostEqual(
@@ -553,16 +511,16 @@ class TestGymObservationAdapter(unittest.TestCase):
             collision_check=CollisionCheckMode.NONE,
             render_enabled=False,
         )
-        bundle = build_core(config, self.track)
+        simulator = JaxSimulator(config, self.track)
         model = np.asarray([[1.5, -0.4, 0.2, -2.0, 0.7]], dtype=np.float32)
         core, _state = reset_core_from_state(
             jax.random.key(104),
             model,
-            bundle.tables,
-            bundle.config,
-            bundle.params,
+            simulator.tables,
+            simulator.config,
+            simulator.params,
         )
-        adapter = GymObservationAdapter.from_bundle(bundle)
+        adapter = GymObservationAdapter.from_simulator(simulator)
         expected = adapter.package(core)
         env = F110Env(config)
         try:

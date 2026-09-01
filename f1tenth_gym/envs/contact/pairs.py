@@ -11,15 +11,15 @@ import jax.numpy as jnp
 from f1tenth_gym.envs.contact.kernels import body_contact
 from f1tenth_gym.envs.contact.solver import ContactParams
 
-from .contact import (
+from ..dynamic_models.jax import DynamicsParams
+from ..track.functional import TrackTable
+from .functional import (
     WallContactConfig,
     apply_contact_response,
     resolve_wall_contacts,
     world_velocity,
 )
-from .dynamics import DynamicsParams
 from .geometry import BodyParams, body_vertices
-from .track import TrackTable
 
 
 @partial(

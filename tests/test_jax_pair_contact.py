@@ -12,47 +12,49 @@ import jax.numpy as jnp
 import numpy as np
 
 from f1tenth_gym.envs.action import LongitudinalActionType, SteerActionType
+from f1tenth_gym.envs.action_jax import (
+    LongitudinalControlMode,
+    SteeringControlMode,
+)
 from f1tenth_gym.envs.collision_models import CollisionCheckMode
 from f1tenth_gym.envs.contact import ContactParams, body_contact, resolve_pair
+from f1tenth_gym.envs.contact.functional import (
+    WallContactConfig,
+    apply_contact_response,
+    resolve_wall_contacts,
+    world_velocity,
+)
+from f1tenth_gym.envs.contact.geometry import BodyParams, body_vertices
+from f1tenth_gym.envs.contact.pairs import (
+    PairContactConfig,
+    make_pair_table,
+    resolve_contacts,
+    resolve_pair_contacts,
+    solve_pair_impulses,
+)
 from f1tenth_gym.envs.dynamic_models import (
     DynamicModel,
     F1TENTH_VEHICLE_PARAMETERS,
 )
+from f1tenth_gym.envs.dynamic_models.jax import (
+    DynamicsParams,
+    kinematic_single_track,
+    single_track,
+)
+from f1tenth_gym.envs.dynamic_models.jax_core import (
+    DynamicsConfig,
+    DynamicsRuntimeParams,
+    make_dynamics_state,
+    step_dynamics,
+)
 from f1tenth_gym.envs.env_config import ControlConfig, EnvConfig, SimulationConfig
 from f1tenth_gym.envs.integrators import IntegratorType, rk4_integration
+from f1tenth_gym.envs.integrators_jax import rk4_step
 from f1tenth_gym.envs.lidar import LiDARConfig
 from f1tenth_gym.envs.simulator import F110Simulator
 from f1tenth_gym.envs.track import Track
 from f1tenth_gym.envs.track.walls import wall_segments
-from f1tenth_gym.jax import (
-    BodyParams,
-    DynamicsConfig,
-    DynamicsParams,
-    EpisodeParams,
-    LongitudinalControlMode,
-    PairContactConfig,
-    PairTable,
-    SteeringControlMode,
-    WallContactConfig,
-    apply_contact_response,
-    body_vertices,
-    kinematic_single_track,
-    make_dynamics_state,
-    make_pair_table,
-    resolve_contacts,
-    resolve_pair_contacts,
-    resolve_wall_contacts,
-    rk4_step,
-    single_track,
-    solve_pair_impulses,
-    step_dynamics,
-    world_velocity,
-)
-from f1tenth_gym.jax.preprocess import (
-    build_pair_table,
-    build_track_table,
-    validate_pair_table,
-)
+from f1tenth_gym.envs.track.preprocessing import preprocess_track
 
 
 VEHICLE = F1TENTH_VEHICLE_PARAMETERS
@@ -160,24 +162,6 @@ class TestPairTable(unittest.TestCase):
         with self.assertRaises(ValueError):
             PairContactConfig(2, 7, multi_relaxation=0.0)
 
-        self.assertEqual(build_pair_table(3).indices.shape, (3, 2))
-        invalid_tables = (
-            PairTable(jnp.asarray([[0, 0]]), jnp.asarray([True]), 3),
-            PairTable(jnp.asarray([[1, 0]]), jnp.asarray([True]), 3),
-            PairTable(jnp.asarray([[0, 3]]), jnp.asarray([True]), 3),
-            PairTable(jnp.asarray([[0, 3]]), jnp.asarray([False]), 3),
-            PairTable(jnp.asarray([[0.0, 1.0]]), jnp.asarray([True]), 3),
-            PairTable(jnp.asarray([[0, 1]]), jnp.asarray([1]), 3),
-            PairTable(jnp.asarray([[0, 1]]), jnp.asarray([True]), 3),
-            PairTable(
-                jnp.asarray([[0, 1], [0, 1]]), jnp.asarray([True, True]), 3
-            ),
-        )
-        for table in invalid_tables:
-            with self.assertRaises(ValueError):
-                validate_pair_table(table, 3)
-        with self.assertRaises(ValueError):
-            validate_pair_table(make_pair_table(4), 3)
         with self.assertRaisesRegex(ValueError, "agent counts"):
             resolve_pair_contacts(
                 states_at([-1.0, 0.0, 1.0], [0.0, 0.0, 0.0]),
@@ -449,7 +433,7 @@ class TestLiveSimulatorParity(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.track = Track.from_track_name("Spielberg_blank", 1.0)
-        cls.table = build_track_table(cls.track, VEHICLE)
+        cls.table = preprocess_track(cls.track, VEHICLE)
         cls.body = BodyParams.from_vehicle_parameters(VEHICLE)
 
     def test_two_car_step_matches_the_mutable_pair_path_for_ks_and_st(self):
@@ -508,7 +492,7 @@ class TestLiveSimulatorParity(unittest.TestCase):
                     make_dynamics_state(initial, dynamics_config),
                     jnp.asarray(actions),
                     dynamics_config,
-                    EpisodeParams(DYNAMICS, 0.01),
+                    DynamicsRuntimeParams(DYNAMICS, 0.01),
                 )
                 actual, events = resolve_contacts(
                     free.model,
@@ -547,7 +531,7 @@ class TestContactComposition(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.track = Track.from_track_name("Spielberg", 1.0)
-        cls.table = build_track_table(cls.track, VEHICLE)
+        cls.table = preprocess_track(cls.track, VEHICLE)
         cls.body = BodyParams.from_vehicle_parameters(VEHICLE)
 
     def test_wrapper_is_wall_then_pairs_with_event_union(self):
@@ -657,7 +641,7 @@ class TestTransformability(unittest.TestCase):
     def test_pair_module_contains_no_numpy_or_host_callback(self):
         path = (
             pathlib.Path(__file__).resolve().parents[1]
-            / "f1tenth_gym" / "jax" / "pairs.py"
+            / "f1tenth_gym" / "envs" / "contact" / "pairs.py"
         )
         source = path.read_text()
         tree = ast.parse(source)

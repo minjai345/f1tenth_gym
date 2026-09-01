@@ -9,30 +9,21 @@ import jax.numpy as jnp
 import numpy as np
 
 from f1tenth_gym.envs.dynamic_models import F1TENTH_VEHICLE_PARAMETERS
+from f1tenth_gym.envs.reset.functional import (
+    ResetSamplingConfig,
+    sample_reset_poses,
+)
+from f1tenth_gym.envs.reset.preprocessing import preprocess_reset
 from f1tenth_gym.envs.track import Track
-from f1tenth_gym.jax import (
-    DynamicsConfig,
+from f1tenth_gym.envs.track.functional import (
     FrenetProjectionConfig,
-    ResetConfig,
     cartesian_to_frenet,
     cartesian_to_frenet_local,
     evaluate_spline,
     frenet_to_cartesian,
-    kinematic_single_track,
-    model_state_from_poses,
-    reset_dynamics_state,
-    rk4_step,
-    sample_reset_poses,
-    single_track,
     tile_candidates,
 )
-from f1tenth_gym.jax.preprocess import (
-    bucket_track_tables,
-    build_reset_table,
-    build_track_table,
-    build_track_table_set,
-    compare_batch_layout,
-)
+from f1tenth_gym.envs.track.preprocessing import preprocess_track
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -53,7 +44,7 @@ class TestTrackPreprocessing(unittest.TestCase):
         for value in (0.0, -1.0, float("nan"), float("inf")):
             with self.subTest(contact_tile_size=value):
                 with self.assertRaisesRegex(ValueError, "tile_size"):
-                    build_track_table(
+                    preprocess_track(
                         track,
                         F1TENTH_VEHICLE_PARAMETERS,
                         contact_enabled=False,
@@ -62,7 +53,7 @@ class TestTrackPreprocessing(unittest.TestCase):
                     )
             with self.subTest(ray_tile_size=value):
                 with self.assertRaisesRegex(ValueError, "tile_size"):
-                    build_track_table(
+                    preprocess_track(
                         track,
                         F1TENTH_VEHICLE_PARAMETERS,
                         contact_enabled=False,
@@ -72,7 +63,7 @@ class TestTrackPreprocessing(unittest.TestCase):
 
     def test_spline_values_and_coordinate_transforms_match_the_host(self):
         track = circle_track()
-        tables = build_track_table(
+        tables = preprocess_track(
             track, F1TENTH_VEHICLE_PARAMETERS, ray_max_range=5.0
         )
         evaluate = jax.jit(evaluate_spline)
@@ -100,7 +91,7 @@ class TestTrackPreprocessing(unittest.TestCase):
 
     def test_empty_and_nonempty_wall_tables_are_masked_and_gatherable(self):
         empty_track = circle_track()
-        empty = build_track_table(
+        empty = preprocess_track(
             empty_track, F1TENTH_VEHICLE_PARAMETERS, ray_max_range=5.0
         )
         self.assertEqual(empty.walls.a.shape, (1, 2))
@@ -110,7 +101,7 @@ class TestTrackPreprocessing(unittest.TestCase):
 
         occupied_track = circle_track()
         occupied_track.occupancy_map[80:120, 80:120] = 0.0
-        occupied = build_track_table(
+        occupied = preprocess_track(
             occupied_track, F1TENTH_VEHICLE_PARAMETERS, ray_max_range=5.0
         )
         self.assertTrue(bool(jnp.any(occupied.walls.mask)))
@@ -121,64 +112,33 @@ class TestTrackPreprocessing(unittest.TestCase):
         self.assertTrue(bool(jnp.any(mask)))
         self.assertTrue(bool(jnp.all(indices[mask] < occupied.walls.a.shape[0])))
 
-    def test_exact_shape_bucketing_avoids_implicit_worst_map_padding(self):
-        tables = [
-            build_track_table(
-                circle_track(40), F1TENTH_VEHICLE_PARAMETERS, ray_max_range=4.0
-            ),
-            build_track_table(
-                circle_track(90), F1TENTH_VEHICLE_PARAMETERS, ray_max_range=4.0
-            ),
-        ]
-        buckets = bucket_track_tables(tables)
-        report = compare_batch_layout(tables)
-        self.assertEqual(len(buckets), 2)
-        self.assertEqual(report.bucket_count, 2)
-        self.assertGreater(report.global_padded_bytes, report.exact_bytes)
-        self.assertGreater(report.global_padding_ratio, 1.0)
-
-        shared = bucket_track_tables((tables[0], tables[0]))
-        self.assertEqual(len(shared), 1)
-        self.assertEqual(shared[0].source_indices, (0, 1))
-        self.assertEqual(shared[0].tables.centerline.knots.shape[0], 2)
-
-        first, second = circle_track(40), circle_track(90)
-        table_set = build_track_table_set(
-            (first, first, second),
-            F1TENTH_VEHICLE_PARAMETERS,
-            ray_max_range=4.0,
-        )
-        self.assertEqual(table_set.unique_count, 2)
-        np.testing.assert_array_equal(table_set.map_indices, [0, 0, 1])
-        self.assertEqual(len(table_set.buckets), 2)
-
     def test_only_the_host_preprocessor_imports_numpy(self):
-        for filename in (
-            "controls.py",
-            "core.py",
-            "dynamics.py",
-            "environment.py",
-            "episode.py",
-            "integrators.py",
-            "reset.py",
-            "track.py",
+        for path in (
+            ROOT / "f1tenth_gym" / "envs" / "action_jax.py",
+            ROOT / "f1tenth_gym" / "envs" / "dynamic_models" / "jax.py",
+            ROOT / "f1tenth_gym" / "envs" / "dynamic_models" / "jax_core.py",
+            ROOT / "f1tenth_gym" / "envs" / "episode.py",
+            ROOT / "f1tenth_gym" / "envs" / "integrators_jax.py",
+            ROOT / "f1tenth_gym" / "envs" / "jax_core.py",
+            ROOT / "f1tenth_gym" / "envs" / "reset" / "functional.py",
+            ROOT / "f1tenth_gym" / "envs" / "track" / "functional.py",
         ):
-            tree = ast.parse((ROOT / "f1tenth_gym" / "jax" / filename).read_text())
+            tree = ast.parse(path.read_text())
             imports = {
                 alias.name
                 for node in ast.walk(tree)
                 if isinstance(node, ast.Import)
                 for alias in node.names
             }
-            self.assertNotIn("numpy", imports, filename)
-            self.assertNotIn("np", imports, filename)
+            self.assertNotIn("numpy", imports, path.name)
+            self.assertNotIn("np", imports, path.name)
 
 
 class TestLocalFrenetProjection(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.track = Track.from_track_name("Spielberg", 1.0)
-        cls.table = build_track_table(
+        cls.table = preprocess_track(
             cls.track,
             F1TENTH_VEHICLE_PARAMETERS,
             ray_max_range=5.0,
@@ -273,7 +233,7 @@ class TestJaxReset(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.track = circle_track(100)
-        cls.table = build_reset_table(
+        cls.table = preprocess_reset(
             cls.track.raceline,
             min_dist=1.5,
             max_dist=2.5,
@@ -281,7 +241,11 @@ class TestJaxReset(unittest.TestCase):
         )
 
     def test_sampling_is_key_driven_fixed_shape_and_jittable(self):
-        config = ResetConfig(num_agents=3, move_laterally=False, shuffle=False)
+        config = ResetSamplingConfig(
+            num_agents=3,
+            move_laterally=False,
+            shuffle=False,
+        )
         sample = jax.jit(sample_reset_poses, static_argnums=2)
         first = sample(jax.random.key(11), self.table, config)
         replay = sample(jax.random.key(11), self.table, config)
@@ -294,8 +258,12 @@ class TestJaxReset(unittest.TestCase):
         for pose in np.asarray(first):
             self.assertLess(float(np.linalg.norm(waypoint_xy - pose[:2], axis=1).min()), 1e-6)
 
-    def test_lateral_shuffle_vmap_and_native_state_initialization(self):
-        reset_config = ResetConfig(num_agents=2, move_laterally=True, shuffle=True)
+    def test_lateral_shuffle_is_vmappable(self):
+        reset_config = ResetSamplingConfig(
+            num_agents=2,
+            move_laterally=True,
+            shuffle=True,
+        )
         keys = jax.random.split(jax.random.key(5), 4)
         batched = jax.jit(
             jax.vmap(lambda key: sample_reset_poses(key, self.table, reset_config))
@@ -303,51 +271,11 @@ class TestJaxReset(unittest.TestCase):
         self.assertEqual(batched.shape, (4, 2, 3))
         self.assertTrue(bool(jnp.all(jnp.isfinite(batched))))
 
-        dynamics_config = DynamicsConfig(
-            num_agents=2,
-            state_dim=5,
-            dynamics_fn=kinematic_single_track,
-            integrator_fn=rk4_step,
-        )
-        poses, state = jax.jit(
-            reset_dynamics_state,
-            static_argnums=(2, 3),
-        )(jax.random.key(8), self.table, reset_config, dynamics_config)
-        np.testing.assert_array_equal(state.model[:, :2], poses[:, :2])
-        np.testing.assert_array_equal(state.model[:, 4], poses[:, 2])
-        np.testing.assert_array_equal(state.model[:, 2:4], 0.0)
-        self.assertEqual(float(state.sim_time), 0.0)
-
-    def test_pose_conversion_has_one_exact_ks_and_st_layout(self):
-        poses = jnp.asarray(
-            [[1.0, 2.0, 0.3], [-4.0, 5.0, -0.6]], dtype=jnp.float32
-        )
-        for state_dim, dynamics_fn in (
-            (5, kinematic_single_track),
-            (7, single_track),
-        ):
-            with self.subTest(state_dim=state_dim):
-                config = DynamicsConfig(
-                    num_agents=2,
-                    state_dim=state_dim,
-                    dynamics_fn=dynamics_fn,
-                    integrator_fn=rk4_step,
-                )
-                convert = jax.jit(model_state_from_poses, static_argnums=1)
-                model = convert(poses, config)
-                expected = np.zeros((2, state_dim), dtype=np.float32)
-                expected[:, :2] = np.asarray(poses[:, :2])
-                expected[:, 4] = np.asarray(poses[:, 2])
-                np.testing.assert_array_equal(model, expected)
-
-        with self.assertRaisesRegex(ValueError, "poses must have shape"):
-            model_state_from_poses(poses[:1], config)
-
     def test_reset_preprocessing_validates_ranges(self):
         with self.assertRaisesRegex(ValueError, "max_dist"):
-            build_reset_table(self.track.raceline, min_dist=2.0, max_dist=1.0)
+            preprocess_reset(self.track.raceline, min_dist=2.0, max_dist=1.0)
         with self.assertRaisesRegex(ValueError, "start_width"):
-            build_reset_table(
+            preprocess_reset(
                 self.track.raceline,
                 min_dist=1.0,
                 max_dist=2.0,

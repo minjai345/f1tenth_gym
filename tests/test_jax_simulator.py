@@ -1,4 +1,4 @@
-"""Host ``EnvConfig`` conversion contracts for the functional JAX core."""
+"""Public ``JaxSimulator`` construction and conversion contracts."""
 
 import unittest
 from unittest import mock
@@ -7,9 +7,14 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
+from f1tenth_gym.envs.batching import reset_batch
 from f1tenth_gym.envs.action import (
     LongitudinalActionType,
     SteerActionType,
+)
+from f1tenth_gym.envs.action_jax import (
+    LongitudinalControlMode,
+    SteeringControlMode,
 )
 from f1tenth_gym.envs.collision_models import CollisionCheckMode
 from f1tenth_gym.envs.contact import ContactConfig
@@ -17,6 +22,10 @@ from f1tenth_gym.envs.dynamic_models import (
     PARAMETER_ORDER,
     DynamicModel,
     F1TENTH_VEHICLE_PARAMETERS,
+)
+from f1tenth_gym.envs.dynamic_models.jax import (
+    kinematic_single_track,
+    single_track,
 )
 from f1tenth_gym.envs.env_config import (
     ControlConfig,
@@ -29,27 +38,15 @@ from f1tenth_gym.envs.env_config import (
     SimulationConfig,
     TerminationConfig,
 )
+from f1tenth_gym.envs.episode import BuiltinRewardMode, TerminationMode
 from f1tenth_gym.envs.integrators import IntegratorType
+from f1tenth_gym.envs.integrators_jax import euler_step, rk4_step
+from f1tenth_gym.envs.jax_simulator import JaxSimulator
 from f1tenth_gym.envs.lidar import LiDARConfig
 from f1tenth_gym.envs.reset import ReferenceLine, ResetStrategy
 from f1tenth_gym.envs.termination import AgentTerminationMode
 from f1tenth_gym.envs.track import Track
 from f1tenth_gym.envs.track.budget import widest_query_half_extent
-from f1tenth_gym.jax.builder import (
-    build_core,
-    build_core_config,
-    build_core_params,
-    build_core_tables,
-    build_vehicle_randomization_params,
-)
-from f1tenth_gym.jax.controls import (
-    LongitudinalControlMode,
-    SteeringControlMode,
-)
-from f1tenth_gym.jax.dynamics import kinematic_single_track, single_track
-from f1tenth_gym.jax.environment import reset_core, step_core
-from f1tenth_gym.jax.episode import BuiltinRewardMode, TerminationMode
-from f1tenth_gym.jax.integrators import euler_step, rk4_step
 
 
 VEHICLE = F1TENTH_VEHICLE_PARAMETERS
@@ -65,7 +62,7 @@ def circle_track(count: int = 64, radius: float = 5.0) -> Track:
 
 
 def lightweight_config(**changes) -> EnvConfig:
-    """Return an offline config that does not preprocess unused geometry."""
+    """Return an offline config that skips unused geometric indexes."""
     defaults = {
         "collision_check": CollisionCheckMode.NONE,
         "lidar_config": LiDARConfig(enabled=False, num_beams=7),
@@ -75,34 +72,48 @@ def lightweight_config(**changes) -> EnvConfig:
     return EnvConfig(**defaults)
 
 
-class TestCoreConfigMapping(unittest.TestCase):
-    def test_default_topology_maps_without_loading_a_track(self):
-        config = build_core_config(EnvConfig(render_enabled=False))
+class TestJaxSimulatorMapping(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.track = circle_track()
 
-        self.assertEqual(config.dynamics.state_dim, 7)
-        self.assertIs(config.dynamics.dynamics_fn, single_track)
-        self.assertIs(config.dynamics.integrator_fn, rk4_step)
-        self.assertEqual(config.dynamics.num_substeps, 1)
+    def test_constructor_exposes_one_complete_device_simulator(self):
+        host = lightweight_config()
+        simulator = JaxSimulator(host, self.track, device="cpu")
+
+        self.assertIs(simulator.env_config, host)
+        self.assertIs(simulator.track, self.track)
+        self.assertEqual(simulator.device.platform, "cpu")
+        self.assertEqual(simulator.config.dynamics.state_dim, 7)
+        self.assertIs(simulator.config.dynamics.dynamics_fn, single_track)
+        self.assertIs(simulator.config.dynamics.integrator_fn, rk4_step)
+        self.assertEqual(simulator.config.dynamics.num_substeps, 1)
         self.assertIs(
-            config.dynamics.longitudinal_mode,
+            simulator.config.dynamics.longitudinal_mode,
             LongitudinalControlMode.TARGET_SPEED,
         )
         self.assertIs(
-            config.dynamics.steering_mode,
+            simulator.config.dynamics.steering_mode,
             SteeringControlMode.TARGET_ANGLE,
         )
-        self.assertTrue(config.dynamics.derive_steer_kp)
-        self.assertEqual(config.scan.num_beams, 1080)
-        self.assertTrue(config.scan_enabled)
-        self.assertTrue(config.contact_enabled)
-        self.assertTrue(config.frenet_enabled)
-        self.assertEqual(config.wall_contact.solver_iterations, 64)
-        self.assertEqual(config.pair_contact.solver_iterations, 64)
-        self.assertIs(config.episode.termination_mode, TerminationMode.EGO)
-        self.assertIs(config.episode.reward_mode, BuiltinRewardMode.SURVIVAL)
+        self.assertTrue(simulator.config.dynamics.derive_steer_kp)
+        self.assertFalse(simulator.config.scan_enabled)
+        self.assertFalse(simulator.config.contact_enabled)
+        self.assertTrue(simulator.config.frenet_enabled)
+        self.assertIs(
+            simulator.config.episode.termination_mode,
+            TerminationMode.EGO,
+        )
+        self.assertIs(
+            simulator.config.episode.reward_mode,
+            BuiltinRewardMode.SURVIVAL,
+        )
+        for leaf in jax.tree.leaves(
+            (simulator.tables, simulator.params, simulator.randomization)
+        ):
+            self.assertEqual(leaf.device, simulator.device)
 
-    def test_nondefault_static_and_traced_values_map_exactly(self):
-        track = circle_track()
+    def test_nondefault_topology_and_values_map_exactly(self):
         host = lightweight_config(
             num_agents=2,
             ego_index=1,
@@ -153,10 +164,10 @@ class TestCoreConfigMapping(unittest.TestCase):
                 collision_penalty=3.0,
             ),
         )
-
-        config = build_core_config(host)
-        tables = build_core_tables(host, track)
-        params = build_core_params(host, tables.track)
+        simulator = JaxSimulator(host, self.track)
+        config = simulator.config
+        tables = simulator.tables
+        params = simulator.params
 
         self.assertEqual(config.dynamics.state_dim, 5)
         self.assertIs(config.dynamics.dynamics_fn, kinematic_single_track)
@@ -186,59 +197,65 @@ class TestCoreConfigMapping(unittest.TestCase):
         self.assertEqual(config.pair_contact.solver_iterations, 9)
 
         expected_waypoints = np.stack(
-            (track.centerline.xs, track.centerline.ys), axis=1
+            (self.track.centerline.xs, self.track.centerline.ys), axis=1
         ).astype(np.float32)
         np.testing.assert_array_equal(tables.reset.waypoints, expected_waypoints)
         self.assertLess(
-            tables.reset.start_indices.shape[0], tables.reset.waypoints.shape[0]
+            tables.reset.start_indices.shape[0],
+            tables.reset.waypoints.shape[0],
         )
         np.testing.assert_array_equal(tables.pairs.indices, [[0, 0]])
         np.testing.assert_array_equal(tables.pairs.mask, [False])
         self.assertFalse(bool(np.asarray(tables.track.contact_tiles.mask).any()))
         self.assertFalse(bool(np.asarray(tables.track.ray_tiles.mask).any()))
-        self.assertEqual(float(tables.track.contact_tiles.reach), 0.0)
-        self.assertEqual(float(tables.track.ray_tiles.reach), 0.0)
 
-        self.assertAlmostEqual(float(params.transition.timestep), 0.03)
-        self.assertAlmostEqual(float(params.transition.steer_kp), 2.75)
-        self.assertAlmostEqual(float(params.transition.steer_noise_std), 0.12)
-        self.assertAlmostEqual(float(params.transition.accel_noise_std), 0.34)
+        self.assertAlmostEqual(float(params.dynamics.timestep), 0.03)
+        self.assertAlmostEqual(float(params.dynamics.steer_kp), 2.75)
+        self.assertAlmostEqual(float(params.dynamics.steer_noise_std), 0.12)
+        self.assertAlmostEqual(float(params.dynamics.accel_noise_std), 0.34)
         self.assertAlmostEqual(float(params.contact.restitution), 0.2)
         self.assertAlmostEqual(float(params.contact.friction), 0.7)
         self.assertAlmostEqual(float(params.contact.slop), 0.004)
-        self.assertFalse(bool(params.bookkeeping.terminate_on_collision))
-        self.assertFalse(bool(params.bookkeeping.lap_limit_enabled))
-        self.assertTrue(bool(params.bookkeeping.step_limit_enabled))
-        self.assertEqual(int(params.bookkeeping.max_episode_steps), 11)
-        self.assertAlmostEqual(float(params.bookkeeping.progress_weight), 2.0)
-        self.assertAlmostEqual(float(params.bookkeeping.velocity_weight), 0.5)
-        self.assertAlmostEqual(float(params.bookkeeping.timestep_weight), 0.25)
-        self.assertAlmostEqual(float(params.bookkeeping.collision_penalty), 3.0)
+        self.assertFalse(bool(params.episode.terminate_on_collision))
+        self.assertFalse(bool(params.episode.lap_limit_enabled))
+        self.assertTrue(bool(params.episode.step_limit_enabled))
+        self.assertEqual(int(params.episode.max_episode_steps), 11)
+        self.assertAlmostEqual(float(params.episode.progress_weight), 2.0)
+        self.assertAlmostEqual(float(params.episode.velocity_weight), 0.5)
+        self.assertAlmostEqual(float(params.episode.timestep_weight), 0.25)
+        self.assertAlmostEqual(float(params.episode.collision_penalty), 3.0)
 
-    def test_disabled_geometry_skips_both_acceleration_indexes(self):
-        host = lightweight_config()
+    def test_disabled_geometry_skips_acceleration_indexes(self):
         with (
             mock.patch(
-                "f1tenth_gym.jax.preprocess.build_contact_tiles",
+                "f1tenth_gym.envs.track.preprocessing.build_contact_tiles",
                 side_effect=AssertionError("contact index should be skipped"),
             ),
             mock.patch(
-                "f1tenth_gym.jax.preprocess.build_ray_tiles",
+                "f1tenth_gym.envs.track.preprocessing.build_ray_tiles",
                 side_effect=AssertionError("ray index should be skipped"),
             ),
             mock.patch(
-                "f1tenth_gym.jax.preprocess.wall_segments",
+                "f1tenth_gym.envs.track.preprocessing.wall_segments",
                 side_effect=AssertionError("wall extraction should be skipped"),
             ),
         ):
-            tables = build_core_tables(host, circle_track())
-        self.assertFalse(bool(np.asarray(tables.track.contact_tiles.mask).any()))
-        self.assertFalse(bool(np.asarray(tables.track.ray_tiles.mask).any()))
-        self.assertEqual(tables.pairs.indices.shape, (1, 2))
-        self.assertFalse(bool(np.asarray(tables.pairs.mask).any()))
+            simulator = JaxSimulator(lightweight_config(), self.track)
+        self.assertFalse(
+            bool(np.asarray(simulator.tables.track.contact_tiles.mask).any())
+        )
+        self.assertFalse(
+            bool(np.asarray(simulator.tables.track.ray_tiles.mask).any())
+        )
+        self.assertEqual(simulator.tables.pairs.indices.shape, (1, 2))
+        self.assertFalse(bool(np.asarray(simulator.tables.pairs.mask).any()))
 
 
 class TestUnsupportedHostSurface(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.track = circle_track()
+
     def test_invalid_substep_ratio_is_rejected(self):
         host = lightweight_config(
             simulation_config=SimulationConfig(
@@ -247,16 +264,16 @@ class TestUnsupportedHostSurface(unittest.TestCase):
             )
         )
         with self.assertRaisesRegex(ValueError, "integer multiple"):
-            build_core_config(host)
+            JaxSimulator(host, self.track)
 
-    def test_map_reset_and_winding_laps_are_explicitly_rejected(self):
+    def test_map_reset_and_winding_laps_are_rejected(self):
         map_reset = lightweight_config(
             reset_config=HostResetConfig(
                 strategy=ResetStrategy.MAP_RANDOM_STATIC
             )
         )
         with self.assertRaisesRegex(ValueError, "MAP_RANDOM_STATIC"):
-            build_core_config(map_reset)
+            JaxSimulator(map_reset, self.track)
 
         winding = lightweight_config(
             simulation_config=SimulationConfig(
@@ -265,9 +282,9 @@ class TestUnsupportedHostSurface(unittest.TestCase):
             )
         )
         with self.assertRaisesRegex(ValueError, "FRENET_BASED"):
-            build_core_config(winding)
+            JaxSimulator(winding, self.track)
 
-    def test_custom_reward_and_nondefault_wall_tolerance_are_rejected(self):
+    def test_custom_reward_and_wall_tolerance_are_rejected(self):
         custom = lightweight_config(
             reward_config=RewardConfig(
                 mode=RewardMode.CUSTOM,
@@ -275,42 +292,16 @@ class TestUnsupportedHostSurface(unittest.TestCase):
             )
         )
         with self.assertRaisesRegex(ValueError, "adapter-only"):
-            build_core_config(custom)
+            JaxSimulator(custom, self.track)
 
         tolerance = EnvConfig(
             contact_config=ContactConfig(wall_tolerance_px=0.5),
             render_enabled=False,
         )
         with self.assertRaisesRegex(ValueError, "wall_tolerance_px"):
-            build_core_config(tolerance)
+            JaxSimulator(tolerance, self.track)
 
-    def test_host_adapter_can_explicitly_supply_a_custom_reward_fallback(self):
-        custom = lightweight_config(
-            reward_config=RewardConfig(
-                mode=RewardMode.CUSTOM,
-                reward_fn=lambda *_args: 0.0,
-            )
-        )
-        bundle = build_core(
-            custom,
-            circle_track(),
-            custom_reward_fallback=BuiltinRewardMode.SURVIVAL,
-        )
-
-        self.assertIs(bundle.env_config, custom)
-        self.assertIs(
-            bundle.config.episode.reward_mode,
-            BuiltinRewardMode.SURVIVAL,
-        )
-        with self.assertRaisesRegex(ValueError, "only applies"):
-            build_core_config(
-                lightweight_config(),
-                custom_reward_fallback=BuiltinRewardMode.SURVIVAL,
-            )
-        with self.assertRaisesRegex(TypeError, "BuiltinRewardMode"):
-            build_core_config(custom, custom_reward_fallback="survival")
-
-    def test_active_contact_and_scan_must_request_one_device(self):
+    def test_active_contact_and_scan_must_share_one_device(self):
         host = EnvConfig(
             contact_config=ContactConfig(device="gpu"),
             lidar_config=LiDARConfig(
@@ -321,33 +312,30 @@ class TestUnsupportedHostSurface(unittest.TestCase):
             render_enabled=False,
         )
         with self.assertRaisesRegex(ValueError, "different devices"):
-            build_core(host, circle_track())
+            JaxSimulator(host, self.track)
 
-        overridden = build_core(
-            host,
-            circle_track(),
-            target_device="cpu",
-        )
+        overridden = JaxSimulator(host, self.track, device="cpu")
         self.assertEqual(overridden.device.platform, "cpu")
 
-    def test_explicit_target_device_accepts_platform_or_device(self):
+    def test_device_accepts_platform_name_or_jax_device(self):
         host = lightweight_config()
-        track = circle_track()
         cpu = jax.devices("cpu")[0]
 
-        by_name = build_core(host, track, target_device="cpu")
-        by_object = build_core(host, track, target_device=cpu)
+        by_name = JaxSimulator(host, self.track, device="cpu")
+        by_object = JaxSimulator(host, self.track, device=cpu)
 
         self.assertEqual(by_name.device.platform, "cpu")
         self.assertIs(by_object.device, cpu)
         with self.assertRaisesRegex(RuntimeError, "unavailable"):
-            build_core(host, track, target_device="not-a-jax-platform")
-        with self.assertRaisesRegex(TypeError, "target_device"):
-            build_core(host, track, target_device=object())
+            JaxSimulator(host, self.track, device="not-a-jax-platform")
+        with self.assertRaisesRegex(TypeError, "device"):
+            JaxSimulator(host, self.track, device=object())
 
-    def test_public_builders_require_an_env_config(self):
+    def test_constructor_requires_host_types(self):
         with self.assertRaisesRegex(TypeError, "EnvConfig"):
-            build_core_config(object())
+            JaxSimulator(object(), self.track)
+        with self.assertRaisesRegex(TypeError, "resolved Track"):
+            JaxSimulator(lightweight_config(), object())
 
 
 class TestDomainRandomizationMapping(unittest.TestCase):
@@ -362,23 +350,20 @@ class TestDomainRandomizationMapping(unittest.TestCase):
                 high=high,
             )
         )
-        self.tables = build_core_tables(self.host, self.track)
+        self.simulator = JaxSimulator(self.host, self.track)
 
-    def test_full_builder_keeps_nominal_params_and_device_bounds(self):
-        bundle = build_core(self.host, self.track)
-
+    def test_constructor_keeps_nominal_params_and_device_bounds(self):
+        simulator = self.simulator
         self.assertAlmostEqual(
-            float(bundle.params.transition.dynamics.m), VEHICLE.m
+            float(simulator.params.dynamics.vehicle.m), VEHICLE.m
         )
-        self.assertTrue(bool(bundle.randomization.enabled))
-        self.assertAlmostEqual(float(bundle.randomization.low.m), 3.0)
-        self.assertAlmostEqual(float(bundle.randomization.high.m), 4.0)
+        self.assertTrue(bool(simulator.randomization.enabled))
+        self.assertAlmostEqual(float(simulator.randomization.low.m), 3.0)
+        self.assertAlmostEqual(float(simulator.randomization.high.m), 4.0)
 
-    def test_active_vehicle_mapping_matches_the_host_abi_prefix(self):
-        spec = build_vehicle_randomization_params(self.host)
-        nominal = np.asarray(spec.nominal.as_array())
-        low = np.asarray(spec.low.as_array())
-        high = np.asarray(spec.high.as_array())
+        nominal = np.asarray(simulator.randomization.nominal.as_array())
+        low = np.asarray(simulator.randomization.low.as_array())
+        high = np.asarray(simulator.randomization.high.as_array())
         expected_nominal = np.asarray(
             [getattr(VEHICLE, name) for name in PARAMETER_ORDER[:20]],
             dtype=np.float32,
@@ -397,60 +382,98 @@ class TestDomainRandomizationMapping(unittest.TestCase):
             ],
             dtype=np.float32,
         )
-
         np.testing.assert_array_equal(nominal, expected_nominal)
         np.testing.assert_array_equal(low, expected_low)
         np.testing.assert_array_equal(high, expected_high)
         self.assertEqual(nominal.dtype, np.dtype(np.float32))
-        self.assertEqual(low.dtype, np.dtype(np.float32))
-        self.assertEqual(high.dtype, np.dtype(np.float32))
         self.assertTrue(np.isfinite(nominal).all())
         self.assertTrue(np.isfinite(low).all())
         self.assertTrue(np.isfinite(high).all())
 
-    def test_sampled_draw_is_copied_and_validated_against_bounds(self):
+    def test_params_for_vehicle_validates_and_places_one_episode_draw(self):
         sampled = VEHICLE.with_updates(m=3.5)
-        params = build_core_params(
+        params = self.simulator.params_for_vehicle(sampled)
+        self.assertAlmostEqual(float(params.dynamics.vehicle.m), 3.5)
+        for leaf in jax.tree.leaves(params):
+            self.assertEqual(leaf.device, self.simulator.device)
+
+        explicit = JaxSimulator(
             self.host,
-            self.tables.track,
+            self.track,
             vehicle_params=sampled,
         )
-        self.assertAlmostEqual(float(params.transition.dynamics.m), 3.5)
+        self.assertAlmostEqual(float(explicit.params.dynamics.vehicle.m), 3.5)
+        self.assertAlmostEqual(float(explicit.randomization.nominal.m), 3.5)
+        self.assertAlmostEqual(float(explicit.randomization.low.m), 3.0)
+        self.assertAlmostEqual(float(explicit.randomization.high.m), 4.0)
 
-        bundle = build_core(self.host, self.track, vehicle_params=sampled)
-        self.assertIs(bundle.env_config, self.host)
-        self.assertIs(bundle.track, self.track)
-        self.assertAlmostEqual(float(bundle.params.transition.dynamics.m), 3.5)
-        for leaf in jax.tree.leaves(
-            (bundle.tables, bundle.params, bundle.randomization)
-        ):
-            self.assertEqual(leaf.device, bundle.device)
-
-        outside = VEHICLE.with_updates(m=4.1)
-        with self.assertRaisesRegex(ValueError, "outside DR bounds"):
-            build_core_params(
-                self.host,
-                self.tables.track,
-                vehicle_params=outside,
-            )
-
-        fixed_outside = sampled.with_updates(width=VEHICLE.width + 0.01)
+        with self.assertRaisesRegex(TypeError, "VehicleParameters"):
+            self.simulator.params_for_vehicle(object())
+        with self.assertRaisesRegex(ValueError, "outside the runtime envelope"):
+            self.simulator.params_for_vehicle(VEHICLE.with_updates(m=4.1))
         with self.assertRaisesRegex(ValueError, "vehicle_params.width"):
-            build_core_params(
-                self.host,
-                self.tables.track,
-                vehicle_params=fixed_outside,
+            self.simulator.params_for_vehicle(
+                sampled.with_updates(width=VEHICLE.width + 0.01)
             )
-
-        unsafe = sampled.with_updates(I=np.nan)
         with self.assertRaisesRegex(ValueError, "vehicle_params.I.*finite"):
-            build_core_params(
-                self.host,
-                self.tables.track,
-                vehicle_params=unsafe,
+            self.simulator.params_for_vehicle(sampled.with_updates(I=np.nan))
+
+    def test_explicit_vehicle_is_preserved_by_disabled_dr_batch_reset(self):
+        explicit_vehicle = VEHICLE.with_updates(m=4.25)
+        simulator = JaxSimulator(
+            lightweight_config(),
+            self.track,
+            vehicle_params=explicit_vehicle,
+            device="cpu",
+        )
+        keys = jax.random.split(jax.random.key(17), 2)
+
+        _observation, batch_state = reset_batch(
+            keys,
+            simulator.tables,
+            simulator.config,
+            simulator.params,
+            simulator.randomization,
+        )
+
+        self.assertAlmostEqual(float(simulator.randomization.nominal.m), 4.25)
+        np.testing.assert_allclose(
+            batch_state.params.dynamics.vehicle.m,
+            np.full((2,), 4.25, dtype=np.float32),
+        )
+
+    def test_effective_vehicle_extends_the_varying_runtime_envelope(self):
+        effective = VEHICLE.with_updates(m=4.25)
+        simulator = JaxSimulator(
+            self.host,
+            self.track,
+            vehicle_params=effective,
+        )
+
+        inside = simulator.params_for_vehicle(VEHICLE.with_updates(m=4.20))
+        self.assertAlmostEqual(float(inside.dynamics.vehicle.m), 4.20, places=6)
+        self.assertAlmostEqual(float(simulator.randomization.high.m), 4.0)
+        with self.assertRaisesRegex(ValueError, "runtime envelope"):
+            simulator.params_for_vehicle(VEHICLE.with_updates(m=4.26))
+
+    def test_fixed_vehicle_changes_require_rebuilding_the_simulator(self):
+        simulator = JaxSimulator(
+            lightweight_config(
+                collision_check=CollisionCheckMode.SEGMENT_CONTACT,
+            ),
+            self.track,
+            vehicle_params=VEHICLE,
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "fixed vehicle envelope.*new JaxSimulator",
+        ):
+            simulator.params_for_vehicle(
+                VEHICLE.with_updates(width=10.0, length=10.0)
             )
 
-    def test_active_bounds_are_finite_and_safe_for_every_draw(self):
+    def test_active_bounds_must_be_finite_and_safe_for_every_draw(self):
         low = VEHICLE.with_updates(s_min=-0.2, s_max=0.1)
         high = VEHICLE.with_updates(s_min=0.2, s_max=0.3)
         crossing = lightweight_config(
@@ -461,7 +484,7 @@ class TestDomainRandomizationMapping(unittest.TestCase):
             )
         )
         with self.assertRaisesRegex(ValueError, "intervals.*s_min <= s_max"):
-            build_vehicle_randomization_params(crossing)
+            JaxSimulator(crossing, self.track)
 
         nonfinite_low = VEHICLE.with_updates(mu=np.nan, m=3.0)
         nonfinite_high = VEHICLE.with_updates(mu=np.nan, m=4.0)
@@ -473,9 +496,9 @@ class TestDomainRandomizationMapping(unittest.TestCase):
             )
         )
         with self.assertRaisesRegex(ValueError, "low.mu.*finite"):
-            build_vehicle_randomization_params(nonfinite)
+            JaxSimulator(nonfinite, self.track)
 
-    def test_contact_table_uses_the_widest_randomized_body(self):
+    def test_contact_tables_cover_the_widest_randomized_body(self):
         low = VEHICLE.with_updates(length=0.60, width=0.30)
         high = VEHICLE.with_updates(length=0.80, width=0.50)
         host = lightweight_config(
@@ -486,14 +509,17 @@ class TestDomainRandomizationMapping(unittest.TestCase):
                 high=high,
             ),
         )
-        tables = build_core_tables(host, self.track)
+        simulator = JaxSimulator(host, self.track)
         self.assertAlmostEqual(
-            float(tables.track.contact_tiles.reach),
-            widest_query_half_extent(VEHICLE, host.domain_randomization_config),
+            float(simulator.tables.track.contact_tiles.reach),
+            widest_query_half_extent(
+                VEHICLE,
+                host.domain_randomization_config,
+            ),
             places=6,
         )
 
-    def test_enabled_but_constant_bounds_need_no_sample(self):
+    def test_constant_bounds_collapse_to_nominal(self):
         host = lightweight_config(
             domain_randomization_config=DomainRandomizationConfig(
                 enabled=True,
@@ -501,44 +527,39 @@ class TestDomainRandomizationMapping(unittest.TestCase):
                 high=VEHICLE,
             )
         )
-        bundle = build_core(host, self.track)
-        self.assertAlmostEqual(float(bundle.params.transition.dynamics.m), VEHICLE.m)
-        self.assertFalse(bool(bundle.randomization.enabled))
+        simulator = JaxSimulator(host, self.track)
+        self.assertFalse(bool(simulator.randomization.enabled))
         np.testing.assert_array_equal(
-            bundle.randomization.low.as_array(),
-            bundle.randomization.nominal.as_array(),
+            simulator.randomization.low.as_array(),
+            simulator.randomization.nominal.as_array(),
         )
         np.testing.assert_array_equal(
-            bundle.randomization.high.as_array(),
-            bundle.randomization.nominal.as_array(),
+            simulator.randomization.high.as_array(),
+            simulator.randomization.nominal.as_array(),
         )
 
-    def test_production_parameter_dtypes_do_not_follow_python_values(self):
-        host = lightweight_config(params=VEHICLE.with_updates(m=4))
-        bundle = build_core(host, self.track)
-        params = bundle.params
-
+    def test_production_dtypes_ignore_python_scalar_types(self):
+        simulator = JaxSimulator(
+            lightweight_config(params=VEHICLE.with_updates(m=4)),
+            self.track,
+        )
+        params = simulator.params
         for leaf in jax.tree.leaves(
-            (
-                params.transition,
-                params.body,
-                params.contact,
-                params.scan,
-            )
+            (params.dynamics, params.body, params.contact, params.scan)
         ):
             self.assertEqual(leaf.dtype, jnp.dtype(jnp.float32))
         self.assertEqual(
-            params.bookkeeping.max_laps.dtype,
+            params.episode.max_laps.dtype,
             jnp.dtype(jnp.int32),
         )
         self.assertEqual(
-            params.bookkeeping.terminate_on_collision.dtype,
+            params.episode.terminate_on_collision.dtype,
             jnp.dtype(jnp.bool_),
         )
 
 
-class TestBuiltCoreSmoke(unittest.TestCase):
-    def test_reset_and_jitted_step_run_from_one_host_bundle(self):
+class TestJaxSimulatorSmoke(unittest.TestCase):
+    def test_reset_and_jitted_step_use_the_public_simulator(self):
         host = lightweight_config(
             lidar_config=LiDARConfig(
                 num_beams=5,
@@ -557,25 +578,14 @@ class TestBuiltCoreSmoke(unittest.TestCase):
                 strategy=ResetStrategy.RL_RANDOM_STATIC
             ),
         )
-        bundle = build_core(host, circle_track())
-        reset = jax.jit(reset_core, static_argnums=2)
-        step = jax.jit(step_core, static_argnums=4)
-
-        observation, state = reset(
-            jax.random.key(1),
-            bundle.tables,
-            bundle.config,
-            bundle.params,
-        )
+        simulator = JaxSimulator(host, circle_track())
+        observation, state = simulator.reset(jax.random.key(1))
         self.assertEqual(observation.state.shape, (1, 5))
         self.assertEqual(observation.scans.shape, (1, 5))
-        observation, state, rewards, events, metrics = step(
+        observation, state, rewards, events, metrics = simulator.step(
             jax.random.key(2),
             state,
             jnp.asarray([[0.0, 1.0]], dtype=jnp.float32),
-            bundle.tables,
-            bundle.config,
-            bundle.params,
         )
         self.assertEqual(observation.standard_state.shape, (1, 7))
         self.assertAlmostEqual(float(state.dynamics.sim_time), 0.01, places=7)

@@ -1,9 +1,10 @@
 """Pure shared-map batching and policy views for device-native rollouts.
 
-This module adds an environment batch axis around :mod:`.environment`.  One
-compiled batch shares structural configuration and map tables while keeping
-core state and traced parameters independent for every environment.  It does
-not perform host conversion or framework-specific packaging.
+This module adds an environment batch axis around
+:mod:`f1tenth_gym.envs.jax_core`. One compiled batch shares structural
+configuration and map tables while keeping core state and traced parameters
+independent for every environment. It does not perform host conversion or
+framework-specific packaging.
 """
 
 from __future__ import annotations
@@ -15,8 +16,8 @@ from typing import Any, Callable
 import jax
 import jax.numpy as jnp
 
-from .controls import LongitudinalControlMode, SteeringControlMode
-from .environment import (
+from .action_jax import LongitudinalControlMode, SteeringControlMode
+from .jax_core import (
     CoreConfig,
     CoreMetrics,
     CoreObservation,
@@ -29,7 +30,7 @@ from .environment import (
     step_core,
 )
 from .episode import EpisodeEvents
-from .randomization import (
+from .dynamic_models.randomization import (
     VehicleRandomizationParams,
     domain_randomization_key,
     sample_core_params,
@@ -130,14 +131,14 @@ def _batched_core_params(
     else:
         raise TypeError("state_or_params must be a BatchState or CoreParams")
 
-    timestep = jnp.asarray(params.transition.timestep)
+    timestep = jnp.asarray(params.dynamics.timestep)
     if timestep.ndim != 1 or timestep.shape[0] < 1:
         raise ValueError(
             "params must have one leading row per environment; "
             f"got timestep shape {timestep.shape}"
         )
     batch_size = timestep.shape[0]
-    dynamics = params.transition.dynamics
+    dynamics = params.dynamics.vehicle
     for name in (
         "s_min",
         "s_max",
@@ -181,7 +182,7 @@ def batch_action_bounds(
     action column represents a setpoint or a direct model effort.
     """
     params, batch_size = _batched_core_params(state_or_params, config)
-    dynamics = params.transition.dynamics
+    dynamics = params.dynamics.vehicle
 
     if config.dynamics.steering_mode is SteeringControlMode.TARGET_ANGLE:
         steering_low = dynamics.s_min
@@ -262,18 +263,38 @@ def _validate_base_inputs(
     return _key_batch_size(keys, name)
 
 
-def _sample_and_reset(
-    key: jax.Array,
+def _reset_rows(
+    keys: jax.Array,
     tables: CoreTables,
     config: CoreConfig,
     base_params: CoreParams,
     randomization: VehicleRandomizationParams,
-) -> tuple[CoreObservation, CoreState, CoreParams]:
-    params, _vehicle = sample_core_params(
-        domain_randomization_key(key), base_params, randomization
-    )
-    observation, core = reset_core(key, tables, config, params)
-    return observation, core, params
+    *,
+    reset_fn: Callable[..., tuple[CoreObservation, CoreState]] | None = None,
+    overrides: jax.Array | None = None,
+    tables_batched: bool = False,
+) -> tuple[CoreObservation, BatchState]:
+    """Sample parameters and reset rows against shared or selected tables."""
+    def reset_one(key, override, environment_tables):
+        params, _vehicle = sample_core_params(
+            domain_randomization_key(key), base_params, randomization
+        )
+        if reset_fn is None:
+            observation, core = reset_core(
+                key, environment_tables, config, params
+            )
+        else:
+            observation, core = reset_fn(
+                key, override, environment_tables, config, params
+            )
+        return observation, core, params
+
+    override_rows = keys if overrides is None else overrides
+    observation, core, params = jax.vmap(
+        reset_one,
+        in_axes=(0, 0, 0 if tables_batched else None),
+    )(keys, override_rows, tables)
+    return observation, BatchState(core=core, params=params)
 
 
 def reset_batch(
@@ -285,12 +306,7 @@ def reset_batch(
 ) -> tuple[CoreObservation, BatchState]:
     """Sample parameters and reset ``B`` environments against shared tables."""
     _validate_base_inputs(keys, config)
-    observation, core, params = jax.vmap(
-        lambda key: _sample_and_reset(
-            key, tables, config, base_params, randomization
-        )
-    )(keys)
-    return observation, BatchState(core=core, params=params)
+    return _reset_rows(keys, tables, config, base_params, randomization)
 
 
 def reset_batch_from_poses(
@@ -308,17 +324,11 @@ def reset_batch_from_poses(
     if poses.shape != expected:
         raise ValueError(f"poses must have shape {expected}, got {poses.shape}")
 
-    def reset_one(key, environment_poses):
-        params, _vehicle = sample_core_params(
-            domain_randomization_key(key), base_params, randomization
-        )
-        observation, core = reset_core_from_poses(
-            key, environment_poses, tables, config, params
-        )
-        return observation, core, params
-
-    observation, core, params = jax.vmap(reset_one)(keys, poses)
-    return observation, BatchState(core=core, params=params)
+    return _reset_rows(
+        keys, tables, config, base_params, randomization,
+        reset_fn=reset_core_from_poses,
+        overrides=poses,
+    )
 
 
 def reset_batch_from_state(
@@ -342,17 +352,11 @@ def reset_batch_from_state(
             f"model_state must have shape {expected}, got {model_state.shape}"
         )
 
-    def reset_one(key, environment_state):
-        params, _vehicle = sample_core_params(
-            domain_randomization_key(key), base_params, randomization
-        )
-        observation, core = reset_core_from_state(
-            key, environment_state, tables, config, params
-        )
-        return observation, core, params
-
-    observation, core, params = jax.vmap(reset_one)(keys, model_state)
-    return observation, BatchState(core=core, params=params)
+    return _reset_rows(
+        keys, tables, config, base_params, randomization,
+        reset_fn=reset_core_from_state,
+        overrides=model_state,
+    )
 
 
 def _validate_step_inputs(
@@ -381,9 +385,51 @@ def _validate_step_inputs(
             "state.core.dynamics.model must have shape "
             f"{expected_model}, got {model.shape}"
         )
-    if jnp.shape(state.params.transition.timestep) != (batch_size,):
+    if jnp.shape(state.params.dynamics.timestep) != (batch_size,):
         raise ValueError("state.params must have one leading row per environment")
     return batch_size
+
+
+def _step_rows(
+    keys: jax.Array,
+    state: BatchState,
+    actions: jax.Array,
+    tables: CoreTables,
+    config: CoreConfig,
+    reward_fn: RewardFn | None,
+    *,
+    tables_batched: bool = False,
+) -> BatchStep:
+    """Execute rows and package one common shared/indexed step result."""
+    actions = jnp.asarray(actions)
+    table_axis = 0 if tables_batched else None
+
+    def step_one(key, core, action, params, environment_tables):
+        return step_core(
+            key, core, action, environment_tables, config, params
+        )
+
+    observation, core, rewards, events, metrics = jax.vmap(
+        step_one,
+        in_axes=(0, 0, 0, 0, table_axis),
+    )(keys, state.core, actions, state.params, tables)
+    if reward_fn is not None:
+        rewards = jax.vmap(reward_fn)(
+            observation, actions, events, metrics, state.params
+        )
+        expected = (actions.shape[0], config.dynamics.num_agents)
+        if rewards.shape != expected:
+            raise ValueError(
+                f"reward_fn must return shape {(config.dynamics.num_agents,)}, "
+                f"giving batched shape {expected}; got {rewards.shape}"
+            )
+    return BatchStep(
+        observation=observation,
+        state=BatchState(core=core, params=state.params),
+        rewards=rewards,
+        events=events,
+        metrics=metrics,
+    )
 
 
 def step_batch(
@@ -400,32 +446,8 @@ def step_batch(
     ``(observation, actions, events, metrics, active_params)``.  It must be a
     pure JAX callable returning one reward per agent.
     """
-    batch_size = _validate_step_inputs(keys, state, actions, config)
-    actions = jnp.asarray(actions)
-
-    def step_one(key, core, action, params):
-        return step_core(key, core, action, tables, config, params)
-
-    observation, core, rewards, events, metrics = jax.vmap(step_one)(
-        keys, state.core, actions, state.params
-    )
-    if reward_fn is not None:
-        rewards = jax.vmap(reward_fn)(
-            observation, actions, events, metrics, state.params
-        )
-        expected = (batch_size, config.dynamics.num_agents)
-        if rewards.shape != expected:
-            raise ValueError(
-                f"reward_fn must return shape {(config.dynamics.num_agents,)}, "
-                f"giving batched shape {expected}; got {rewards.shape}"
-            )
-    return BatchStep(
-        observation=observation,
-        state=BatchState(core=core, params=state.params),
-        rewards=rewards,
-        events=events,
-        metrics=metrics,
-    )
+    _validate_step_inputs(keys, state, actions, config)
+    return _step_rows(keys, state, actions, tables, config, reward_fn)
 
 
 def _select_batch_rows(mask: jax.Array, selected: Any, other: Any) -> Any:
@@ -438,6 +460,64 @@ def _select_batch_rows(mask: jax.Array, selected: Any, other: Any) -> Any:
         return jnp.where(row_mask, selected_leaf, other_leaf)
 
     return jax.tree.map(choose, selected, other)
+
+
+def _validate_autoreset_inputs(
+    step_keys: jax.Array,
+    reset_keys: jax.Array,
+    state: BatchState,
+    actions: jax.Array,
+    config: CoreConfig,
+) -> int:
+    """Validate common step/reset batch axes once for autoreset callers."""
+    batch_size = _validate_step_inputs(
+        step_keys, state, actions, config, key_name="step_keys"
+    )
+    reset_batch_size = _validate_base_inputs(reset_keys, config, "reset_keys")
+    if reset_batch_size != batch_size:
+        raise ValueError(
+            "step_keys and reset_keys must contain the same number of environments"
+        )
+    return batch_size
+
+
+def _step_and_autoreset_rows(
+    step_keys: jax.Array,
+    reset_keys: jax.Array,
+    state: BatchState,
+    actions: jax.Array,
+    tables: CoreTables,
+    config: CoreConfig,
+    base_params: CoreParams,
+    randomization: VehicleRandomizationParams,
+    reward_fn: RewardFn | None,
+    *,
+    tables_batched: bool = False,
+) -> AutoResetBatchStep:
+    """Run common shared/indexed transition and selective reset composition."""
+    transition = _step_rows(
+        step_keys, state, actions, tables, config, reward_fn,
+        tables_batched=tables_batched,
+    )
+    reset_observation, reset_state = _reset_rows(
+        reset_keys, tables, config, base_params, randomization,
+        tables_batched=tables_batched,
+    )
+    reset = (
+        transition.metrics.status.terminated
+        | transition.metrics.status.truncated
+    )
+    return AutoResetBatchStep(
+        transition_observation=transition.observation,
+        next_observation=_select_batch_rows(
+            reset, reset_observation, transition.observation
+        ),
+        state=_select_batch_rows(reset, reset_state, transition.state),
+        rewards=transition.rewards,
+        events=transition.events,
+        metrics=transition.metrics,
+        reset=reset.astype(jnp.bool_),
+    )
 
 
 def step_batch_autoreset(
@@ -457,36 +537,16 @@ def step_batch_autoreset(
     outputs are retained while only ``next_observation``, state, and sampled
     parameters select the reset candidate for completed rows.
     """
-    batch_size = _validate_step_inputs(
-        step_keys, state, actions, config, key_name="step_keys"
+    _validate_autoreset_inputs(
+        step_keys,
+        reset_keys,
+        state,
+        actions,
+        config,
     )
-    reset_batch_size = _validate_base_inputs(reset_keys, config, "reset_keys")
-    if reset_batch_size != batch_size:
-        raise ValueError(
-            "step_keys and reset_keys must contain the same number of environments"
-        )
-    transition = step_batch(
-        step_keys, state, actions, tables, config, reward_fn=reward_fn
-    )
-    reset_observation, reset_state = reset_batch(
-        reset_keys, tables, config, base_params, randomization
-    )
-    reset = (
-        transition.metrics.status.terminated
-        | transition.metrics.status.truncated
-    )
-    next_observation = _select_batch_rows(
-        reset, reset_observation, transition.observation
-    )
-    next_state = _select_batch_rows(reset, reset_state, transition.state)
-    return AutoResetBatchStep(
-        transition_observation=transition.observation,
-        next_observation=next_observation,
-        state=next_state,
-        rewards=transition.rewards,
-        events=transition.events,
-        metrics=transition.metrics,
-        reset=reset.astype(jnp.bool_),
+    return _step_and_autoreset_rows(
+        step_keys, reset_keys, state, actions, tables, config,
+        base_params, randomization, reward_fn,
     )
 
 

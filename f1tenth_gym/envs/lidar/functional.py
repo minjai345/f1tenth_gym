@@ -8,9 +8,9 @@ from typing import Any
 import jax
 import jax.numpy as jnp
 
-from .geometry import BodyParams, body_vertices, transform_pose
-from .lidar_kernels import ray_segment_range
-from .track import TrackTable, tile_candidates
+from ..contact.geometry import BodyParams, body_vertices, transform_pose
+from ..track.functional import TrackTable, tile_candidates
+from .kernels import ray_segment_range
 
 
 @dataclass(frozen=True)

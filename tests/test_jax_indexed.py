@@ -7,8 +7,8 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from f1tenth_gym.jax.environment import reset_core, step_core
-from f1tenth_gym.jax.indexed import (
+from f1tenth_gym.envs.jax_core import reset_core, step_core
+from f1tenth_gym.envs.indexed_batching import (
     IndexedCoreTables,
     reset_indexed_batch,
     reset_indexed_batch_from_poses,
@@ -195,12 +195,12 @@ class TestIndexedBatch(unittest.TestCase):
             _assert_tree_equal(self, actual, expected)
 
     def test_autoreset_uses_each_rows_selected_map(self):
-        bookkeeping = replace(
-            self.params.bookkeeping,
+        episode_params = replace(
+            self.params.episode,
             step_limit_enabled=jnp.asarray(True),
             max_episode_steps=jnp.asarray(1, dtype=jnp.int32),
         )
-        params = replace(self.params, bookkeeping=bookkeeping)
+        params = replace(self.params, episode=episode_params)
         one_key = jax.random.key(205)
         keys = jnp.stack((one_key, one_key))
         map_indices = jnp.asarray((0, 1), dtype=jnp.int32)

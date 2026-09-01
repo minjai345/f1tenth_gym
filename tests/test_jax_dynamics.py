@@ -13,13 +13,19 @@ from f1tenth_gym.envs.dynamic_models import (
     vehicle_dynamics_st,
 )
 from f1tenth_gym.envs.dynamic_models.kinematic import vehicle_dynamics_ks_cog
-from f1tenth_gym.jax import (
+from f1tenth_gym.envs.dynamic_models.jax import (
     DynamicsParams,
+    kinematic_single_track,
+    single_track,
+)
+from f1tenth_gym.envs.dynamic_models.jax_core import (
+    DynamicsConfig,
+    model_state_from_poses,
+)
+from f1tenth_gym.envs.integrators_jax import (
     euler_step,
     integrate_substeps,
-    kinematic_single_track,
     rk4_step,
-    single_track,
 )
 
 
@@ -36,6 +42,31 @@ class TestJaxDynamics(unittest.TestCase):
         expected = vehicle_dynamics_ks_cog(state, control, self.param_array)
         actual = jax.jit(kinematic_single_track)(state, control, self.params)
         np.testing.assert_allclose(actual, expected, rtol=2e-6, atol=2e-6)
+
+    def test_pose_conversion_has_one_exact_ks_and_st_layout(self):
+        poses = jnp.asarray(
+            [[1.0, 2.0, 0.3], [-4.0, 5.0, -0.6]], dtype=jnp.float32
+        )
+        for state_dim, dynamics_fn in (
+            (5, kinematic_single_track),
+            (7, single_track),
+        ):
+            with self.subTest(state_dim=state_dim):
+                config = DynamicsConfig(
+                    num_agents=2,
+                    state_dim=state_dim,
+                    dynamics_fn=dynamics_fn,
+                    integrator_fn=rk4_step,
+                )
+                convert = jax.jit(model_state_from_poses, static_argnums=1)
+                model = convert(poses, config)
+                expected = np.zeros((2, state_dim), dtype=np.float32)
+                expected[:, :2] = np.asarray(poses[:, :2])
+                expected[:, 4] = np.asarray(poses[:, 2])
+                np.testing.assert_array_equal(model, expected)
+
+        with self.assertRaisesRegex(ValueError, "poses must have shape"):
+            model_state_from_poses(poses[:1], config)
 
     def test_st_matches_reference_at_reverse_zero_and_dynamic_speeds(self):
         compiled = jax.jit(single_track)

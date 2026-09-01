@@ -14,9 +14,9 @@ from f1tenth_gym.envs.contact.solver import (
     speculative_clamp,
 )
 
-from .dynamics import DynamicsParams
+from ..dynamic_models.jax import DynamicsParams
+from ..track.functional import TrackTable, tile_candidates
 from .geometry import BodyParams, body_vertices
-from .track import TrackTable, tile_candidates
 
 
 @dataclass(frozen=True)
