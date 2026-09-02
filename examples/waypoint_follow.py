@@ -5,28 +5,24 @@ Every field of ``EnvConfig`` and its nested dataclasses is set explicitly in
 attribute. Deviations carry a ``# default: ...`` comment.
 """
 import time
-from typing import Tuple
 
 import gymnasium as gym
 import numpy as np
 from numba import njit
 
-from f1tenth_gym.envs.integrators import IntegratorType
-from f1tenth_gym.envs.dynamic_models import (
-    DynamicModel,
-    F1TENTH_VEHICLE_PARAMETERS,
-)
-from f1tenth_gym.envs.observation import ObservationType
-from f1tenth_gym.envs.reset import ResetStrategy
 from f1tenth_gym.envs.action import LongitudinalActionType, SteerActionType
 from f1tenth_gym.envs.collision_models import CollisionCheckMode
 from f1tenth_gym.envs.contact import ContactConfig
+from f1tenth_gym.envs.dynamic_models import (
+    F1TENTH_VEHICLE_PARAMETERS,
+    DynamicModel,
+)
 from f1tenth_gym.envs.env_config import (
+    AgentTerminationMode,
     ControlConfig,
     DomainRandomizationConfig,
     EnvConfig,
     LoopCounterMode,
-    AgentTerminationMode,
     ObservationConfig,
     RenderConfig,
     ResetConfig,
@@ -35,8 +31,11 @@ from f1tenth_gym.envs.env_config import (
     SimulationConfig,
     TerminationConfig,
 )
+from f1tenth_gym.envs.integrators import IntegratorType
 from f1tenth_gym.envs.lidar import LiDARConfig
+from f1tenth_gym.envs.observation import ObservationType
 from f1tenth_gym.envs.rendering import make_lidar_scan_callback
+from f1tenth_gym.envs.reset import ResetStrategy
 
 """
 Planner Helpers
@@ -254,13 +253,13 @@ class PurePursuitPlanner:
                 )
             else:
                 self.local_plan_render.update(points)
-                
+
     def get_render_callbacks(self):
         return [self.render_lookahead_point, self.render_local_plan]
 
     def _get_current_waypoint(
         self, waypoints, lookahead_distance, position, theta
-    ) -> Tuple[np.ndarray, int]:
+    ) -> tuple[np.ndarray, int]:
         """
         Returns the current waypoint to follow given the current pose.
 
@@ -325,6 +324,7 @@ class PurePursuitPlanner:
 
         return speed, steering_angle
 
+
 def build_config() -> EnvConfig:
     """Build a *fully-explicit* EnvConfig.
 
@@ -360,7 +360,7 @@ def build_config() -> EnvConfig:
             longitudinal_mode=LongitudinalActionType.SPEED,   # SPEED | ACCL
             steering_mode=SteerActionType.STEERING_ANGLE,     # STEERING_ANGLE | STEERING_SPEED
             steer_delay_steps=0,    # steering-command ring-buffer lag (steps)
-            throttle_delay_steps=0, # longitudinal-command lag (steps)
+            throttle_delay_steps=0,  # longitudinal-command lag (steps)
             steer_noise_std=0.0,    # Gaussian noise on the steer command (sim2real)
             accl_noise_std=0.0,     # Gaussian noise on the longitudinal command
         ),
@@ -368,7 +368,7 @@ def build_config() -> EnvConfig:
         # ---- physics -------------------------------------------------------
         simulation_config=SimulationConfig(
             timestep=0.01,                        # env step (s); must be a multiple
-            integrator_timestep=0.01,             #   of integrator_timestep
+            integrator_timestep=0.01,             # of integrator_timestep
             integrator=IntegratorType.RK4,        # RK4 | EULER
             dynamics_model=DynamicModel.ST,       # ST (single-track) | KS | MB (needs FULLSCALE params)
             loop_counter=LoopCounterMode.FRENET_BASED,  # FRENET_BASED | WINDING_ANGLE
@@ -429,9 +429,8 @@ def build_config() -> EnvConfig:
         render_config=RenderConfig(
             render_fps=60,          # max redraws / wall-second (human) or frame cadence
                                     #   in sim-time (rgb_array). Raise it to draw more often.
-            real_time_factor=1.0,   # sim-seconds per wall-second in human modes;
-                                    #   float("inf") = free-run. (render_mode="unlimited"
-                                    #   forces inf; "human_fast" forces 10.)
+            # Sim-seconds per wall-second; infinity makes human rendering free-run.
+            real_time_factor=float("inf"),
             window_size=800,        # square pixel size (also the rgb_array/video size)
             focus_on="agent_0",     # camera-follow target; None = whole-map view
             vehicle_palette=(       # per-agent car colours, cycled by index
@@ -491,7 +490,7 @@ def main():
     #   "unlimited"  -> free-run: RTF as fast as the CPU allows (rtf = inf)
     #   "rgb_array"  -> returns frames, never sleeps (for RecordVideo)
     # Redraws are still capped at render_config.render_fps in every human mode.
-    env = gym.make("f1tenth_gym:f1tenth-v0", config=cfg, render_mode="human")
+    env = gym.make("f1tenth_gym:f1tenth-v0", config=cfg, render_mode="unlimited")
 
     track = env.unwrapped.track
     planner = PurePursuitPlanner(
