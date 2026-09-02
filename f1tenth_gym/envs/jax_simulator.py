@@ -41,6 +41,17 @@ from f1tenth_gym.envs.track.walls import DEFAULT_TOL_PX
 
 from .contact.functional import WallContactConfig
 from .action_jax import LongitudinalControlMode, SteeringControlMode
+from .batching import (
+    AutoResetBatchStep,
+    BatchState,
+    BatchStep,
+    RewardFn,
+    reset_batch as _reset_batch,
+    reset_batch_from_poses as _reset_batch_from_poses,
+    reset_batch_from_state as _reset_batch_from_state,
+    step_batch as _step_batch,
+    step_batch_autoreset as _step_batch_autoreset,
+)
 from .dynamic_models.jax_core import DynamicsConfig, DynamicsRuntimeParams
 from .dynamic_models.jax import (
     DynamicsParams,
@@ -84,6 +95,20 @@ _RESET = jax.jit(reset_core, static_argnums=2)
 _RESET_FROM_POSES = jax.jit(reset_core_from_poses, static_argnums=3)
 _RESET_FROM_STATE = jax.jit(reset_core_from_state, static_argnums=3)
 _STEP = jax.jit(step_core, static_argnums=4)
+_RESET_BATCH = jax.jit(_reset_batch, static_argnums=2)
+_RESET_BATCH_FROM_POSES = jax.jit(
+    _reset_batch_from_poses,
+    static_argnums=3,
+)
+_RESET_BATCH_FROM_STATE = jax.jit(
+    _reset_batch_from_state,
+    static_argnums=3,
+)
+_STEP_BATCH = jax.jit(_step_batch, static_argnums=(4, 5))
+_STEP_BATCH_AUTORESET = jax.jit(
+    _step_batch_autoreset,
+    static_argnums=(5, 8),
+)
 
 
 class JaxSimulator:
@@ -221,6 +246,94 @@ class JaxSimulator:
             self.tables,
             self.config,
             self.params if params is None else params,
+        )
+
+    def reset_batch(
+        self,
+        keys: jax.Array,
+    ) -> tuple[CoreObservation, BatchState]:
+        """Reset a device batch and sample one parameter set per row.
+
+        Domain-randomized vehicle parameters are sampled from each row's key,
+        shared by that row's agents, and retained in the returned
+        :class:`BatchState` for the complete episode.
+        """
+        return _RESET_BATCH(
+            keys,
+            self.tables,
+            self.config,
+            self.params,
+            self.randomization,
+        )
+
+    def reset_batch_from_poses(
+        self,
+        keys: jax.Array,
+        poses: jax.Array,
+    ) -> tuple[CoreObservation, BatchState]:
+        """Reset batch rows from explicit CoG ``[x, y, yaw]`` poses."""
+        return _RESET_BATCH_FROM_POSES(
+            keys,
+            poses,
+            self.tables,
+            self.config,
+            self.params,
+            self.randomization,
+        )
+
+    def reset_batch_from_state(
+        self,
+        keys: jax.Array,
+        model_state: jax.Array,
+    ) -> tuple[CoreObservation, BatchState]:
+        """Reset batch rows from complete native KS/ST states."""
+        return _RESET_BATCH_FROM_STATE(
+            keys,
+            model_state,
+            self.tables,
+            self.config,
+            self.params,
+            self.randomization,
+        )
+
+    def step_batch(
+        self,
+        keys: jax.Array,
+        state: BatchState,
+        actions: jax.Array,
+        *,
+        reward_fn: RewardFn | None = None,
+    ) -> BatchStep:
+        """Advance a device batch without freezing or resetting terminal rows."""
+        return _STEP_BATCH(
+            keys,
+            state,
+            actions,
+            self.tables,
+            self.config,
+            reward_fn,
+        )
+
+    def step_batch_autoreset(
+        self,
+        step_keys: jax.Array,
+        reset_keys: jax.Array,
+        state: BatchState,
+        actions: jax.Array,
+        *,
+        reward_fn: RewardFn | None = None,
+    ) -> AutoResetBatchStep:
+        """Step a batch and selectively reset completed environment rows."""
+        return _STEP_BATCH_AUTORESET(
+            step_keys,
+            reset_keys,
+            state,
+            actions,
+            self.tables,
+            self.config,
+            self.params,
+            self.randomization,
+            reward_fn,
         )
 
 

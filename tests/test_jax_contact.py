@@ -150,6 +150,58 @@ class TestNativeRigidBodyMapping(unittest.TestCase):
                 )
                 np.testing.assert_allclose(actual, expected, atol=2.0e-7)
 
+    def test_st_dead_stop_response_has_finite_forward_and_reverse_jacobians(self):
+        state = jnp.asarray([1.0, 2.0, 0.1, 3.0, 0.4, -0.2, 0.05])
+        correction = jnp.asarray([0.03, -0.02])
+
+        def respond(velocity):
+            return apply_contact_response(
+                state, velocity, jnp.asarray(0.37), correction, self.dynamics
+            )
+
+        expected = np.asarray(state).copy()
+        expected[:2] += np.asarray(correction)
+        expected[3] = 0.0
+        expected[5] = 0.37
+        expected[6] = -0.4
+        tiny = jnp.finfo(jnp.float32).tiny
+        for velocity in (
+            jnp.zeros((2,), dtype=jnp.float32),
+            jnp.asarray((tiny, tiny), dtype=jnp.float32),
+        ):
+            with self.subTest(velocity=np.asarray(velocity)):
+                actual = respond(velocity)
+                np.testing.assert_allclose(actual, expected, atol=1.0e-7)
+
+                forward = jax.jacfwd(respond)(velocity)
+                reverse = jax.jacrev(respond)(velocity)
+                self.assertTrue(bool(jnp.all(jnp.isfinite(forward))))
+                self.assertTrue(bool(jnp.all(jnp.isfinite(reverse))))
+                np.testing.assert_allclose(forward, reverse, atol=1.0e-7)
+
+    def test_st_nonzero_response_preserves_speed_and_course_jacobian(self):
+        state = jnp.asarray([1.0, 2.0, 0.1, 3.0, 0.4, -0.2, 0.05])
+
+        def respond(velocity):
+            return apply_contact_response(
+                state,
+                velocity,
+                jnp.asarray(0.37),
+                jnp.zeros((2,), dtype=velocity.dtype),
+                self.dynamics,
+            )
+
+        velocity = jnp.asarray([2.0, 1.0])
+        jacobian = jax.jacrev(respond)(velocity)
+        speed = np.sqrt(5.0)
+        np.testing.assert_allclose(
+            jacobian[3], np.asarray([2.0 / speed, 1.0 / speed]), atol=1.0e-7
+        )
+        np.testing.assert_allclose(
+            jacobian[6], np.asarray([-1.0 / 5.0, 2.0 / 5.0]), atol=1.0e-7
+        )
+        self.assertTrue(bool(jnp.all(jnp.isfinite(jacobian))))
+
 
 class TestWallContactParity(unittest.TestCase):
     @classmethod
@@ -267,13 +319,31 @@ class TestWallContactContracts(unittest.TestCase):
         )
 
     def test_empty_candidates_leave_state_and_event_clear(self):
-        state = jnp.asarray([[0.0, 0.14, 0.0, 2.0, -np.pi / 2, 0.0, 0.0]])
-        result, events = resolve_wall_contacts(
-            state, self._horizontal_table(False), self.body, self.dynamics,
-            CONTACT, DT, self.config,
+        state = jnp.asarray(
+            [[0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0]], dtype=jnp.float32
         )
+        table = self._horizontal_table(False)
+
+        def run(value):
+            return resolve_wall_contacts(
+                value,
+                table,
+                self.body,
+                self.dynamics,
+                CONTACT,
+                DT,
+                self.config,
+            )
+
+        result, events = run(state)
         np.testing.assert_array_equal(np.asarray(result), np.asarray(state))
         np.testing.assert_array_equal(np.asarray(events), [False])
+
+        jacobian = jax.jacrev(lambda value: run(value)[0])(state)
+        self.assertTrue(bool(jnp.all(jnp.isfinite(jacobian))))
+        np.testing.assert_array_equal(
+            jacobian[0, :, 0, :], np.eye(7, dtype=np.float32)
+        )
 
     def test_speculative_only_clamp_is_discarded_for_host_parity(self):
         state = jnp.asarray(

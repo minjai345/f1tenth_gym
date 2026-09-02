@@ -6,7 +6,9 @@ import gymnasium as gym
 import numpy as np
 
 from f1tenth_gym.envs.action import LongitudinalActionType, SteerActionType
+from f1tenth_gym.envs.collision_models import CollisionCheckMode
 from f1tenth_gym.envs.env_config import ControlConfig, EnvConfig, ObservationConfig, ResetConfig
+from f1tenth_gym.envs.lidar import LiDARConfig
 from f1tenth_gym.envs.observation import ObservationType
 from f1tenth_gym.envs.reset import ResetStrategy
 
@@ -26,7 +28,7 @@ class TestEnvInterface(unittest.TestCase):
     def test_gymnasium_api(self):
         from gymnasium.utils.env_checker import check_env
 
-        env =  gym.make("f1tenth_gym:f1tenth-v0", config=EnvConfig())
+        env = gym.make("f1tenth_gym:f1tenth-v0", config=EnvConfig())
         check_env(env.unwrapped, skip_render_check=True)
         env.close()
 
@@ -125,7 +127,8 @@ class TestEnvInterface(unittest.TestCase):
         """
         Test that the acceleration action space is correctly configured.
         """
-        env = gym.make("f1tenth_gym:f1tenth-v0",
+        env = gym.make(
+            "f1tenth_gym:f1tenth-v0",
             config=EnvConfig(
                 control_config=ControlConfig(
                     longitudinal_mode=LongitudinalActionType.ACCL,
@@ -195,9 +198,13 @@ class TestEnvInterface(unittest.TestCase):
         cfg = EnvConfig(
             num_agents=num_agents,
             observation_config=ObservationConfig(type=ObservationType.KINEMATIC_STATE),
+            lidar_config=LiDARConfig(enabled=False),
+            collision_check=CollisionCheckMode.NONE,
         )
-        # Spawn, not the default fork: the exact scanner initialises JAX in
-        # this process, and JAX is multithreaded, so os.fork() deadlocks the workers.
+        # This test covers async reset propagation, not sensing or contact. Keep
+        # those kernel-backed subsystems out of each worker so the test neither
+        # duplicates their coverage nor competes with the parent for GPU memory.
+        # Spawn remains required because earlier tests may have initialized JAX.
         vec_env = gym.make_vec(
             "f1tenth_gym:f1tenth-v0", vectorization_mode="async", config=cfg,
             num_envs=num_envs, vector_kwargs={"context": "spawn"},
@@ -279,7 +286,6 @@ class TestEnvInterface(unittest.TestCase):
             all(all_dones_twice),
             f"All envs should be done twice, got {all_dones_twice}",
         )
-
 
 
 class TestInfoDict(unittest.TestCase):

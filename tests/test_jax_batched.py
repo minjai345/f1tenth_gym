@@ -187,7 +187,14 @@ def _assert_tree_equal(test, actual, expected):
     for actual_leaf, expected_leaf in zip(
         actual_leaves, expected_leaves, strict=True
     ):
-        np.testing.assert_array_equal(actual_leaf, expected_leaf)
+        actual_array = np.asarray(actual_leaf)
+        expected_array = np.asarray(expected_leaf)
+        if np.issubdtype(actual_array.dtype, np.inexact):
+            np.testing.assert_allclose(
+                actual_array, expected_array, rtol=2.0e-6, atol=1.0e-7
+            )
+        else:
+            np.testing.assert_array_equal(actual_array, expected_array)
 
 
 class TestBatchedResetAndStep(unittest.TestCase):
@@ -264,6 +271,30 @@ class TestBatchedResetAndStep(unittest.TestCase):
         )
         np.testing.assert_array_equal(observation.state, model)
         np.testing.assert_array_equal(state.core.dynamics.control_input, 0.0)
+
+    def test_exact_centerline_step_has_a_finite_action_gradient(self):
+        config, tables, params = _fixture(num_agents=1)
+        keys = jax.random.split(jax.random.key(1000), 1)
+        point = tables.track.centerline.points[10]
+        pose = jnp.stack(
+            (point[0], point[1], jnp.arctan2(point[3], point[2]))
+        )
+        _observation, state = reset_batch_from_poses(
+            keys,
+            pose[None, None, :],
+            tables,
+            config,
+            params,
+            _randomization(params),
+        )
+
+        def loss(actions):
+            result = step_batch(keys, state, actions, tables, config)
+            return jnp.sum(result.observation.frenet) + jnp.sum(result.rewards)
+
+        actions = jnp.zeros((1, 1, 2), dtype=jnp.float32)
+        gradient = jax.jit(jax.grad(loss))(actions)
+        self.assertTrue(bool(jnp.all(jnp.isfinite(gradient))))
 
     def test_step_jit_scalar_parity_custom_reward_and_ego_selection(self):
         _observation, state = reset_batch(

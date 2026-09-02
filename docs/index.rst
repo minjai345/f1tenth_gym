@@ -6,9 +6,10 @@ F1TENTH Gym
 ===========
 
 ``f1tenth_gym`` races one or more 1/10th-scale cars on a real racetrack map
-behind a single Gymnasium ``Env`` — single-track or kinematic vehicle dynamics,
-a ray-cast 2D LiDAR, wall and car-to-car collisions, and a Frenet-frame view of
-the track. Every agent is a row in one shared state buffer, and a frozen
+through either a conventional Gymnasium ``Env`` or a functional device-batch
+API — single-track or kinematic vehicle dynamics, a ray-cast 2D LiDAR, wall and
+car-to-car collisions, and a Frenet-frame view of the track. Every agent is a
+row in one shared state buffer, and a frozen
 :class:`~f1tenth_gym.envs.env_config.EnvConfig` is the only way in.
 
 The shortest complete program

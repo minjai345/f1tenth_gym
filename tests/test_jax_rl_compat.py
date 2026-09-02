@@ -21,7 +21,6 @@ from f1tenth_gym.envs.track import Track
 from f1tenth_gym.envs.wrappers import SingleAgentWrapper
 from f1tenth_gym.envs.jax_env import JaxF110Env
 
-
 _HAS_SB3 = importlib.util.find_spec("stable_baselines3") is not None
 _HAS_SBX = importlib.util.find_spec("sbx") is not None
 

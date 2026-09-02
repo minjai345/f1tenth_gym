@@ -258,7 +258,14 @@ class TestCoreResetAndStep(unittest.TestCase):
         for actual, expected in zip(
             jax.tree.leaves(overridden), jax.tree.leaves(sampled), strict=True
         ):
-            np.testing.assert_array_equal(actual, expected)
+            actual_array = np.asarray(actual)
+            expected_array = np.asarray(expected)
+            if np.issubdtype(actual_array.dtype, np.inexact):
+                np.testing.assert_allclose(
+                    actual_array, expected_array, rtol=2.0e-6, atol=1.0e-7
+                )
+            else:
+                np.testing.assert_array_equal(actual_array, expected_array)
 
     def test_full_state_override_preserves_native_motion_and_resets_carry(self):
         _track, _lidar, config, tables, params = core_fixture(

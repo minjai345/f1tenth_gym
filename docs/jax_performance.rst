@@ -6,8 +6,10 @@ forms of evidence.  A complete native PPO job demonstrated that rollout, reset,
 terminal targets and an optimizer could remain in one JAX program.  A rollout
 harness compared the functional batch with the mutable Gymnasium reference on
 equivalent physics.  The native PPO CPU gate and the full-rollout CPU/RTX 3080
-gates were rerun successfully immediately before their removal; they are not
-shipped interfaces or current commands.  Neither result predicts the
+gates were rerun successfully immediately before their removal. The retained
+measurements are historical rather than commands; the supported
+``examples/jax_ppo_training.py`` now demonstrates the same end-to-end JAX
+training architecture on the current API. Neither result predicts the
 Python-facing ``JaxF110Env`` adapter, which transfers observations to NumPy on
 every step.
 
@@ -117,8 +119,8 @@ training shape should be placed on the GPU.
 The separate Gymnasium ecosystem gate also passed in an ephemeral environment:
 Stable-Baselines3 2.9.0 accepted the wrapped ``JaxF110Env``, and SBX 0.28.0
 completed one eight-step PPO update and returned a valid action and transition
-with JAX 0.11.1.  The trainer stack is deliberately absent from the package
-dependencies and committed lock.
+with JAX 0.11.1. The trainer stack is now available through the optional
+``sbx`` extra but remains outside required runtime dependencies.
 
 CPU rollout results
 -------------------

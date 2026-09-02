@@ -1,8 +1,9 @@
 How to run the bundled examples
 ===============================
 
-Five scripts in ``examples/`` drive the simulator through the ordinary
-Gymnasium API — no private hooks, no test harness. Invoke any of them by file
+Six scripts live in ``examples/``. Five drive the simulator through the
+ordinary Gymnasium API; ``jax_ppo_training.py`` compiles a complete PPO
+training job over the pure JAX environment batch. Invoke any of them by file
 path from the repository root: Python puts the script's own directory on
 ``sys.path``, which is what resolves their sibling imports of
 ``PurePursuitPlanner``.
@@ -10,10 +11,11 @@ path from the repository root: Python puts the script's own directory on
 Run the first example
 ---------------------
 
-``uv sync`` already installs what the scripts need beyond the library. The
-``examples`` dependency group pulls in two extras — ``video`` (``moviepy``,
-for the recorder) and ``trackgen`` (``shapely`` and ``matplotlib``, for the
-generator); see :doc:`installation`. From the repository root:
+``uv sync`` already installs what all six scripts need beyond the library. The
+``examples`` dependency group pulls in ``video`` (``moviepy``), ``trackgen``
+(``shapely`` and ``matplotlib``), and ``train`` (Flax and Optax). SBX remains
+a separate opt-in integration because it also brings the sizeable SB3/PyTorch
+stack; see :doc:`installation`. From the repository root:
 
 .. code-block:: bash
 
@@ -37,7 +39,7 @@ without unwinding through ``env.close()``.
 Pick a script
 -------------
 
-The five differ in what they draw and in what they cost to start:
+The six differ in what they draw and in what they cost to start:
 
 .. list-table::
    :header-rows: 1
@@ -61,6 +63,46 @@ The five differ in what they draw and in what they cost to start:
    * - Randomly generated circuits written to disk
      - ``random_trackgen.py``
      - ``trackgen``
+   * - End-to-end JAX PPO over a GPU-vectorized simulator batch
+     - ``jax_ppo_training.py``
+     - ``train``, CUDA for ``--device gpu``
+
+Train PPO entirely in JAX
+-------------------------
+
+Launch the default 256-environment PPO job on one GPU:
+
+.. code-block:: bash
+
+   uv sync --extra train
+   uv run --extra train python examples/jax_ppo_training.py \
+       --device gpu --num-envs 256
+
+``jax_ppo_training.py`` follows the PureJaxRL single-file structure. One
+:class:`~f1tenth_gym.envs.jax_simulator.JaxSimulator` owns the fixed topology;
+an outer ``lax.scan`` performs PPO updates, with nested scans for rollouts,
+timeout-correct GAE, epochs and minibatches. Environment state, independently
+domain-randomized vehicle parameters, policy inference and Optax state remain
+on the selected device. Only the final metrics and optional Flax checkpoint
+cross to the host.
+
+The policy observes ego steering, speed, yaw rate, slip angle and Frenet
+errors. Its tanh-bounded actions are scaled against each environment row's
+active steering-rate and acceleration limits. The regular job keeps
+Spielberg wall contact, collision termination, randomized raceline resets and
+the built-in progress reward enabled; LiDAR is disabled to keep the example
+focused on the training architecture. ``--num-envs * --rollout-steps`` is one
+PPO sample batch and must divide ``--total-timesteps``.
+
+This command proves the compiled native training path and one PPO update
+without downloading a map or requiring CUDA:
+
+.. code-block:: bash
+
+   uv run --extra train python examples/jax_ppo_training.py \
+       --smoke-test --device cpu --num-envs 4 \
+       --rollout-steps 2 --total-timesteps 8 \
+       --update-epochs 1 --minibatches 2 --no-save
 
 Drive a lap with pure pursuit
 -----------------------------

@@ -47,6 +47,12 @@ Documentation = "https://f1tenth-gym.readthedocs.io/en/latest/"
 # Used only by scripts in examples/; the library needs none of them.
 video = ["moviepy>=1.0.0"]                          # gymnasium RecordVideo backend
 trackgen = ["shapely>=2.0", "matplotlib>=3.8.2,<4"] # examples/random_trackgen.py
+# End-to-end native JAX training example; no trainer framework is required.
+train = ["flax>=0.12,<0.13", "optax>=0.2.8,<0.3"]
+# Optional because SBX also installs the sizeable SB3/PyTorch trainer stack.
+# Torch serves SBX's host-side SB3 infrastructure here; uv selects its CPU wheel
+# below so it cannot inject CUDA 12 libraries beside JAX's CUDA 13 stack.
+sbx = ["sbx-rl>=0.28,<0.29", "torch>=2.8,<2.11"]
 # jax-cuda13-plugin/-pjrt ship manylinux wheels only, no sdist: without the marker
 # every macOS/Windows install fails. The cuda13 extra does not exist before jax 0.7.
 cuda = ["jax[cuda13]>=0.11.1; sys_platform == 'linux'"]
@@ -70,7 +76,7 @@ dev = [
 ]
 # `uv sync` is exact: it prunes anything not derivable from pyproject/uv.lock.
 # Declaring these here is what stops it uninstalling moviepy and shapely.
-examples = ["f1tenth_gym[video,trackgen]"]
+examples = ["f1tenth_gym[video,trackgen,train]"]
 # Groups are not published in the wheel, so downstream installs get CPU jax and
 # opt in with `f1tenth_gym[cuda]`. Skip locally with `uv sync --no-group gpu`.
 gpu = ["f1tenth_gym[cuda]"]
@@ -81,6 +87,16 @@ lint = ["flake8>=7.0.0,<8", "pyyaml>=5.3.1"]
 
 [tool.uv]
 default-groups = ["dev", "examples", "gpu"]
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cpu", extra = "sbx", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [tool.uv.build-backend]
 module-name = ["f1tenth_gym"]

@@ -8,8 +8,10 @@ import numpy as np
 
 from f1tenth_gym.envs.contact import (
     ContactParams,
+    body_contact,
     contact_velocity,
     resolve,
+    resolve_pair,
     segment_contact,
     speculative_clamp,
     speculative_gap,
@@ -195,6 +197,69 @@ class TestSolverContract(unittest.TestCase):
         self.assertEqual(v.shape, (3, 2))
         self.assertEqual(w.shape, (3,))
         self.assertEqual(correction.shape, (3, 2))
+
+    def test_zero_tangent_wall_response_has_a_finite_jacobian(self):
+        manifold, centre = resting_manifold()
+
+        def response(velocity):
+            solved_velocity, omega, correction = resolve(
+                velocity,
+                0.0,
+                MASS,
+                INERTIA,
+                manifold.points,
+                manifold.depths,
+                NORMALS,
+                centre,
+                ContactParams(),
+                8,
+            )
+            return jnp.concatenate(
+                (solved_velocity, jnp.atleast_1d(omega), correction)
+            )
+
+        jacobian = jax.jacrev(response)(jnp.zeros(2))
+
+        self.assertTrue(bool(jnp.all(jnp.isfinite(jacobian))))
+
+    def test_zero_tangent_pair_response_has_a_finite_jacobian(self):
+        centre_a = jnp.array([-0.28, 0.0])
+        centre_b = jnp.array([0.28, 0.0])
+        manifold = body_contact(
+            body(centre_a[0], centre_a[1], 0.0),
+            body(centre_b[0], centre_b[1], 0.0),
+        )
+
+        def response(velocities):
+            result = resolve_pair(
+                velocities[:2],
+                0.0,
+                velocities[2:],
+                0.0,
+                MASS,
+                INERTIA,
+                manifold.points,
+                manifold.depths,
+                manifold.normal,
+                centre_a,
+                centre_b,
+                ContactParams(),
+                8,
+            )
+            return jnp.concatenate(
+                (
+                    result[0],
+                    jnp.atleast_1d(result[1]),
+                    result[2],
+                    jnp.atleast_1d(result[3]),
+                    result[4],
+                )
+            )
+
+        head_on = jnp.array([2.0, 0.0, -2.0, 0.0])
+        jacobian = jax.jacrev(response)(head_on)
+
+        self.assertTrue(bool(jnp.all(jnp.isfinite(jacobian))))
 
 
 if __name__ == "__main__":

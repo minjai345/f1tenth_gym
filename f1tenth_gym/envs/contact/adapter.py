@@ -32,17 +32,33 @@ def resolve_device(name: str):
             cost an order of magnitude with nothing said, which is the failure mode
             ``lidar.enabled=False`` already has.
     """
+    backend_error = None
     try:
         found = jax.devices(name)
-    except RuntimeError:
-        found = []
+    except RuntimeError as exc:
+        # On first discovery JAX initializes every registered plugin. An
+        # unrelated plugin can fail after the requested backend was cached
+        # (for example CUDA OOM while asking for CPU), so retry the named
+        # backend before declaring it absent.
+        backend_error = exc
+        try:
+            found = jax.devices(name)
+        except RuntimeError:
+            found = []
     if not found:
-        available = sorted({device.platform for device in jax.devices()})
+        try:
+            available_devices = jax.devices()
+        except RuntimeError:
+            available_devices = []
+        cached = [device for device in available_devices if device.platform == name]
+        if cached:
+            return cached[0]
+        available = sorted({device.platform for device in available_devices})
         raise ValueError(
             f"contact_config.device={name!r} but JAX sees no {name} backend here; "
             f"available: {available}. Set JAX_PLATFORMS to include it, or choose "
             f"a device that is present."
-        )
+        ) from backend_error
     return found[0]
 
 

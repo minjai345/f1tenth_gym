@@ -74,6 +74,9 @@ different compilation behavior.
    f1tenth_gym.envs.jax_simulator.IndexedJaxSimulator
    f1tenth_gym.envs.jax_simulator.JaxSimulator.reset
    f1tenth_gym.envs.jax_simulator.JaxSimulator.step
+   f1tenth_gym.envs.jax_simulator.JaxSimulator.reset_batch
+   f1tenth_gym.envs.jax_simulator.JaxSimulator.step_batch
+   f1tenth_gym.envs.jax_simulator.JaxSimulator.step_batch_autoreset
    f1tenth_gym.envs.jax_env.JaxF110Env
    f1tenth_gym.envs.observation.jax_adapter.GymObservationAdapter
    f1tenth_gym.envs.jax_core.CoreConfig
@@ -100,6 +103,18 @@ different compilation behavior.
 .. automodule:: f1tenth_gym.envs.batching
 
 .. automodule:: f1tenth_gym.envs.indexed_batching
+
+Optional trainer integrations
+-----------------------------
+
+Trainer dependencies stay outside the core package import path. The SBX
+adapter is available after installing the ``sbx`` extra.
+
+.. autosummary::
+
+   f1tenth_gym.envs.sbx.F110SBXVecEnv
+
+.. automodule:: f1tenth_gym.envs.sbx
 
 Feature-owned functional modules
 --------------------------------

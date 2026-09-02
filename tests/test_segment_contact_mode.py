@@ -1,6 +1,7 @@
 import math
 import unittest
 import warnings
+from unittest import mock
 
 import gymnasium as gym
 import numpy as np
@@ -276,9 +277,19 @@ class TestDevicePlacement(unittest.TestCase):
         self.assertEqual(ContactConfig().device, "cpu")
 
     def test_cpu_placement_is_honoured(self):
-        from f1tenth_gym.envs.contact.adapter import resolve_device
+        from f1tenth_gym.envs.contact import adapter
 
-        self.assertEqual(resolve_device("cpu").platform, "cpu")
+        cpu = adapter.resolve_device("cpu")
+        self.assertEqual(cpu.platform, "cpu")
+
+        # JAX may cache CPU and then raise while initializing an unrelated GPU
+        # plugin. The cached requested backend remains valid on the retry.
+        with mock.patch.object(
+            adapter.jax,
+            "devices",
+            side_effect=[RuntimeError("CUDA plugin failed"), [cpu]],
+        ):
+            self.assertIs(adapter.resolve_device("cpu"), cpu)
 
     def test_an_absent_backend_is_named_not_silently_swapped(self):
         """A quiet fallback would cost 10x with nothing said."""

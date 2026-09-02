@@ -1,6 +1,12 @@
 How to train an RL agent against this environment
 =================================================
 
+There are two supported RL paths. For accelerator-resident rollout storage and
+optimization, use the native F1TENTH batch API and the PureJaxRL-style PPO
+example. For trainer interoperability, use the conventional Gymnasium boundary
+or the optional SBX ``VecEnv`` adapter; those paths cross a NumPy collector
+boundary. Neither trainer protocol becomes part of the physics core.
+
 The environment is natively multi-agent: ``reset`` hands back
 ``dict[agent_id -> dict[field -> ndarray]]`` and ``step`` expects a
 ``(num_agents, 2)`` action array. Two wrappers and one reward mode collapse
@@ -108,8 +114,20 @@ understand the native nested agent dictionary.  Select ``DEFAULT`` or a
 the exception: its raw arrays have no ``agent_0`` level, so it cannot be passed
 through ``SingleAgentWrapper``.
 
-SBX follows the Stable-Baselines3 environment API, so the ordinary construction
-is:
+For the primary accelerator-native path, run the PureJaxRL-style PPO example:
+
+.. code-block:: bash
+
+   uv run --extra train python examples/jax_ppo_training.py --device gpu
+
+Its environment rollout, policy, timeout-correct GAE, PPO minibatches and
+Optax updates are nested ``lax.scan`` programs under one ``jax.jit``. Domain
+randomization is sampled independently for every environment row at reset and
+remains in the device ``BatchState``. No Gymnasium or trainer protocol is on
+that path; see :doc:`examples` for the task and smoke-test commands.
+
+SBX follows the Stable-Baselines3 environment API. The ordinary
+single-environment construction is:
 
 .. code-block:: python
 
@@ -120,22 +138,50 @@ is:
    model.learn(total_timesteps=10_000)
    env.close()
 
-Neither ``sbx-rl`` nor ``stable-baselines3`` is a package dependency of this
-gym; install the trainer separately.  The adapter provides compatibility, not
-an end-to-end device-native training path.  Each Gym step runs the compiled JAX
-transition, then transfers only the selected observation leaves to independent
-NumPy arrays for Gymnasium.  SBX subsequently transfers policy inputs to its
-own JAX program.  Native batched training should instead use ``reset_batch``
-and ``step_batch``/``step_batch_autoreset`` below; no throughput comparison is
-claimed for the Gym adapter.
+Neither ``sbx-rl`` nor ``stable-baselines3`` is a required dependency of this
+gym; install the ``sbx`` extra when using that trainer.  The single-environment
+adapter above provides compatibility, not an end-to-end device-native training
+path.  Each Gym step runs the compiled JAX transition, then transfers only the
+selected observation leaves to independent NumPy arrays for Gymnasium.  SBX
+subsequently transfers policy inputs to its own JAX program. No throughput
+comparison is claimed for that adapter.
 
-The optional ``tests/test_jax_rl_compat.py`` gate runs the Stable-Baselines3
-environment checker and one eight-step SBX PPO update when those two external
-packages are installed.  It skips in the base package environment, keeping
-trainer stacks out of runtime dependencies.  The Phase 6 release run passed
-both checks in an ephemeral environment with Stable-Baselines3 2.9.0, SBX 0.28.0
-and the locked JAX 0.11.1; those trainer versions are test evidence, not package
-constraints.
+The optional device-batch adapter avoids constructing one Python environment
+per row:
+
+.. code-block:: python
+
+   from sbx import PPO
+
+   from f1tenth_gym.envs.sbx import F110SBXVecEnv
+   from f1tenth_gym.envs.track import Track
+
+   track = Track.from_track_name("Spielberg", 1.0)
+   env = F110SBXVecEnv.from_config(
+       cfg,
+       track,
+       num_envs=256,
+       device="gpu",
+   )
+   model = PPO("MlpPolicy", env, n_steps=128, batch_size=4096)
+   model.learn(total_timesteps=1_048_576)
+   env.close()
+
+``F110SBXVecEnv`` executes one vmapped transition for the complete batch and
+keeps simulator state plus domain-randomized parameters on the selected GPU.
+It is deliberately an optional protocol adapter: stock SBX still requires
+NumPy actions and observations at each collector step and keeps its SB3 rollout
+buffer on the host. Use the native PPO example when rollout storage and
+optimization must remain on the accelerator too.
+
+The optional ``tests/test_jax_rl_compat.py`` gate covers the Stable-Baselines3
+environment checker and the conventional adapter's SBX update.
+``tests/test_sbx_vec_env.py`` separately gates the device-batch contract,
+domain-randomization resampling, terminal observations, timeout bootstrapping
+and a real SBX PPO rollout. They skip when the optional trainer stack is absent.
+The ``sbx`` extra pins the supported SBX minor series; the lock file records the
+exact SBX, Stable-Baselines3, CPU-only Torch and JAX versions used by repository
+checks.
 
 Python callbacks and Gymnasium episode randomization deliberately stay on the
 host.  ``RewardMode.CUSTOM`` is called after the packaged observation and final
@@ -163,8 +209,8 @@ of a device-native throughput claim.
 Run a device-native batch
 -------------------------
 
-The pure batch adapters add an environment axis without changing the physics
-core.  The shared-map entry points below use one ``CoreConfig`` and one map
+The native batch entry points add an environment axis without changing the
+physics core. The shared-map API below uses one ``CoreConfig`` and one map
 table; state and episode parameters have an independent leading row for every
 environment.  The indexed variant described afterward selects among stacked
 equal-shape tables.  Construct a simulator on the requested device, then close
@@ -179,9 +225,7 @@ over its tables, topology and parameters in compiled reset and step functions:
        PolicyField,
        PolicyLayout,
        policy_observation,
-       reset_batch,
        scale_normalized_actions,
-       step_batch_autoreset,
    )
    from f1tenth_gym.envs.jax_simulator import JaxSimulator
    from f1tenth_gym.envs.track import Track
@@ -193,25 +237,15 @@ over its tables, topology and parameters in compiled reset and step functions:
 
    @jax.jit
    def reset(keys):
-       return reset_batch(
-           keys,
-           simulator.tables,
-           simulator.config,
-           simulator.params,
-           simulator.randomization,
-       )
+       return simulator.reset_batch(keys)
 
    @jax.jit
    def step(step_keys, reset_keys, state, actions):
-       return step_batch_autoreset(
+       return simulator.step_batch_autoreset(
            step_keys,
            reset_keys,
            state,
            actions,
-           simulator.tables,
-           simulator.config,
-           simulator.params,
-           simulator.randomization,
        )
 
    root = jax.random.key(42)
@@ -287,19 +321,19 @@ measurements and placement guidance.
 JaxMARL status
 --------------
 
-An official-JaxMARL adapter is deliberately not shipped in this release.  Its
-current API uses observations, actions, rewards and done values in
-agent-keyed dictionaries, and its public ``step`` automatically resets when
-``done["__all__"]`` is true.  The native batch above instead keeps dense agent
-arrays and exposes terminal and reset observations separately, which preserves
-timeout targets and serves the current SBX/SB3 and native-PPO goals without a
-second framework dependency.
+An official-JaxMARL adapter is planned as the multi-agent compatibility
+boundary, but cannot yet be published against a compatible released package.
+JaxMARL 0.1.0 constrains JAX to 0.4 and SciPy to 1.12, while this project uses
+JAX 0.11 or newer and SciPy 1.13 or newer. Its unreleased 0.2 development line
+removes those conflicting upper bounds.
 
-Revisit the adapter when a concrete multi-policy IPPO or MAPPO consumer needs
-that interface.  It should depend on the `official JaxMARL package
-<https://github.com/FLAIROx/JaxMARL>`_, translate at the adapter boundary
-and pass a continuous multi-agent training gate; copied base classes or spaces
-will not be vendored into this package.
+Once a released JaxMARL 0.2+ is verified compatible, the adapter should translate
+one dense F1TENTH race into its agent-keyed ``reset``/``step`` protocol and let
+JaxMARL apply the outer environment ``vmap``. It must preserve per-episode
+domain randomization, map timeout into ``done["__all__"]`` while retaining
+separate status in ``info``, and require bounded continuous policy actions.
+The `official JaxMARL package <https://github.com/bold-lab-ai/JaxMARL>`_ remains
+the dependency; copied base classes or spaces will not be vendored here.
 
 Choose what the policy sees
 ---------------------------
@@ -499,15 +533,16 @@ four spawn abscissae differ. Do not lean on ``EnvConfig(seed=...)`` for this:
 one seeded config shared by every worker makes the workers replay identical
 episodes — seed through the vector ``reset`` instead (:doc:`reproducibility`).
 
-What this environment does not ship
------------------------------------
+What remains outside this repository
+------------------------------------
 
-Planners and training loops are deliberately absent. Pure pursuit, MPC and
-other controllers live in the separate ``f1tenth_planning`` repository — the
+The repository ships one focused native PPO example and optional trainer
+protocol adapters, not a general algorithm suite. Production PPO/SAC libraries
+and experiment management remain external. Pure pursuit, MPC and other
+controllers live in the separate ``f1tenth_planning`` repository — the
 pure-pursuit follower in ``examples/waypoint_follow.py`` is a demo, not a
-supported API — and PPO/SAC training code belongs in ``f1tenth_learning``.
-What ships here is the reward surface, the observation presets and the two
-wrappers (the second,
+supported API. The reusable RL surface here is the native batch API, reward
+and observation configuration, and the Gym wrappers (the second,
 :class:`~f1tenth_gym.envs.wrappers.ObservationDelayWrapper`, delays only the
 observation to model sensing lag — see :doc:`sim2real`), all configured
 through the frozen :class:`~f1tenth_gym.envs.env_config.EnvConfig` tree

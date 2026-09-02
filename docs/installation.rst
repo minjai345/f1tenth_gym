@@ -21,7 +21,8 @@ Clone the repository and sync the environment with `uv <https://docs.astral.sh/u
 ``uv sync --frozen`` creates ``.venv/`` from the committed lock and installs the
 package (editable) with its runtime dependencies plus three default groups:
 ``dev`` (pytest, flake8, black, ...), ``examples`` (``moviepy``, ``shapely``,
-``matplotlib`` — what the bundled scripts need beyond the library) and ``gpu``.
+``matplotlib``, Flax and Optax — what the bundled scripts need beyond the
+library) and ``gpu``.
 Skip groups with, for example, ``uv sync --frozen --no-group examples``. Run
 subsequent commands through ``uv run``, e.g. ``uv run python your_script.py``.
 
@@ -34,6 +35,35 @@ subsequent commands through ``uv run``, e.g. ``uv run python your_script.py``.
 The default groups install GPU JAX. On a machine without CUDA, use ``uv sync
 --frozen --no-group gpu`` to skip roughly 3 GB of GPU wheels; plain ``jax``
 remains a hard dependency either way and runs CPU-only.
+
+The native PPO example uses the ``train`` extra, which is already included by
+the default ``examples`` group. An installed package outside this clone can
+request the same device-native training stack explicitly:
+
+.. code-block:: bash
+
+   python -m pip install "f1tenth_gym[train,cuda]"
+
+SBX interoperability is deliberately not in a default group because SBX also
+installs Stable-Baselines3 and its PyTorch dependency. Opt into that adapter
+explicitly:
+
+.. code-block:: bash
+
+   uv sync --frozen --extra sbx
+
+SBX uses PyTorch for its host-side SB3 infrastructure and rollout buffer. The
+repository therefore pins ``torch`` to the official CPU wheel for this extra;
+installing PyTorch's default Linux wheel would add a second CUDA/cuDNN stack
+beside JAX CUDA 13. When installing outside this uv-managed clone, install CPU
+PyTorch first, then the corresponding package extras:
+
+.. code-block:: bash
+
+   python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+   python -m pip install "f1tenth_gym[sbx,cuda]"
+
+CPU-only SBX use needs only ``f1tenth_gym[sbx]`` in the second command.
 
 Verify the install
 ------------------

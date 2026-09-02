@@ -638,6 +638,31 @@ class TestTransformability(unittest.TestCase):
         gradient = jax.grad(lambda state: jnp.sum(run(state)))(clear)
         self.assertTrue(bool(jnp.all(jnp.isfinite(gradient))))
 
+    def test_zero_tangent_simultaneous_solver_has_a_finite_jacobian(self):
+        table = make_pair_table(3)
+        manifolds, velocities, omegas = manifolds_for(self.states, table)
+
+        def run(current_velocities):
+            solved, _omegas, _correction, _events = solve_pair_impulses(
+                current_velocities,
+                omegas,
+                self.states[:, :2],
+                table,
+                manifolds.points,
+                manifolds.depths,
+                manifolds.normal,
+                DYNAMICS.m,
+                DYNAMICS.I,
+                ContactParams(),
+                self.config.solver_iterations,
+                self.config.multi_relaxation,
+            )
+            return solved
+
+        jacobian = jax.jacrev(run)(velocities)
+
+        self.assertTrue(bool(jnp.all(jnp.isfinite(jacobian))))
+
     def test_pair_module_contains_no_numpy_or_host_callback(self):
         path = (
             pathlib.Path(__file__).resolve().parents[1]

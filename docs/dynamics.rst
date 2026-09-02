@@ -126,7 +126,7 @@ adapter work: arbitrary Python and Gym/render objects never enter the pure
 transition.  The class is not registered and does not replace
 ``f1tenth_gym:f1tenth-v0``.  Its Gym-compatible host transfer is useful for
 SB3/SBX interoperability, but it is separate from the device-batched training
-adapter and carries no throughput claim; see :doc:`rl`.
+API and PPO example and carries no throughput claim; see :doc:`rl`.
 
 ``JaxF110Env.reset(seed=...)`` controls a host Gymnasium RNG from which the
 adapter derives explicit JAX keys.  Replay is deterministic within that class,

@@ -17,6 +17,7 @@ from f1tenth_gym.envs.reset.preprocessing import preprocess_reset
 from f1tenth_gym.envs.track import Track
 from f1tenth_gym.envs.track.functional import (
     FrenetProjectionConfig,
+    SplineTable,
     cartesian_to_frenet,
     cartesian_to_frenet_local,
     evaluate_spline,
@@ -35,6 +36,21 @@ def circle_track(count=80, radius=8.0):
         x=radius * np.cos(theta),
         y=radius * np.sin(theta),
         velx=np.full(count, 4.0),
+    )
+
+
+def straight_spline_table():
+    coefficients = jnp.zeros((4, 1, 7), dtype=jnp.float32)
+    coefficients = coefficients.at[2, 0, 0].set(1.0)
+    coefficients = coefficients.at[3, 0, 2].set(1.0)
+    return SplineTable(
+        knots=jnp.asarray([0.0, 1.0], dtype=jnp.float32),
+        coefficients=coefficients,
+        points=jnp.asarray([[0.0, 0.0], [1.0, 0.0]], dtype=jnp.float32),
+        knot_mask=jnp.asarray([True, True]),
+        segment_mask=jnp.asarray([True]),
+        s_interval=jnp.asarray(1.0, dtype=jnp.float32),
+        length=jnp.asarray(1.0, dtype=jnp.float32),
     )
 
 
@@ -88,6 +104,36 @@ class TestTrackPreprocessing(unittest.TestCase):
             )
             actual_frenet = np.asarray(to_frenet(tables.centerline, actual_pose))
             np.testing.assert_allclose(actual_frenet, expected_frenet, atol=2e-3)
+
+    def test_exact_line_projection_has_finite_forward_and_reverse_jacobians(self):
+        table = straight_spline_table()
+        previous_s = jnp.asarray(0.5, dtype=jnp.float32)
+        projectors = {
+            "global": lambda pose: cartesian_to_frenet(table, pose),
+            "local": lambda pose: cartesian_to_frenet_local(
+                table, pose, previous_s
+            ),
+        }
+
+        for name, project in projectors.items():
+            compiled = jax.jit(project)
+            forward_jacobian = jax.jit(jax.jacfwd(project))
+            reverse_jacobian = jax.jit(jax.jacrev(project))
+            for lateral_offset in (0.0, 1.0e-6, -1.0e-6):
+                with self.subTest(projector=name, lateral_offset=lateral_offset):
+                    pose = jnp.asarray(
+                        [0.5, lateral_offset, 0.0], dtype=jnp.float32
+                    )
+                    expected = np.asarray(
+                        [0.5, lateral_offset, 0.0], dtype=np.float32
+                    )
+                    np.testing.assert_allclose(compiled(pose), expected, atol=1.0e-8)
+                    self.assertTrue(
+                        bool(jnp.all(jnp.isfinite(forward_jacobian(pose))))
+                    )
+                    self.assertTrue(
+                        bool(jnp.all(jnp.isfinite(reverse_jacobian(pose))))
+                    )
 
     def test_empty_and_nonempty_wall_tables_are_masked_and_gatherable(self):
         empty_track = circle_track()

@@ -27,6 +27,19 @@ Then you can run a quick waypoint follow example by:
 uv run python examples/waypoint_follow.py
 ```
 
+For a complete device-native PPO update with no map download, run:
+
+```bash
+uv run --extra train python examples/jax_ppo_training.py \
+  --smoke-test --device cpu --num-envs 4 --rollout-steps 2 \
+  --total-timesteps 8 --update-epochs 1 --minibatches 2 --no-save
+```
+
+The regular training job defaults to the GPU, the Spielberg track, wall
+contact, and per-environment domain randomization. See the
+[RL guide](https://f1tenth-gym.readthedocs.io/en/latest/rl.html) for the native
+batch API and optional SBX interoperability.
+
 ### CPU-only machines
 
 The default sync installs GPU JAX. Without CUDA, skip the ~3 GB of GPU wheels:

@@ -24,7 +24,8 @@ more 1/10-scale race cars. It combines:
 - deterministic seeding, actuator/sensor noise, and domain randomization;
 - a deep-import Gymnasium lifecycle over the functional JAX core;
 - shared-map and exact-shape indexed-map device batches with selective
-  auto-reset and normalized action scaling.
+  auto-reset and normalized action scaling;
+- an end-to-end single-policy JAX PPO example plus optional SBX integration.
 
 The installed package is `f1tenth_gym` version `1.0.0dev`. Importing the
 package registers `f1tenth-v0`; normal use is the namespaced Gymnasium id
@@ -281,6 +282,7 @@ rather than equality.
 | `envs/indexed_batching.py` | equal-shape indexed-map reset/step/auto-reset |
 | `envs/jax_simulator.py` | host construction, validation, preprocessing and device placement |
 | `envs/jax_env.py` | direct-import Gym lifecycle, host RNG/rewards/info and rendering |
+| `envs/sbx.py` | optional SBX ``VecEnv`` protocol over one device batch |
 | `envs/observation/jax_adapter.py` | Gym observation spaces and device-to-NumPy packaging |
 | `envs/reset/functional.py` | fixed-table functional pose sampling |
 | `envs/reset/preprocessing.py` | host reset-table preprocessing |
@@ -294,8 +296,8 @@ rather than equality.
 | `envs/reset/` | reset strategy registry and samplers |
 | `envs/rendering/` | PyQt6/OpenGL renderer, objects, callbacks |
 | `envs/wrappers.py` | single-agent and observation-delay wrappers |
-| `examples/` | waypoint following, video, telemetry, synthetic tracks |
-| `tests/` | 695 collected tests across 53 `test_*.py` files |
+| `examples/` | waypoint following, video, telemetry, synthetic tracks, native JAX PPO |
+| `tests/` | 710 collected tests across 55 `test_*.py` files |
 | `docs/` | Sphinx user documentation plus behavioral measurements |
 
 ## Configuration model
@@ -495,8 +497,10 @@ overrides discard the pose child without shifting functional sensor streams.
 `JaxSimulator(config, track, device=...)` is the single host construction
 surface. It maps supported `EnvConfig` topology and traced values plus one
 resolved `Track` into device-placed `CoreConfig`, `CoreTables` and `CoreParams`,
-then exposes compiled single-environment reset/step methods. It preserves KS/ST,
-Euler/RK4 substeps, action controllers and delays, RL reset defaults,
+then exposes compiled single-environment and shared-map batch reset/step
+methods. Batch resets sample one correlated domain-randomized vehicle per
+environment row; selective auto-reset resamples only completed rows. It
+preserves KS/ST, Euler/RK4 substeps, action controllers and delays, RL defaults,
 sensing/contact switches, EGO/ANY/ALL reduction and built-in rewards. It also
 carries nominal parameters and device-sampleable active DR bounds; an explicit
 host-managed shared `VehicleParameters` remains optional and is validated.
@@ -527,12 +531,18 @@ complete table pytrees by exact shape and dtype. Each `IndexedCoreBucket`
 carries bucket-local map indices and source-row routing; no small map is padded
 to the largest shape.
 
-No JaxMARL adapter or dependency ships in v1. The official agent-dictionary,
-public-auto-reset API remains a possible future adapter for a concrete
-multi-policy consumer; do not vendor its base classes or make it a core
-contract. Current RL gates are the conventional SBX/SB3 Gymnasium path and the
-functional core/batch tests. The Phase 6 native PPO result remains historical
-validation evidence rather than a shipped trainer or live repository job.
+`examples/jax_ppo_training.py` is the primary high-throughput training path. It
+keeps policy inference, vmapped environment rollout, timeout-correct GAE, PPO
+minibatches and Optax updates inside nested JAX scans. `envs/sbx.py` is an
+optional compatibility adapter: simulator state and domain randomization remain
+on device, but stock SBX still crosses its NumPy collector boundary each step
+and stages rollouts on the CPU.
+
+No JaxMARL adapter or dependency ships yet. Published JaxMARL 0.1.0 pins JAX
+and SciPy below this repository's supported versions. Re-evaluate a released
+0.2+ version for compatibility, then implement its official agent-dictionary,
+public-auto-reset protocol at a deep optional boundary. Do not vendor its base
+classes or make it a core contract.
 
 Keep the kernel/core modules pure JAX/array math, fixed-shape,
 jittable/vmappable, free of Gym and NumPy marshalling. Host conversion, device
@@ -650,7 +660,8 @@ caches frames between configured render instants.
 | Reset strategy | enum, `_RESET_BUILDERS`, sampler, config applicability | `test_reset.py`, `test_env_config.py` |
 | Reward/termination | config plus `F110Env` episode bookkeeping | reward/termination/lap tests, `rl.rst` |
 | Renderer/callback | render config, factory/backend, render observations | `test_renderer.py`, `rendering.rst` |
-| Wrapper/API adapter | `wrappers.py` without changing native env | wrapper/env tests, `rl.rst` |
+| Gym wrapper | `wrappers.py` without changing the native env | wrapper/env tests, `rl.rst` |
+| Trainer protocol adapter | deep optional `envs/<trainer>.py`; batch/core unchanged | adapter plus real-trainer test, `rl.rst` |
 
 Prefer explicit enum dispatch with a final error over implicit fallthrough.
 Validate incompatible combinations once at `EnvConfig` construction when the
@@ -658,7 +669,7 @@ constraint spans subsystems.
 
 ## Tests and validation
 
-The current tree collects 695 tests across 53 `test_*.py` files. Most tests use
+The current tree collects 710 tests across 55 `test_*.py` files. Most tests use
 `unittest.TestCase` but run through pytest. Tests cover public behavior and
 low-level numerical contracts, including JIT/vmap/gradient properties,
 allocation guards, cache invalidation, observation aliasing, vector envs,
@@ -683,12 +694,13 @@ xvfb-run -a env -u PYTHONPATH UV_CACHE_DIR=/tmp/f1tenth-gym-uv-cache \
 Focused tests are preferred during iteration, followed by the full suite when
 behavior or shared infrastructure changes.
 
-`tests/test_jax_rl_compat.py` is an optional trainer gate. The base environment
-skips its SB3 checker and eight-step SBX PPO update when
-`stable-baselines3`/`sbx-rl` are absent; run it in a separate environment with
-those packages installed rather than adding either trainer to runtime
-dependencies. The Phase 6c release run passed both checks with
-Stable-Baselines3 2.9.0, SBX 0.28.0 and JAX 0.11.1 in an ephemeral environment.
+`tests/test_jax_ppo_training.py` gates the native policy math, termination-
+versus-timeout GAE and a complete compiled PPO update with device domain
+randomization. `tests/test_jax_rl_compat.py` keeps the conventional Gym adapter
+checks; `tests/test_sbx_vec_env.py` owns the optional device-batch SBX contract,
+including writable timeout rewards, terminal observations, DR resampling and a
+real PPO rollout. Install the published ``sbx`` extra to run the optional gates
+without making either trainer a required runtime dependency.
 
 Documentation CI has three meaningful gates:
 

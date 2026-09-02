@@ -43,6 +43,25 @@ def contact_velocity(velocity, omega, r):
     return velocity + omega * jnp.stack([-r[..., 1], r[..., 0]], axis=-1)
 
 
+def _safe_tangent(tangent_velocity, normals):
+    """Return the current friction tangent without a zero-norm AD singularity."""
+    speed_squared = jnp.sum(
+        tangent_velocity * tangent_velocity,
+        axis=-1,
+        keepdims=True,
+    )
+    moving = speed_squared > _TINY * _TINY
+    safe_speed = jnp.sqrt(
+        jnp.where(moving, speed_squared, jnp.ones_like(speed_squared))
+    )
+    fallback = jnp.stack([-normals[..., 1], normals[..., 0]], axis=-1)
+    return jnp.where(
+        moving,
+        tangent_velocity / (safe_speed + _TINY),
+        fallback,
+    )
+
+
 def speculative_clamp(velocity, gaps, normals, dt):
     """Stop the body closing more than the available gap in one step.
 
@@ -134,12 +153,7 @@ def resolve(
 
         # Friction opposes the slide that exists, not a fixed tangent.
         v_t_vec = v_c - v_n[:, None] * normals
-        speed_t = jnp.linalg.norm(v_t_vec, axis=-1, keepdims=True)
-        tangent = jnp.where(
-            speed_t > _TINY,
-            v_t_vec / (speed_t + _TINY),
-            jnp.stack([-normals[:, 1], normals[:, 0]], axis=-1),
-        )
+        tangent = _safe_tangent(v_t_vec, normals)
         rt = _cross(r, tangent)
         k_t = jnp.maximum(inv_m + rt * rt * inv_i, _TINY)
         bound = params.friction * acc_n
@@ -231,12 +245,7 @@ def resolve_pair(
         acc_n = acc_n + delta
 
         v_t_vec = v_rel - v_n[:, None] * normals
-        speed_t = jnp.linalg.norm(v_t_vec, axis=-1, keepdims=True)
-        tangent = jnp.where(
-            speed_t > _TINY,
-            v_t_vec / (speed_t + _TINY),
-            jnp.stack([-normals[:, 1], normals[:, 0]], axis=-1),
-        )
+        tangent = _safe_tangent(v_t_vec, normals)
         rt_a = _cross(r_a, tangent)
         rt_b = _cross(r_b, tangent)
         k_t = jnp.maximum(2.0 * inv_m + (rt_a * rt_a + rt_b * rt_b) * inv_i, _TINY)

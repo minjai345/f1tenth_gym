@@ -9,7 +9,7 @@ import jax
 import jax.numpy as jnp
 
 from f1tenth_gym.envs.contact.kernels import body_contact
-from f1tenth_gym.envs.contact.solver import ContactParams
+from f1tenth_gym.envs.contact.solver import ContactParams, _safe_tangent
 
 from ..dynamic_models.jax import DynamicsParams
 from ..track.functional import TrackTable
@@ -197,12 +197,7 @@ def solve_pair_impulses(
         accumulated_normal = accumulated_normal + normal_impulse
 
         tangent_velocity = relative - normal_speed[..., None] * pair_normals
-        tangent_speed = jnp.linalg.norm(tangent_velocity, axis=-1, keepdims=True)
-        tangent = jnp.where(
-            tangent_speed > 1.0e-12,
-            tangent_velocity / (tangent_speed + 1.0e-12),
-            jnp.stack((-pair_normals[..., 1], pair_normals[..., 0]), axis=-1),
-        )
+        tangent = _safe_tangent(tangent_velocity, pair_normals)
         tangent_arm_left = _cross(offset_left, tangent)
         tangent_arm_right = _cross(offset_right, tangent)
         effective_tangent_mass = jnp.maximum(

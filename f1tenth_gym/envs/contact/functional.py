@@ -77,8 +77,16 @@ def apply_contact_response(
     corrected = state.at[:2].add(correction)
     yaw = corrected[4]
     if state.shape[0] == 7:
-        speed = jnp.linalg.norm(velocity)
-        course = jnp.arctan2(velocity[1], velocity[0])
+        speed_squared = jnp.sum(velocity * velocity)
+        moving = speed_squared > 0.0
+        safe_speed_squared = jnp.where(moving, speed_squared, 1.0)
+        speed = jnp.where(moving, jnp.sqrt(safe_speed_squared), 0.0)
+        safe_velocity = jnp.where(
+            moving,
+            velocity,
+            jnp.asarray((1.0, 0.0), dtype=velocity.dtype),
+        )
+        course = jnp.arctan2(safe_velocity[1], safe_velocity[0])
         beta = jnp.arctan2(jnp.sin(course - yaw), jnp.cos(course - yaw))
         reverse = jnp.abs(beta) > jnp.pi / 2.0
         speed = jnp.where(reverse, -speed, speed)

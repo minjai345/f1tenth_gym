@@ -129,7 +129,16 @@ def _project_to_frenet(
     yaw = jnp.arctan2(values[3], values[2])
     normal = jnp.stack((-jnp.sin(yaw), jnp.cos(yaw)))
     signed = jnp.sign(jnp.dot(pose[:2] - values[:2], normal))
-    ey = jnp.sqrt(distances_sq[segment]) * signed
+    distance_sq = distances_sq[segment]
+    has_distance = distance_sq > 0.0
+    # Guard the input rather than masking sqrt(0) afterwards: reverse-mode
+    # autodiff can otherwise multiply the inactive infinite derivative by zero.
+    safe_distance_sq = jnp.where(has_distance, distance_sq, 1.0)
+    ey = jnp.where(
+        has_distance,
+        jnp.sqrt(safe_distance_sq) * signed,
+        jnp.zeros_like(distance_sq),
+    )
     return jnp.stack((s, ey, _wrap_angle(pose[2] - yaw)))
 
 
