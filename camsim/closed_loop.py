@@ -34,6 +34,7 @@ class Result:
     mean_lateral_m: float
     max_lateral_m: float
     progress_m: float
+    control_hz_eff: float
 
 
 def _unwrap_progress(track: Track, s_prev: float, s_now: float) -> float:
@@ -45,11 +46,24 @@ def _unwrap_progress(track: Track, s_prev: float, s_now: float) -> float:
 
 def run(env, predictor, track: Track, cfg: Config, H_g2i: np.ndarray, start_index: int = 0,
         latency_steps=None, video_path=None, seed: int = 0) -> Result:
+    """Run one closed-loop episode: render -> predict -> pure pursuit -> env.step.
+
+    seed is reserved for future stochastic reset/noise injection and is currently unused.
+    """
     cl = cfg.closed_loop
     if latency_steps is None:
         latency_steps = cl.latency_steps
     k = len(cfg.waypoints.ahead_m)
     physics_per_tick = max(1, int(round(1.0 / (env.timestep * cl.control_hz))))
+    # The actual control rate, which only equals cl.control_hz when control_hz evenly
+    # divides gym's 1/env.timestep physics rate (physics_per_tick is rounded to an int).
+    hz_eff = 1.0 / (env.timestep * physics_per_tick)
+    if abs(hz_eff - cl.control_hz) / cl.control_hz > 0.02:
+        warnings.warn(
+            f"camsim: control_hz={cl.control_hz} is not an integer divisor of the gym physics "
+            f"rate (1/{env.timestep}); effective control rate is {hz_eff:.3f} Hz instead",
+            UserWarning,
+        )
 
     p0 = track.center[start_index]
     obs, _, done, _ = env.reset(np.array([[p0[0], p0[1], track.heading[start_index]]]))
@@ -57,7 +71,7 @@ def run(env, predictor, track: Track, cfg: Config, H_g2i: np.ndarray, start_inde
 
     writer = None
     if video_path is not None:
-        writer = cv2.VideoWriter(str(video_path), cv2.VideoWriter_fourcc(*"mp4v"), cl.control_hz,
+        writer = cv2.VideoWriter(str(video_path), cv2.VideoWriter_fourcc(*"mp4v"), hz_eff,
                                  (cfg.camera.image_width, cfg.camera.image_height))
 
     lats, traveled, reason = [], 0.0, "max_steps"
@@ -94,7 +108,8 @@ def run(env, predictor, track: Track, cfg: Config, H_g2i: np.ndarray, start_inde
         if writer is not None:
             writer.release()
     lats = np.array(lats) if lats else np.zeros(1)
-    return Result(reason == "lap", reason, steps, float(lats.mean()), float(lats.max()), float(traveled))
+    return Result(reason == "lap", reason, steps, float(lats.mean()), float(lats.max()), float(traveled),
+                  hz_eff)
 
 
 def sweep(env, track: Track, cfg: Config, H_g2i, latency_list, sigma_list, predictor_factory=None):

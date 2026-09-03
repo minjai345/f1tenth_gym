@@ -42,7 +42,7 @@ augment:
 closed_loop:
   map_yaml: examples/example_map.yaml
   centerline_csv: examples/example_waypoints.csv
-  control_hz: 30            # 카메라/제어 주기. gym 물리는 100Hz
+  control_hz: 25            # 카메라/제어 주기. gym 물리 100 Hz의 정수 배수여야 함 (25, 50, 100)
   lookahead_m: 1.2
   speed_mps: 2.0
   latency_steps: 0          # 제어 틱 단위 지연
