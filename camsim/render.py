@@ -16,15 +16,28 @@ def to_vehicle(pose, pts_world: np.ndarray) -> np.ndarray:
 
 
 def visible_quads(qv: np.ndarray, scan, cfg: Config) -> np.ndarray:
-    """qv: (M,4,2) vehicle-frame quads. Returns bool mask of quads to draw."""
+    """qv: (M,4,2) vehicle-frame quads. Returns bool mask of quads to draw.
+
+    Near/far culling must be relative to the camera, not the vehicle origin: with
+    camera.offset_x_m > 0 the camera sits ahead of the rear axle, so a quad at
+    vehicle-frame x in (0, offset_x_m) is actually *behind* the camera and would
+    otherwise pass a vehicle-relative near check, get projected with a flipped
+    (negative-depth) homogeneous coordinate, and appear mirrored above the horizon.
+    LiDAR range/bearing stay vehicle-relative: the scan comes from gym at the
+    vehicle pose, not the (assumed) camera pose.
+    """
     ctr = qv.mean(1)
-    rng = np.hypot(ctr[:, 0], ctr[:, 1])
-    keep = (qv[:, :, 0].min(1) > cfg.render.near_m) & (rng < cfg.render.far_m)
+    off = cfg.camera.offset_x_m
+    xc = qv[:, :, 0] - off                            # camera-frame forward coordinate
+    rng = np.hypot(ctr[:, 0], ctr[:, 1])               # vehicle-origin range, for LiDAR
+    cam_rng = np.hypot(ctr[:, 0] - off, ctr[:, 1])     # camera-origin range, for the far cut
+    keep = (xc.min(1) > cfg.render.near_m) & (cam_rng < cfg.render.far_m)
     if scan is not None:
         scan = np.asarray(scan)
         fov = cfg.render.lidar_fov_rad
         brg = np.arctan2(ctr[:, 1], ctr[:, 0])
-        idx = ((brg + fov / 2.0) / fov * len(scan)).astype(int).clip(0, len(scan) - 1)
+        # gym lays out beam i at angle -fov/2 + i*fov/(n-1), i.e. n-1 steps span fov.
+        idx = np.rint((brg + fov / 2.0) / fov * (len(scan) - 1)).astype(int).clip(0, len(scan) - 1)
         keep &= rng < scan[idx]
     return keep
 

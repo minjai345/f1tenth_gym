@@ -1,4 +1,4 @@
-import time, numpy as np, pytest
+import copy, time, numpy as np, pytest
 from camsim import config, camera, track, render
 
 CSV = "examples/example_waypoints.csv"
@@ -16,27 +16,30 @@ def pose_on_track(trk, i=50):
 def test_shape_and_background(ctx):
     cfg, trk, H, _ = ctx
     img = render.render(pose_on_track(trk), trk.quads, None, H, cfg)
-    assert img.shape == (400, 640, 3) and img.dtype == np.uint8
+    assert img.shape == (cfg.camera.image_height, cfg.camera.image_width, 3) and img.dtype == np.uint8
     assert (img[0, 0] == cfg.lane.color_floor).all()      # top-left is sky/floor color
 
 def test_tape_is_drawn_below_horizon_only(ctx):
     cfg, trk, H, _ = ctx
     img = render.render(pose_on_track(trk), trk.quads, None, H, cfg)
+    horizon = cfg.camera.image_height // 2
     tape = np.all(img == cfg.lane.color_tape, axis=-1)
-    assert tape[200:].sum() > 500
-    assert tape[:199].sum() == 0
+    assert tape[horizon:].sum() > 500
+    assert tape[:horizon - 1].sum() == 0
 
 def test_left_tape_on_left(ctx):
     cfg, trk, H, _ = ctx
     img = render.render(pose_on_track(trk), trk.quads, None, H, cfg)
-    # Row 380 (forward distance ~0.356 m) is geometrically unreachable by tape at the
-    # +/-0.4 m track half-width given hfov=90 deg (visible half-width == forward
-    # distance, which never exceeds 0.4 m until row <= 367 for this config). Measured:
-    # img[380] has zero tape pixels regardless of pose. Row 350 (forward distance
-    # ~0.416 m, comfortably above the 0.4 m half-width) is used instead.
-    row = np.all(img[350] == cfg.lane.color_tape, axis=-1)
+    # A row 3/4 of the way from the horizon to the bottom of the image is geometrically
+    # guaranteed to be past the point where the +/-track_width/2 tape is still within the
+    # hfov-limited visible half-width (visible half-width grows with forward distance, and
+    # forward distance shrinks closer to the horizon) -- measured true for this config.
+    horizon = cfg.camera.image_height // 2
+    row_idx = horizon + round(0.75 * (cfg.camera.image_height - horizon))
+    row = np.all(img[row_idx] == cfg.lane.color_tape, axis=-1)
     cols = np.where(row)[0]
-    assert cols.min() < 320 < cols.max()
+    cx = cfg.camera.image_width // 2
+    assert cols.min() < cx < cols.max()
 
 def test_culling_behind_and_far(ctx):
     cfg, trk, H, _ = ctx
@@ -45,6 +48,21 @@ def test_culling_behind_and_far(ctx):
                    [[2, -0.1], [2.1, -0.1], [2.1, 0.1], [2, 0.1]]], float)  # visible
     keep = render.visible_quads(qv, None, cfg)
     assert keep.tolist() == [False, False, True]
+
+def test_culling_is_camera_relative_not_vehicle_relative(ctx):
+    """With camera.offset_x_m > 0 the camera sits ahead of the rear axle, so near/far
+    culling must be measured from the camera, not the vehicle origin. Quads at vehicle-frame
+    x in (0, offset_x_m) are behind the camera; if culled with vehicle-relative x they pass,
+    get a negative-depth (flipped) projection, and land above the horizon."""
+    cfg, trk, _, _ = ctx
+    cfg2 = copy.deepcopy(cfg)
+    cfg2.camera.offset_x_m = 0.6
+    H2, _ = camera.build(cfg2)
+    pose = pose_on_track(trk)
+    img = render.render(pose, trk.quads, None, H2, cfg2)
+    horizon = cfg2.camera.image_height // 2
+    tape = np.all(img == cfg2.lane.color_tape, axis=-1)
+    assert tape[:horizon - 2].sum() == 0
 
 def test_lidar_occludes(ctx):
     cfg, trk, H, _ = ctx
@@ -59,8 +77,10 @@ def test_ipm_round_trip(ctx):
     cfg, trk, H, H_i2g = ctx
     pose = pose_on_track(trk)
     img = render.render(pose, trk.quads, None, H, cfg)
+    horizon = cfg.camera.image_height // 2
+    row_thresh = horizon + (cfg.camera.image_height - horizon) // 2
     vs, us = np.where(np.all(img == cfg.lane.color_tape, axis=-1))
-    sel = vs > 300
+    sel = vs > row_thresh
     g = camera.project(H_i2g, np.column_stack([us[sel], vs[sel]]).astype(float))
     qv = render.to_vehicle(pose, trk.quads).reshape(-1, 2)
     d = np.sqrt(((g[:, None, :] - qv[None, :, :]) ** 2).sum(-1)).min(1)
