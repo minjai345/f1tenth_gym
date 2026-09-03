@@ -2,6 +2,7 @@
 from collections import deque
 from dataclasses import dataclass
 import os
+import warnings
 import cv2
 import numpy as np
 from .config import Config
@@ -15,8 +16,10 @@ def make_env(cfg: Config):
     import gym
     from f110_gym.envs.base_classes import Integrator
     base = os.path.splitext(cfg.closed_loop.map_yaml)[0]
-    return gym.make("f110_gym:f110-v0", map=base, map_ext=".png", num_agents=1,
-                    timestep=0.01, integrator=Integrator.RK4)
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message="Chosen integrator is RK4.*")
+        return gym.make("f110_gym:f110-v0", map=base, map_ext=".png", num_agents=1,
+                        timestep=0.01, integrator=Integrator.RK4)
 
 
 def pose_of(obs) -> np.ndarray:
@@ -60,34 +63,36 @@ def run(env, predictor, track: Track, cfg: Config, H_g2i: np.ndarray, start_inde
     lats, traveled, reason = [], 0.0, "max_steps"
     s_prev = track.s[gt.nearest_index(track, p0)]
     steps = 0
-    for steps in range(1, cl.max_steps + 1):
-        pose = pose_of(obs)
-        img = render.render(pose, track.quads, obs["scans"][0], H_g2i, cfg)
-        if hasattr(predictor, "set_pose"):
-            predictor.set_pose(pose)
-        buf.append(predictor.predict(img))
-        wp = buf.popleft()
-        steer = pure_pursuit(wp, cl.lookahead_m, cl.wheelbase_m, cl.steer_max_rad)
+    try:
+        for steps in range(1, cl.max_steps + 1):
+            pose = pose_of(obs)
+            img = render.render(pose, track.quads, obs["scans"][0], H_g2i, cfg)
+            if hasattr(predictor, "set_pose"):
+                predictor.set_pose(pose)
+            buf.append(predictor.predict(img))
+            wp = buf.popleft()
+            steer = pure_pursuit(wp, cl.lookahead_m, cl.wheelbase_m, cl.steer_max_rad)
+            if writer is not None:
+                writer.write(render.draw_points(img.copy(), wp, H_g2i))
+            for _ in range(physics_per_tick):
+                obs, _, done, _ = env.step(np.array([[steer, cl.speed_mps]]))
+                if done:
+                    break
+            pose = pose_of(obs)
+            lat = gt.lateral_error(track, pose[:2])
+            lats.append(lat)
+            s_now = track.s[gt.nearest_index(track, pose[:2])]
+            traveled += _unwrap_progress(track, s_prev, s_now)
+            s_prev = s_now
+            if obs["collisions"][0]:
+                reason = "collision"; break
+            if lat > cl.offtrack_m:
+                reason = "offtrack"; break
+            if traveled >= track.length:
+                reason = "lap"; break
+    finally:
         if writer is not None:
-            writer.write(render.draw_points(img.copy(), wp, H_g2i))
-        for _ in range(physics_per_tick):
-            obs, _, done, _ = env.step(np.array([[steer, cl.speed_mps]]))
-            if done:
-                break
-        pose = pose_of(obs)
-        lat = gt.lateral_error(track, pose[:2])
-        lats.append(lat)
-        s_now = track.s[gt.nearest_index(track, pose[:2])]
-        traveled += _unwrap_progress(track, s_prev, s_now)
-        s_prev = s_now
-        if obs["collisions"][0]:
-            reason = "collision"; break
-        if lat > cl.offtrack_m:
-            reason = "offtrack"; break
-        if traveled >= track.length:
-            reason = "lap"; break
-    if writer is not None:
-        writer.release()
+            writer.release()
     lats = np.array(lats) if lats else np.zeros(1)
     return Result(reason == "lap", reason, steps, float(lats.mean()), float(lats.max()), float(traveled))
 
