@@ -13,6 +13,6 @@ flycheck_*
 .superpowers/
 
 # camsim run outputs
-out/
-track.npz
-model.pt
+/out/
+/track.npz
+/model.pt

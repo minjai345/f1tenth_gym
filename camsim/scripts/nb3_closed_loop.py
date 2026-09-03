@@ -14,10 +14,14 @@ rows = cl.sweep(env, trk, cfg, H_g2i, latency_list=[0, 2, 4, 6], sigma_list=[0.0
 json.dump(rows, open("out/sweep_oracle.json", "w"), indent=1)
 
 if len(sys.argv) > 1:
-    net = model.load(sys.argv[1], cfg)
-    pred = model.Predictor(net, cfg)
-    print("== trained model ==")
-    for lat in [0, 2, 4, 6]:
-        r = cl.run(env, pred, trk, cfg, H_g2i, latency_steps=lat,
-                   video_path=f"out/run_latency{lat}.mp4" if lat == 0 else None)
-        print(f"latency={lat}: {r}")
+    model_path = sys.argv[1]
+    if not os.path.exists(model_path):
+        print(f"model.pt 없음 — NB2를 먼저 실행하세요 ({model_path})")
+    else:
+        net = model.load(model_path, cfg)
+        pred = model.Predictor(net, cfg)
+        print("== trained model ==")
+        for lat in [0, 2, 4, 6]:
+            r = cl.run(env, pred, trk, cfg, H_g2i, latency_steps=lat,
+                       video_path=f"out/run_latency{lat}.mp4" if lat == 0 else None)
+            print(f"latency={lat}: {r}")

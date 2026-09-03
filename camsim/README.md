@@ -2,7 +2,7 @@
 
 `f1tenth_gym`은 카메라를 못 그린다. 바닥 테이프 트랙은 전부 평면이므로 캘리브레이션 행렬 하나로
 가짜 전방 영상을 그릴 수 있다. 이 패키지는 그 렌더러, 온더플라이 학습, gym 폐루프 검증을 담는다.
-설계: `docs/superpowers/specs/2026-09-03-camsim-design.md`, 배경: `camera_waypoint_pipeline.md`.
+설계: `docs/superpowers/specs/2026-09-03-camsim-design.md`. 배경 설명은 강의 자료 참고.
 
 ## 학생이 손대는 파일
 `camsim/config.yaml` 하나. 카메라 높이/각도/화각, 테이프 폭, waypoint 거리, 지연, 속도가 전부 여기 있다.
@@ -29,6 +29,7 @@ gym 0.19의 `setup.py`는 pip이 그대로 못 읽는 요구사항 문자열을 
 
 세 스크립트 모두 저장소 루트에서 실행해야 한다(`sys.path.insert(0, os.getcwd())`). 노트북은
 `%run` 전에 `%cd f1tenth_gym`을 하므로 동일하게 루트에서 실행되는 셈이다.
+스크립트를 다시 실행하면 `out/`, `track.npz`, `model.pt`가 덮어써진다.
 
 ## 좌표계
 world = gym 맵 (m). vehicle = 후륜축, x 전방, y 좌측. image = OpenCV (u 우, v 아래).
@@ -37,5 +38,5 @@ world = gym 맵 (m). vehicle = 후륜축, x 전방, y 좌측. image = OpenCV (u 
 ## 코랩 주의
 - `pip install -r camsim/requirements.txt` 후 numpy가 바뀌면 런타임 재시작 한 번.
 - `pyglet` import 에러가 나면 `!apt-get install -y libgl1` 후 재시도.
-- 노트북의 clone URL(`https://github.com/f1tenth/f1tenth_gym.git`)은 아직 이 브랜치가 없는 자리표시자다.
-  강사 fork로 바꿀 것.
+- 노트북 첫 코드 셀의 `REPO_URL`을 조교의 fork 주소로 바꾼 뒤 실행할 것. 기본값은 이 브랜치가
+  없는 자리표시자라 그대로 두면 clone이 조용히 실패한다(`|| true`).
