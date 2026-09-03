@@ -1,0 +1,51 @@
+# 학생이 편집하는 유일한 파일. 단위는 키 이름에 붙어 있음 (_m = 미터, _deg = 도, _px = 픽셀).
+
+camera:
+  image_width: 640          # 렌더/모델 입력 해상도 (실차 1920x1200을 이 크기로 축소)
+  image_height: 400
+  sensor_width_mm: 6.62     # FLIR BFS-U3-23S3 데이터시트 (1920 x 3.45um)
+  sensor_height_mm: 4.14
+  hfov_deg: 90.0            # 렌즈 수평 화각
+  height_m: 0.20            # 바닥에서 렌즈 중심까지 (가정값, 마운트 확정 후 수정)
+  pitch_deg: 0.0            # 아래로 숙인 각도 (+ = 아래). 정면이면 0
+  offset_x_m: 0.0           # 후륜축 기준 카메라 전방 오프셋
+  h_i2g_file: null          # 2주차 캘리브레이션 H_i2g (.npy, 3x3, image px -> ground m). 있으면 위 값 무시
+
+lane:
+  track_width_m: 0.8        # 좌우 테이프 중심 사이 거리
+  tape_width_m: 0.05
+  segment_len_m: 0.05       # 테이프를 쪼개는 사각형 길이
+  color_floor: [200, 200, 200]   # BGR
+  color_tape: [30, 30, 220]
+
+render:
+  near_m: 0.15              # 이보다 가까운 테이프는 안 그림
+  far_m: 10.0               # 이보다 먼 테이프는 안 그림
+  lidar_fov_rad: 4.7        # f110_gym 기본 LiDAR 화각 (1080빔)
+
+waypoints:
+  ahead_m: [0.5, 1.0, 1.5, 2.0, 2.5, 3.0]   # 전방 호길이. 모델 출력 = len * 2
+  norm_m: 1.0               # 타깃 정규화 나눗수
+
+sampling:
+  lateral_frac: 0.35        # 중심선에서 ±track_width*frac 까지 pose 샘플링
+  heading_deg: 15.0         # 헤딩 ±
+
+augment:
+  pitch_jitter_deg: 2.0
+  blur_max_px: 3
+  tape_dropout_prob: 0.3
+  tape_dropout_len: [5, 20]   # 지우는 연속 사각형 개수 범위
+  glare_prob: 0.3
+
+closed_loop:
+  map_yaml: examples/example_map.yaml
+  centerline_csv: examples/example_waypoints.csv
+  control_hz: 30            # 카메라/제어 주기. gym 물리는 100Hz
+  lookahead_m: 1.2
+  speed_mps: 2.0
+  latency_steps: 0          # 제어 틱 단위 지연
+  max_steps: 4000           # 제어 틱
+  offtrack_m: 0.4           # 중심선 이탈 시 종료
+  wheelbase_m: 0.3302       # lf + lr (gym 기본)
+  steer_max_rad: 0.4189
