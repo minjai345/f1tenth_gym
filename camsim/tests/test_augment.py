@@ -7,9 +7,10 @@ def cfg():
 
 def test_jitter_pitch_changes_horizon(cfg):
     rng = np.random.default_rng(0)
+    horizon = cfg.camera.image_height / 2.0
     vs = {round(camera.project(augment.jitter_pitch(cfg, rng), np.array([[1000., 0.]]))[0, 1], 1)
           for _ in range(20)}
-    assert len(vs) > 5 and all(abs(v - 200) < 15 for v in vs)
+    assert len(vs) > 5 and all(abs(v - horizon) < 15 for v in vs)
 
 def test_jitter_zero_when_disabled(cfg):
     cfg.augment.pitch_jitter_deg = 0.0

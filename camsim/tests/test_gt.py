@@ -11,7 +11,7 @@ def test_waypoints_on_straight_are_ahead(ctx):
     i = 10
     pose = np.array([*trk.center[i], trk.heading[i]])
     wp = gt.waypoints_ahead(pose, trk, cfg)
-    assert wp.shape == (6, 2)
+    assert wp.shape == (len(cfg.waypoints.ahead_m), 2)
     assert np.all(np.diff(wp[:, 0]) > 0)
     assert np.allclose(wp[:, 0], cfg.waypoints.ahead_m, atol=0.3)
 
@@ -36,14 +36,16 @@ def test_wraps_at_track_end(ctx):
     i = len(trk.center) - 3
     pose = np.array([*trk.center[i], trk.heading[i]])
     wp = gt.waypoints_ahead(pose, trk, cfg)
-    assert np.all(np.isfinite(wp)) and wp[-1, 0] > 2.0
+    # The farthest waypoint should stay well forward even across the wrap; allow slack for
+    # resample-grid snapping rather than requiring it match cfg.waypoints.ahead_m[-1] exactly.
+    assert np.all(np.isfinite(wp)) and wp[-1, 0] > cfg.waypoints.ahead_m[-1] * 0.6
 
 def test_sample_pose_within_bounds(ctx):
     cfg, trk = ctx
     rng = np.random.default_rng(1)
     for _ in range(200):
         p = gt.sample_pose(trk, cfg, rng)
-        assert gt.lateral_error(trk, p[:2]) <= 0.35 * 0.8 + 0.03
+        assert gt.lateral_error(trk, p[:2]) <= cfg.sampling.lateral_frac * cfg.lane.track_width_m + 0.03
         i = gt.nearest_index(trk, p[:2])
         dth = np.angle(np.exp(1j * (p[2] - trk.heading[i])))
-        assert abs(dth) <= np.deg2rad(15) + 0.05
+        assert abs(dth) <= np.deg2rad(cfg.sampling.heading_deg) + 0.05

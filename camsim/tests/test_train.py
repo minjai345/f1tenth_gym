@@ -14,7 +14,7 @@ def test_evaluate_oracle_is_zero(ctx):
         def predict(s, img): return s.o.predict(img)
         def set_pose(s, p): s.o.set_pose(p)
     r = train.evaluate(P(), trk, cfg, n=20)
-    assert r["mean_m"] < 1e-9 and r["per_waypoint_m"].shape == (6,)
+    assert r["mean_m"] < 1e-9 and r["per_waypoint_m"].shape == (len(cfg.waypoints.ahead_m),)
 
 def test_train_runs_and_loss_drops(ctx, tmp_path):
     cfg, trk = ctx

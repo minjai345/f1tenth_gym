@@ -1,7 +1,9 @@
 import numpy as np, pytest
+from camsim import config
 from camsim.pure_pursuit import pure_pursuit
 
-WB, SMAX = 0.3302, 0.4189
+_cfg = config.load()
+WB, SMAX = _cfg.closed_loop.wheelbase_m, _cfg.closed_loop.steer_max_rad
 
 def test_straight_gives_zero():
     wp = np.column_stack([np.arange(1, 7) * 0.5, np.zeros(6)])
