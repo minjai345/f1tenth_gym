@@ -1,0 +1,9 @@
+# camsim 의존성 (gym 0.19.0은 camsim/scripts/install_gym019.sh 로 따로 설치)
+# 코랩: !pip install -r camsim/requirements.txt && bash camsim/scripts/install_gym019.sh && pip install --no-build-isolation -e .
+#       numpy가 다운그레이드되면 "런타임 다시 시작" 한 번 필요
+setuptools==65.5.0
+numpy==1.22.0
+opencv-python-headless<4.10
+pyyaml
+pytest
+torch
