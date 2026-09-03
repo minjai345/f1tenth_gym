@@ -111,4 +111,13 @@ def load(path: Optional[str] = None) -> Config:
         if name not in raw:
             raise ConfigError(f"missing section '{name}'")
         built[name] = _build(cls, name, raw[name])
+    cam = built["camera"]
+    render_ar = cam.image_width / cam.image_height
+    sensor_ar = cam.sensor_width_mm / cam.sensor_height_mm
+    if abs(render_ar - sensor_ar) > 0.02:
+        raise ConfigError(
+            f"camera aspect ratio mismatch: image {cam.image_width}x{cam.image_height} "
+            f"(ratio {render_ar:.4f}) vs sensor {cam.sensor_width_mm}x{cam.sensor_height_mm}mm "
+            f"(ratio {sensor_ar:.4f})"
+        )
     return Config(path=path, **built)

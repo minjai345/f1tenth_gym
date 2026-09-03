@@ -1,7 +1,8 @@
 import pytest, textwrap
 from camsim import config
 
-def test_default_loads():
+def test_default_config_values():
+    """Documents the shipped camsim/config.yaml defaults (literal on purpose)."""
     cfg = config.load()
     assert cfg.camera.image_width == 640
     assert cfg.camera.image_height == 400
@@ -24,3 +25,10 @@ def test_unknown_key_names_key(tmp_path):
     with pytest.raises(config.ConfigError) as e:
         config.load(str(p))
     assert "lane_typo" in str(e.value)
+
+def test_aspect_ratio_mismatch_raises(tmp_path):
+    src = open(config.DEFAULT_PATH).read().replace("image_height: 400", "image_height: 480")
+    p = tmp_path / "c.yaml"; p.write_text(src)
+    with pytest.raises(config.ConfigError) as e:
+        config.load(str(p))
+    assert "aspect" in str(e.value)
