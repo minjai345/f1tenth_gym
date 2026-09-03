@@ -4,6 +4,13 @@ import numpy as np
 from .config import Config
 from .camera import build
 
+# Internal glare ellipse shape parameters (not student tunables -- these fix the
+# *shape* of the glare blob relative to image size, unlike glare_prob/glare_alpha
+# in config.yaml which control *whether/how strongly* it appears).
+_GLARE_AXES_FRAC_W = (1 / 10, 1 / 3)    # ellipse semi-axis (x) as a fraction of image width
+_GLARE_AXES_FRAC_H = (1 / 12, 1 / 4)    # ellipse semi-axis (y) as a fraction of image height
+_GLARE_Y_MIN_FRAC = 1 / 3               # ellipse center is restricted to the lower 2/3 of the image
+
 
 def jitter_pitch(cfg: Config, rng: np.random.Generator) -> np.ndarray:
     j = cfg.augment.pitch_jitter_deg
@@ -36,10 +43,11 @@ def glare(img: np.ndarray, cfg: Config, rng: np.random.Generator) -> np.ndarray:
         return img
     h, w = img.shape[:2]
     overlay = img.copy()
-    center = (int(rng.integers(0, w)), int(rng.integers(h // 3, h)))
-    axes = (int(rng.integers(w // 10, w // 3)), int(rng.integers(h // 12, h // 4)))
+    center = (int(rng.integers(0, w)), int(rng.integers(int(h * _GLARE_Y_MIN_FRAC), h)))
+    axes = (int(rng.integers(w * _GLARE_AXES_FRAC_W[0], w * _GLARE_AXES_FRAC_W[1])),
+            int(rng.integers(h * _GLARE_AXES_FRAC_H[0], h * _GLARE_AXES_FRAC_H[1])))
     cv2.ellipse(overlay, center, axes, float(rng.uniform(0, 180)), 0, 360, (255, 255, 255), -1)
-    alpha = float(rng.uniform(0.3, 0.7))
+    alpha = float(rng.uniform(*cfg.augment.glare_alpha))
     return cv2.addWeighted(overlay, alpha, img, 1 - alpha, 0)
 
 

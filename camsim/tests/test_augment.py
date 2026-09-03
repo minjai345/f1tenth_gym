@@ -42,3 +42,11 @@ def test_glare_brightens(cfg):
     cfg.augment.glare_prob = 1.0
     out = augment.glare(img, cfg, np.random.default_rng(0))
     assert out.mean() > img.mean()
+
+def test_glare_alpha_from_config(cfg):
+    """glare_alpha=[1.0, 1.0] forces a full-strength blend, proving the config key is read."""
+    img = np.full((400, 640, 3), 100, np.uint8)
+    cfg.augment.glare_prob = 1.0
+    cfg.augment.glare_alpha = [1.0, 1.0]
+    out = augment.glare(img, cfg, np.random.default_rng(0))
+    assert out.max() == 255

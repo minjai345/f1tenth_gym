@@ -58,6 +58,7 @@ class Augment:
     tape_dropout_prob: float
     tape_dropout_len: List[int]
     glare_prob: float
+    glare_alpha: List[float]
 
 
 @dataclass

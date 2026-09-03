@@ -37,6 +37,7 @@ augment:
   tape_dropout_prob: 0.3
   tape_dropout_len: [5, 20]   # 지우는 연속 사각형 개수 범위
   glare_prob: 0.3
+  glare_alpha: [0.3, 0.7]     # 글레어 오버레이 블렌드 비율 범위
 
 closed_loop:
   map_yaml: examples/example_map.yaml
