@@ -6,6 +6,7 @@ frames
   image   : u right, v down (pixels)
 H_g2i maps ground (x, y, 1) -> image (u, v, w).  H_i2g = inv(H_g2i).
 """
+import os
 import numpy as np
 from .config import Config
 
@@ -13,6 +14,10 @@ from .config import Config
 _R_VC = np.array([[0.0, -1.0, 0.0],
                   [0.0, 0.0, -1.0],
                   [1.0, 0.0, 0.0]])
+
+# Cache of loaded h_i2g_file matrices, keyed by absolute path, so build() does not
+# hit the disk on every call (it may be called once per rendered frame).
+_H_FILE_CACHE: dict = {}
 
 
 def focal_px(cfg: Config) -> float:
@@ -38,15 +43,19 @@ def extrinsics(cfg: Config, pitch_deg: float) -> np.ndarray:
     return np.hstack([R, t[:, None]])
 
 
-def build(cfg: Config, pitch_deg=None):
-    """Return (H_g2i, H_i2g). A measured H_i2g file, if configured, wins over the assumed camera."""
-    if cfg.camera.h_i2g_file:
-        H_i2g = np.load(cfg.camera.h_i2g_file).astype(np.float64)
-        if H_i2g.shape != (3, 3):
-            raise ValueError(f"h_i2g_file must be 3x3, got {H_i2g.shape}")
-        return np.linalg.inv(H_i2g), H_i2g
-    if pitch_deg is None:
-        pitch_deg = cfg.camera.pitch_deg
+def _load_h_i2g_file(path: str) -> np.ndarray:
+    key = os.path.abspath(path)
+    H = _H_FILE_CACHE.get(key)
+    if H is None:
+        H = np.load(key).astype(np.float64)
+        if H.shape != (3, 3):
+            raise ValueError(f"h_i2g_file must be 3x3, got {H.shape}")
+        _H_FILE_CACHE[key] = H
+    return H
+
+
+def _assumed_h_g2i(cfg: Config, pitch_deg: float) -> np.ndarray:
+    """H_g2i from the assumed camera model (hfov/height/pitch/offset), not the measured file."""
     Rt = extrinsics(cfg, pitch_deg)
     H_g2i = intrinsics(cfg) @ Rt[:, [0, 1, 3]]   # ground plane z_v = 0
     # Normalize by the Frobenius norm rather than H_g2i[2, 2]: for offset_x_m=0 at
@@ -55,6 +64,30 @@ def build(cfg: Config, pitch_deg=None):
     # dividing by it produces NaN/Inf. The norm is always nonzero for an invertible H
     # and project() is scale-invariant, so this does not change any projected result.
     H_g2i /= np.linalg.norm(H_g2i)
+    return H_g2i
+
+
+def build(cfg: Config, pitch_deg=None):
+    """Return (H_g2i, H_i2g). A measured H_i2g file, if configured, wins over the assumed camera.
+
+    If a pitch_deg override is requested that differs from cfg.camera.pitch_deg (e.g. augment's
+    pitch jitter), the measured H is corrected by the *delta* between the assumed camera at the
+    configured pitch and at the requested pitch, rather than being silently ignored:
+    H_g2i = H_file @ inv(H_assumed(cfg.pitch_deg)) @ H_assumed(pitch_deg).
+    """
+    if cfg.camera.h_i2g_file:
+        H_i2g_file = _load_h_i2g_file(cfg.camera.h_i2g_file)
+        H_g2i_file = np.linalg.inv(H_i2g_file)
+        if pitch_deg is not None and pitch_deg != cfg.camera.pitch_deg:
+            H_assumed_base = _assumed_h_g2i(cfg, cfg.camera.pitch_deg)
+            H_assumed_new = _assumed_h_g2i(cfg, pitch_deg)
+            H_g2i = H_g2i_file @ np.linalg.inv(H_assumed_base) @ H_assumed_new
+            H_g2i /= np.linalg.norm(H_g2i)
+            return H_g2i, np.linalg.inv(H_g2i)
+        return H_g2i_file, H_i2g_file
+    if pitch_deg is None:
+        pitch_deg = cfg.camera.pitch_deg
+    H_g2i = _assumed_h_g2i(cfg, pitch_deg)
     return H_g2i, np.linalg.inv(H_g2i)
 
 

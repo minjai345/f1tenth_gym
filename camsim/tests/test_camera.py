@@ -1,3 +1,4 @@
+import copy
 import numpy as np, pytest
 from camsim import config, camera
 
@@ -6,27 +7,35 @@ def cfg():
     return config.load()
 
 def test_focal_from_hfov(cfg):
-    assert camera.focal_px(cfg) == pytest.approx(320.0)   # 320 / tan(45deg)
+    expected = (cfg.camera.image_width / 2.0) / np.tan(np.deg2rad(cfg.camera.hfov_deg) / 2.0)
+    assert camera.focal_px(cfg) == pytest.approx(expected)
 
 def test_horizon_at_center_for_pitch_zero(cfg):
     H_g2i, _ = camera.build(cfg, pitch_deg=0.0)
     uv = camera.project(H_g2i, np.array([[1000.0, 0.0]]))
-    assert uv[0, 0] == pytest.approx(320.0, abs=0.5)
-    assert uv[0, 1] == pytest.approx(200.0, abs=1.0)
+    assert uv[0, 0] == pytest.approx(cfg.camera.image_width / 2.0, abs=0.5)
+    assert uv[0, 1] == pytest.approx(cfg.camera.image_height / 2.0, abs=1.0)
 
 def test_left_is_left_and_near_is_low(cfg):
     H_g2i, _ = camera.build(cfg)
+    cy = cfg.camera.image_height / 2.0
+    cx = cfg.camera.image_width / 2.0
     near = camera.project(H_g2i, np.array([[1.0, 0.0]]))[0]
     far = camera.project(H_g2i, np.array([[3.0, 0.0]]))[0]
     left = camera.project(H_g2i, np.array([[2.0, 0.5]]))[0]
-    assert near[1] > far[1] > 200.0          # nearer -> lower in image, both below horizon
-    assert left[0] < 320.0                   # vehicle +y (left) -> smaller u
+    assert near[1] > far[1] > cy             # nearer -> lower in image, both below horizon
+    assert left[0] < cx                      # vehicle +y (left) -> smaller u
 
 def test_nearest_visible_ground(cfg):
-    # bottom row v=400 with h=0.2, f=320 -> x = h*f/(v-cy) = 0.32 m
+    # bottom row v=image_height with h=height_m, f=focal_px -> x = h*f/(v-cy)
     _, H_i2g = camera.build(cfg, pitch_deg=0.0)
-    g = camera.project(H_i2g, np.array([[320.0, 400.0]]))[0]
-    assert g[0] == pytest.approx(0.32, abs=1e-3)
+    v = float(cfg.camera.image_height)
+    u = cfg.camera.image_width / 2.0
+    cy = cfg.camera.image_height / 2.0
+    f = camera.focal_px(cfg)
+    expected_x = cfg.camera.height_m * f / (v - cy)
+    g = camera.project(H_i2g, np.array([[u, v]]))[0]
+    assert g[0] == pytest.approx(expected_x, abs=1e-3)
     assert g[1] == pytest.approx(0.0, abs=1e-6)
 
 def test_round_trip(cfg):
@@ -55,3 +64,43 @@ def test_h_file_overrides(cfg, tmp_path):
     # camera.build()'s own normalization. Compare up to scale via the Frobenius norm
     # instead, which is always nonzero for an invertible homography.
     assert np.allclose(H2 / np.linalg.norm(H2), H_g2i / np.linalg.norm(H_g2i))
+
+def test_h_file_pitch_jitter_matches_assumed_delta(cfg, tmp_path):
+    """A measured h_i2g_file must not silently disable a pitch_deg override: the horizon
+    should move by (about) the same amount as it would for the assumed camera model."""
+    H_g2i_assumed0, H_i2g_assumed0 = camera.build(cfg)   # cfg.camera.pitch_deg == 0.0 by default
+    p = tmp_path / "h.npy"; np.save(p, H_i2g_assumed0)
+    cfg_file = copy.deepcopy(cfg)
+    cfg_file.camera.h_i2g_file = str(p)
+
+    far = np.array([[1000.0, 0.0]])
+    v_file_base = camera.project(camera.build(cfg_file)[0], far)[0, 1]
+    v_file_5 = camera.project(camera.build(cfg_file, pitch_deg=5.0)[0], far)[0, 1]
+    v_assumed_base = camera.project(camera.build(cfg)[0], far)[0, 1]
+    v_assumed_5 = camera.project(camera.build(cfg, pitch_deg=5.0)[0], far)[0, 1]
+
+    delta_file = v_file_5 - v_file_base
+    delta_assumed = v_assumed_5 - v_assumed_base
+    assert delta_file == pytest.approx(delta_assumed, abs=0.5)
+
+    # build(cfg_file) with no pitch override still equals the file's inverse up to scale.
+    H2, _ = camera.build(cfg_file)
+    assert np.allclose(H2 / np.linalg.norm(H2), H_g2i_assumed0 / np.linalg.norm(H_g2i_assumed0))
+
+def test_h_file_is_cached(cfg, tmp_path, monkeypatch):
+    H_g2i0, H_i2g0 = camera.build(cfg)
+    p = tmp_path / "h.npy"; np.save(p, H_i2g0)
+    cfg2 = copy.deepcopy(cfg)
+    cfg2.camera.h_i2g_file = str(p)
+    camera.build(cfg2)   # primes the module-level cache
+
+    calls = {"n": 0}
+    orig_load = np.load
+    def counting_load(*a, **k):
+        calls["n"] += 1
+        return orig_load(*a, **k)
+    monkeypatch.setattr(np, "load", counting_load)
+
+    camera.build(cfg2)
+    camera.build(cfg2)
+    assert calls["n"] == 0
