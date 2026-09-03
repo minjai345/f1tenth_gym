@@ -25,6 +25,9 @@ def make_sample(track: Track, cfg: Config, rng: np.random.Generator, do_augment:
         from .camera import build
         H = build(cfg)[0]
         quads = track.quads
+    # scan=None: training renders without LiDAR wall-occlusion (closed_loop.run passes gym's
+    # real scan instead). A known, deliberate train/test gap, kept so this module can be
+    # imported without gym.
     img = render.render(pose, quads, None, H, cfg)
     if do_augment:
         img = augment.augment_image(img, cfg, rng)

@@ -8,16 +8,19 @@ def ctx():
 
 def test_crop_is_bottom_half(ctx):
     cfg, _ = ctx
-    img = np.zeros((400, 640, 3), np.uint8); img[200:] = 7
+    h, w = cfg.camera.image_height, cfg.camera.image_width
+    img = np.zeros((h, w, 3), np.uint8); img[h // 2:] = 7
     c = dataset.crop(img, cfg)
-    assert c.shape == (200, 640, 3) and (c == 7).all()
+    assert c.shape == (h // 2, w, 3) and (c == 7).all()
 
 def test_dataset_yields_tensor_pairs(ctx):
     cfg, trk = ctx
+    n_out = 2 * len(cfg.waypoints.ahead_m)
     it = iter(dataset.SynthDataset(trk, cfg, seed=0))
     x, y = next(it)
-    assert x.shape == (3, 200, 640) and x.dtype == torch.float32 and 0 <= x.min() <= x.max() <= 1
-    assert y.shape == (12,)
+    assert x.shape == (3, cfg.camera.image_height // 2, cfg.camera.image_width)
+    assert x.dtype == torch.float32 and 0 <= x.min() <= x.max() <= 1
+    assert y.shape == (n_out,)
 
 def test_dataset_is_deterministic_per_seed(ctx):
     cfg, trk = ctx
@@ -27,21 +30,25 @@ def test_dataset_is_deterministic_per_seed(ctx):
 
 def test_dataloader_batches(ctx):
     cfg, trk = ctx
+    n_out = 2 * len(cfg.waypoints.ahead_m)
     dl = torch.utils.data.DataLoader(dataset.SynthDataset(trk, cfg), batch_size=4, num_workers=0)
     x, y = next(iter(dl))
-    assert x.shape == (4, 3, 200, 640) and y.shape == (4, 12)
+    assert x.shape == (4, 3, cfg.camera.image_height // 2, cfg.camera.image_width)
+    assert y.shape == (4, n_out)
 
-def test_model_forward_and_size():
+def test_model_forward_and_size(ctx):
+    cfg, _ = ctx
     net = model.WaypointNet()
-    out = net(torch.zeros(2, 3, 200, 640))
-    assert out.shape == (2, 12)
+    out = net(torch.zeros(2, 3, cfg.camera.image_height // 2, cfg.camera.image_width))
+    assert out.shape == (2, 12)   # WaypointNet()'s own default n_out, not config-driven
     assert sum(p.numel() for p in net.parameters()) < 1_000_000
 
 def test_predictor_shape(ctx):
     cfg, _ = ctx
-    p = model.Predictor(model.WaypointNet(), cfg)
-    wp = p.predict(np.zeros((400, 640, 3), np.uint8))
-    assert wp.shape == (6, 2)
+    net = model.WaypointNet(n_out=2 * len(cfg.waypoints.ahead_m))
+    p = model.Predictor(net, cfg)
+    wp = p.predict(np.zeros((cfg.camera.image_height, cfg.camera.image_width, 3), np.uint8))
+    assert wp.shape == (len(cfg.waypoints.ahead_m), 2)
 
 def test_oracle_matches_gt(ctx):
     cfg, trk = ctx
@@ -52,9 +59,17 @@ def test_oracle_matches_gt(ctx):
 
 def test_save_load(ctx, tmp_path):
     cfg, _ = ctx
-    net = model.WaypointNet()
+    net = model.WaypointNet(n_out=2 * len(cfg.waypoints.ahead_m))
     model.save(net, tmp_path / "m.pt")
     net2 = model.load(tmp_path / "m.pt", cfg)
-    x = torch.zeros(1, 3, 200, 640)
+    x = torch.zeros(1, 3, cfg.camera.image_height // 2, cfg.camera.image_width)
     net.eval(); net2.eval()
     assert torch.allclose(net(x), net2(x))
+
+def test_load_rejects_n_out_mismatch(ctx, tmp_path):
+    cfg, _ = ctx
+    bad_n_out = 2 * len(cfg.waypoints.ahead_m) + 2   # deliberately mismatched
+    net = model.WaypointNet(n_out=bad_n_out)
+    model.save(net, tmp_path / "bad.pt")
+    with pytest.raises(ValueError, match="n_out"):
+        model.load(tmp_path / "bad.pt", cfg)

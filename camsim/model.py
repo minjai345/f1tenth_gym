@@ -61,6 +61,11 @@ def save(net: nn.Module, path) -> None:
 
 def load(path, cfg: Config) -> WaypointNet:
     ck = torch.load(path, map_location="cpu", weights_only=True)
+    expected = 2 * len(cfg.waypoints.ahead_m)
+    if ck["n_out"] != expected:
+        raise ValueError(
+            f"checkpoint n_out={ck['n_out']} does not match cfg 2*len(waypoints.ahead_m)={expected}"
+        )
     net = WaypointNet(n_out=ck["n_out"])
     net.load_state_dict(ck["state_dict"])
     return net
