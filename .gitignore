@@ -11,3 +11,8 @@ docs/_build/
 flycheck_*
 .venv/
 .superpowers/
+
+# camsim run outputs
+out/
+track.npz
+model.pt
