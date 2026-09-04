@@ -38,5 +38,5 @@ world = gym 맵 (m). vehicle = 후륜축, x 전방, y 좌측. image = OpenCV (u 
 ## 코랩 주의
 - `pip install -r camsim/requirements.txt` 후 numpy가 바뀌면 런타임 재시작 한 번.
 - `pyglet` import 에러가 나면 `!apt-get install -y libgl1` 후 재시도.
-- 노트북 첫 코드 셀의 `REPO_URL`을 조교의 fork 주소로 바꾼 뒤 실행할 것. 기본값은 이 브랜치가
-  없는 자리표시자라 그대로 두면 clone이 조용히 실패한다(`|| true`).
+- 노트북 첫 코드 셀의 `REPO_URL` 기본값은 조교 fork(`https://github.com/minjai345/f1tenth_gym.git`, `main`)다.
+  다른 fork를 쓰려면 그 줄만 바꾸면 된다. clone이 실패하면 `%cd f1tenth_gym`부터 전부 깨지므로 주소를 먼저 확인할 것.
