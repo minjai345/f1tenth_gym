@@ -1,7 +1,7 @@
 """NB1: 트랙 + 렌더러 + GT + IPM 왕복. gym 불필요."""
 import os, sys, numpy as np, cv2
 sys.path.insert(0, os.getcwd())
-from camsim import config, camera, track, render, gt
+from camsim import config, camera, track, render, gt, viz
 
 cfg = config.load()
 trk = track.from_csv(cfg.closed_loop.centerline_csv, cfg)
@@ -11,11 +11,23 @@ print("focal px", camera.focal_px(cfg), "track length m", trk.length, "quads", l
 
 os.makedirs("out", exist_ok=True)
 rng = np.random.default_rng(0)
+mapimg = viz.MapImage(cfg.closed_loop.map_yaml)
+poses = []
 for n in range(6):
     pose = gt.sample_pose(trk, cfg, rng)
+    wp = gt.waypoints_ahead(pose, trk, cfg)
+    poses.append(pose)
     img = render.render(pose, trk.quads, None, H_g2i, cfg)
-    render.draw_points(img, gt.waypoints_ahead(pose, trk, cfg), H_g2i)
+    render.draw_points(img, wp, H_g2i)
     cv2.imwrite(f"out/nb1_sample_{n}.png", img)
+    # 왼쪽: 카메라 뷰(초록 = GT waypoint) | 오른쪽: 차 주변 top-down (벽, 테이프, 차, 카메라 화각, BEV 범위, GT waypoint)
+    local = viz.local_view(pose, trk, wp, cfg, mapimg)
+    cv2.imwrite(f"out/nb1_where_{n}.png", viz.side_by_side(img, local))
+
+# 전체 맵: 테이프 + 샘플 6개의 위치와 heading(번호 = 샘플 번호)
+overview, off = viz.draw_track_on_map(mapimg, trk, cfg)
+viz.mark_poses_on_map(overview, off, mapimg, poses)
+cv2.imwrite("out/nb1_map.png", overview)
 
 # IPM 왕복: 렌더 -> 테이프 픽셀 -> H_i2g -> 지면. 원래 테이프와 얼마나 맞는가
 pose = np.array([*trk.center[50], trk.heading[50]])
