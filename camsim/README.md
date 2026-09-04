@@ -36,9 +36,9 @@ world = gym 맵 (m). vehicle = 후륜축, x 전방, y 좌측. image = OpenCV (u 
 `H_g2i`: ground (x,y,1) → image. pitch 0이면 지평선은 이미지 세로 중앙.
 
 ## 코랩 주의
-- 코랩 Python(3.11+)에는 numpy 1.22 wheel이 없다. 그래서 코랩에서는 `numpy<2`를 쓰고 f110_gym을
-  `pip install --no-deps -e .` 로 설치한다 (numpy 1.26에서 테스트 60개 통과 확인). 노트북 첫 셀이 이 순서대로 되어 있다.
-- 첫 셀 실행 후 numpy 버전이 바뀌었다는 메시지가 나오면 "런타임 다시 시작" 한 번, 그리고 첫 셀부터 다시 실행.
+- 코랩 Python(3.13)에는 numpy 1.22 wheel이 없다. 그래서 코랩에서는 numpy를 코랩 기본(2.x) 그대로 두고 f110_gym을
+  `pip install --no-deps -e .` 로 설치한다 (numpy 2.5에서 테스트 60개 통과 확인). 노트북 첫 셀이 이 순서대로 되어 있다.
+- numpy를 설치 중에 바꾸면 런타임을 재시작해야 한다. 재시작 없이 진행하면 `numpy.dtype size changed` 오류가 난다.
 - `pyglet` import 에러가 나면 `!apt-get install -y libgl1` 후 재시도.
 - 노트북 첫 코드 셀의 `REPO_URL` 기본값은 조교 fork(`https://github.com/minjai345/f1tenth_gym.git`, `main`)다.
   다른 fork를 쓰려면 그 줄만 바꾸면 된다. clone이 실패하면 `%cd f1tenth_gym`부터 전부 깨지므로 주소를 먼저 확인할 것.

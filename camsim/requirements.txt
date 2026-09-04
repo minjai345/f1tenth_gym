@@ -1,8 +1,8 @@
 # camsim 의존성 (코랩용). gym 0.19.0은 camsim/scripts/install_gym019.sh 로 따로 설치한다.
 # 코랩 순서: pip install -r camsim/requirements.txt  ->  bash camsim/scripts/install_gym019.sh  ->  pip install --no-deps -e .
-# f110_gym의 setup.py는 numpy<=1.22를 요구하지만 코랩 Python(3.11+)에는 그 wheel이 없다.
-# numpy 1.26으로도 f110_gym이 정상 동작함을 확인했으므로(테스트 60개 통과) --no-deps 로 설치한다.
-numpy<2
+# f110_gym의 setup.py는 numpy<=1.22를 요구하지만 코랩 Python(3.13)에는 그 wheel이 없다.
+# numpy 2.x로도 f110_gym이 정상 동작함을 확인했으므로(테스트 60개 통과) numpy는 핀하지 않고 --no-deps 로 설치한다.
+# numpy를 여기서 바꾸면 런타임 재시작이 필요해지고, 재시작 없이 진행하면 'numpy.dtype size changed' 오류가 난다.
 opencv-python-headless
 pyyaml
 pytest
