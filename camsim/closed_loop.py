@@ -40,6 +40,7 @@ class Result:
     progress_m: float
     control_hz_eff: float
     lateral_trace: np.ndarray = None   # 제어 틱마다 중심선 대비 횡오차 (m). 그래프용
+    pose_trace: np.ndarray = None      # (steps,3) 제어 틱마다 world pose. 맵 위 경로 그리기용
 
 
 def _unwrap_progress(track: Track, s_prev: float, s_now: float) -> float:
@@ -78,6 +79,7 @@ def run(env, predictor, track: Track, cfg: Config, H_g2i: np.ndarray, start_inde
     writer = None            # 영상 프레임 = [카메라 뷰 | 모델 입력 BEV], 첫 프레임 크기로 열림
 
     lats, traveled, reason = [], 0.0, "max_steps"
+    poses = []
     s_prev = track.s[gt.nearest_index(track, p0)]
     steps = 0
     try:
@@ -103,6 +105,7 @@ def run(env, predictor, track: Track, cfg: Config, H_g2i: np.ndarray, start_inde
             pose = pose_of(obs)
             lat = gt.lateral_error(track, pose[:2])
             lats.append(lat)
+            poses.append(pose)
             s_now = track.s[gt.nearest_index(track, pose[:2])]
             traveled += _unwrap_progress(track, s_prev, s_now)
             s_prev = s_now
@@ -117,7 +120,7 @@ def run(env, predictor, track: Track, cfg: Config, H_g2i: np.ndarray, start_inde
             writer.release()
     lats = np.array(lats) if lats else np.zeros(1)
     return Result(reason == "lap", reason, steps, float(lats.mean()), float(lats.max()), float(traveled),
-                  hz_eff, lats)
+                  hz_eff, lats, np.array(poses).reshape(-1, 3))
 
 
 def sweep(env, track: Track, cfg: Config, H_g2i, latency_list, sigma_list, predictor_factory=None):

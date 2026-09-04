@@ -135,3 +135,42 @@ def side_by_side(*imgs, gap=10, bg=255) -> np.ndarray:
         r = cv2.resize(i, (int(round(i.shape[1] * s)), hmax), interpolation=cv2.INTER_AREA if s < 1 else cv2.INTER_LINEAR)
         out += [r, np.full((hmax, gap, 3), bg, np.uint8)]
     return np.hstack(out[:-1])
+
+
+PATH_COLORS = [(110, 110, 110), (255, 0, 0), (0, 160, 0), (0, 0, 255), (200, 0, 200), (0, 140, 255), (120, 120, 0)]  # 0번 = 회색(오라클/기준용)
+
+
+def draw_paths_on_map(mapimg: MapImage, track: Track, cfg: Config, paths: dict, thickness: int = 3,
+                      crop_margin_m: float = 2.0, legend: bool = True):
+    """전체 맵 위에 GT 경로(중심선, 검은 점선)와 주행 경로들을 겹쳐 그린다.
+
+    paths: {label: (N,2) world xy 또는 (N,3) pose}. 각 경로의 끝에 원을 찍고 label 을 적는다.
+    반환: (img_bgr, offset_px)
+    """
+    img, off = draw_track_on_map(mapimg, track, cfg, crop_margin_m)
+    c = np.round(mapimg.world_to_px(track.center) - off).astype(np.int32)
+    for k in range(0, len(c), 6):                      # 점선 중심선
+        cv2.line(img, tuple(c[k]), tuple(c[(k + 3) % len(c)]), (0, 0, 0), 1, cv2.LINE_AA)
+    y0 = 24
+    for i, (label, xy) in enumerate(paths.items()):
+        col = PATH_COLORS[i % len(PATH_COLORS)]
+        xy = np.asarray(xy, float)[:, :2]
+        if len(xy) == 0:
+            continue
+        px = np.round(mapimg.world_to_px(xy) - off).astype(np.int32)
+        cv2.polylines(img, [px.reshape(-1, 1, 2)], False, col, thickness, cv2.LINE_AA)
+        cv2.circle(img, tuple(px[0]), 6, col, 2, cv2.LINE_AA)          # 시작: 빈 원
+        cv2.circle(img, tuple(px[-1]), 8, col, -1, cv2.LINE_AA)        # 끝: 채운 원
+        if legend:
+            cv2.putText(img, label, (12, y0), cv2.FONT_HERSHEY_SIMPLEX, 0.6, col, 2, cv2.LINE_AA)
+            y0 += 24
+    return img, off
+
+
+def crop_around(img: np.ndarray, offset_px, mapimg: MapImage, xy_world, half_m: float = 4.0, scale: int = 3):
+    """맵 그림에서 world 점 주변 half_m 반경을 잘라 scale 배 확대."""
+    c = np.round(mapimg.world_to_px(np.asarray(xy_world, float)[:2]) - offset_px).astype(int)
+    r = int(half_m / mapimg.res)
+    x0, y0 = max(c[0] - r, 0), max(c[1] - r, 0)
+    sub = img[y0:c[1] + r, x0:c[0] + r]
+    return cv2.resize(sub, (sub.shape[1] * scale, sub.shape[0] * scale), interpolation=cv2.INTER_NEAREST)

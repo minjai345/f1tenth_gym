@@ -48,3 +48,13 @@ def test_side_by_side_heights_match():
     a = np.zeros((400, 640, 3), np.uint8); b = np.zeros((650, 600, 3), np.uint8)
     out = viz.side_by_side(a, b)
     assert out.shape[0] == 650 and out.shape[1] > 640 + 600
+
+
+def test_draw_paths_on_map_marks_paths(ctx):
+    cfg, trk, m = ctx
+    path = trk.center[:200] + 0.1
+    img, off = viz.draw_paths_on_map(m, trk, cfg, {"a": path, "b": trk.center[300:400]})
+    px = np.round(m.world_to_px(path[100]) - off).astype(int)
+    assert (img[px[1], px[0]] == viz.PATH_COLORS[0]).all()
+    zoom = viz.crop_around(img, off, m, path[-1], half_m=3.0, scale=2)
+    assert zoom.shape[0] > 0 and zoom.ndim == 3

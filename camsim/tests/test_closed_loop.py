@@ -72,3 +72,12 @@ def test_lateral_trace_recorded(ctx):
     cfg2 = copy.deepcopy(cfg); cfg2.closed_loop.max_steps = 20
     r = cl.run(env, model.OraclePredictor(trk, cfg2), trk, cfg2, H)
     assert r.lateral_trace.shape == (r.steps,) and r.lateral_trace.max() == r.max_lateral_m
+
+
+def test_pose_trace_recorded(ctx):
+    import copy
+    cfg, trk, env, H = ctx
+    cfg2 = copy.deepcopy(cfg); cfg2.closed_loop.max_steps = 15
+    r = cl.run(env, model.OraclePredictor(trk, cfg2), trk, cfg2, H)
+    assert r.pose_trace.shape == (r.steps, 3)
+    assert np.hypot(*(r.pose_trace[-1, :2] - r.pose_trace[0, :2])) > 0.3

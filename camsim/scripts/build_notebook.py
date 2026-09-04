@@ -268,6 +268,20 @@ code('results = {}',
      'plt.xlabel("time (s)"); plt.ylabel("lateral error (cm)"); plt.legend(fontsize=8); plt.grid(alpha=.3); plt.show()',
      'display(Video("out/run_latency0.mp4", embed=True, width=900))')
 
+md("### 맵 위의 주행 경로",
+   "검은 점선 = 중심선(GT 경로), 노란 선 = 테이프, 회색 = 오라클(정답 waypoint, 지연 0) 주행, 색 선 = 학습 모델 주행(지연별).",
+   "빈 원이 출발, 채운 원이 종료 지점이다. 실격이면 그 자리에서 끊긴다. 아래는 지연 0 주행의 종료 지점 확대.")
+code('paths = {}',
+     'r_or = closed_loop.run(env, model.OraclePredictor(trk, cfg), trk, cfg, H_g2i, latency_steps=0)',
+     'paths[f"oracle -> {r_or.reason} ({r_or.progress_m:.0f} m)"] = r_or.pose_trace',
+     'for lat, r in results.items():',
+     '    paths[f"model latency {lat} -> {r.reason} ({r.progress_m:.0f} m)"] = r.pose_trace',
+     'pm, off = viz.draw_paths_on_map(mapimg, trk, cfg, paths)',
+     'pm_colors = list(paths.keys())',
+     'show(pm, width=900, title="전체 맵: 경로 비교")',
+     'r0 = results[LATENCIES[0]]',
+     'show(viz.crop_around(pm, off, mapimg, r0.pose_trace[-1], half_m=3.0, scale=3), width=500, title=f"지연 {LATENCIES[0]} 주행의 종료 지점 ({r0.reason})")')
+
 # --------------------------------------------------------------------------- 5. 보관
 md("## 5. 결과 보관",
    "이 파일들은 코랩 VM에 있고 런타임이 끊기면 사라진다. 아래 셀은 구글 드라이브가 마운트 가능할 때(브라우저 코랩) `model.pt`와 결과를 복사한다.",
