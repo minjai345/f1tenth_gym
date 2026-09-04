@@ -24,12 +24,20 @@ gym 0.19의 `setup.py`는 pip이 그대로 못 읽는 요구사항 문자열을 
 | | 스크립트 | 노트북 | gym 필요 |
 |---|---|---|---|
 | 렌더러 + IPM 왕복 | `camsim/scripts/nb1_render.py` | `notebooks/NB1_render.ipynb` | ✗ |
-| 학습 | `camsim/scripts/nb2_train.py STEPS BATCH DEVICE` | `NB2_train.ipynb` | ✗ |
+| 데이터셋 저장 | `camsim/scripts/make_dataset.py N` | `NB1_render.ipynb` 뒷부분 | ✗ |
+| 학습 | `camsim/scripts/nb2_train.py STEPS BATCH DEVICE [DATA_DIR]` | `NB2_train.ipynb` | ✗ |
 | 폐루프 + 스윕 | `camsim/scripts/nb3_closed_loop.py model.pt` | `NB3_closed_loop.ipynb` | ✓ |
 
 세 스크립트 모두 저장소 루트에서 실행해야 한다(`sys.path.insert(0, os.getcwd())`). 노트북은
 `%run` 전에 `%cd f1tenth_gym`을 하므로 동일하게 루트에서 실행되는 셈이다.
 스크립트를 다시 실행하면 `out/`, `track.npz`, `model.pt`가 덮어써진다.
+
+## 데이터셋
+`make_dataset.py N` 이 `out/dataset/images/NNNNNN.png`(640x400 전체 렌더) 와 `labels.csv`(file, x, y, theta, wp0_x..wp5_y) 를 만든다.
+pitch 지터·테이프 결손은 생성 시 샘플마다 들어 있고, 블러·글레어는 `DiskDataset` 이 로딩할 때 넣는다. train/val 은 9:1 결정적 분리.
+`nb2_train.py` 는 이 폴더가 있으면 그것으로, 없으면 온더플라이(`SynthDataset`)로 학습한다.
+실차 녹화 데이터도 같은 `labels.csv` 포맷으로 만들면 `DiskDataset` 그대로 학습된다.
+코랩 로컬 디스크에 생성하고 드라이브에는 zip 하나로 옮길 것 (드라이브는 작은 파일 다량에 매우 느리다).
 
 ## BEV 두 종류
 - `render.render_bev(pose, quads, cfg)`: 지오메트리에서 직접 그린 top-down 정답. 카메라·IPM과 무관.
