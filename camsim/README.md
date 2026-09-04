@@ -20,29 +20,17 @@
 gym 0.19의 `setup.py`는 pip이 그대로 못 읽는 요구사항 문자열을 갖고 있어서, 일반 `pip install gym==0.19.0`이
 실패한다. 그래서 gym은 `camsim/scripts/install_gym019.sh`로 따로 설치한다.
 
-## 실행 순서
-| | 스크립트 | 노트북 | gym 필요 |
-|---|---|---|---|
-| 렌더러 + IPM 왕복 | `camsim/scripts/nb1_render.py` | `notebooks/NB1_render.ipynb` | ✗ |
-| 데이터셋 저장 | `camsim/scripts/make_dataset.py N` | `NB1_render.ipynb` 뒷부분 | ✗ |
-| 학습 | `camsim/scripts/nb2_train.py STEPS BATCH DEVICE [DATA_DIR]` | `NB2_train.ipynb` | ✗ |
-| 폐루프 + 스윕 | `camsim/scripts/nb3_closed_loop.py model.pt` | `NB3_closed_loop.ipynb` | ✓ |
+## 실행: 노트북 하나
+학생용 경로는 `notebooks/camsim_lab.ipynb` 하나다. 0장(설치·파라미터) → 1장 카메라와 트랙 → 2장 GT와 데이터셋 → 3장 학습(train/val loss 실시간) → 4장 폐루프(스윕 표, 횡오차 곡선, 영상) → 5장 보관.
+각 장 첫 셀의 파라미터를 바꾸고 그 장을 다시 실행하면서 진행한다. `config.yaml`은 기본값이고, 노트북의 파라미터 셀이 그 위에 덮어쓴다.
+노트북 원본은 `camsim/scripts/build_notebook.py` 다 (수정 후 재생성). 로컬 검증:
 
-세 스크립트 모두 저장소 루트에서 실행해야 한다(`sys.path.insert(0, os.getcwd())`). 노트북은
-`%run` 전에 `%cd f1tenth_gym`을 하므로 동일하게 루트에서 실행되는 셈이다.
-스크립트를 다시 실행하면 `out/`, `track.npz`, `model.pt`가 덮어써진다.
+    .venv/bin/python camsim/scripts/build_notebook.py
+    cp notebooks/camsim_lab.ipynb _lab.ipynb && CAMSIM_SMOKE=1 <py3.12+ python> -m jupyter nbconvert --to notebook --execute _lab.ipynb --output /tmp/lab_out.ipynb
 
-## 데이터셋
-`make_dataset.py N` 이 `out/dataset/images/NNNNNN.png`(640x400 전체 렌더) 와 `labels.csv`(file, x, y, theta, wp0_x..wp5_y) 를 만든다.
-pitch 지터·테이프 결손은 생성 시 샘플마다 들어 있고, 블러·글레어는 `DiskDataset` 이 로딩할 때 넣는다. train/val 은 9:1 결정적 분리.
-`nb2_train.py` 는 이 폴더가 있으면 그것으로, 없으면 온더플라이(`SynthDataset`)로 학습한다.
-실차 녹화 데이터도 같은 `labels.csv` 포맷으로 만들면 `DiskDataset` 그대로 학습된다.
-코랩 로컬 디스크에 생성하고 드라이브에는 zip 하나로 옮길 것 (드라이브는 작은 파일 다량에 매우 느리다).
+(`CAMSIM_SMOKE=1` 이면 데이터 300장·30스텝으로 축소. 레포 루트에서 실행해야 첫 셀이 clone을 건너뛴다.)
 
-## BEV 두 종류
-- `render.render_bev(pose, quads, cfg)`: 지오메트리에서 직접 그린 top-down 정답. 카메라·IPM과 무관.
-- `render.ipm_bev(img, H_i2g, cfg)`: 원근 영상을 `H_i2g`로 펴서 만든 BEV. 실차 2주차 IPM과 같은 연산.
-- 두 이미지의 범위·해상도는 `config.yaml`의 `bev:` 섹션 하나로 정한다 (시뮬·실차 공용).
+`camsim/scripts/` 의 `nb1_render.py`, `make_dataset.py`, `nb2_train.py`, `nb3_closed_loop.py` 는 같은 단계의 헤드리스 버전으로, 로컬 테스트용이다.
 
 ## 실격 규칙 (폐루프 종료 조건)
 실차 트랙은 벽 없이 테이프가 경계다. 시뮬도 같은 규칙을 쓴다: 차체(`closed_loop.car_length_m` x `car_width_m`) 네 모서리 중
