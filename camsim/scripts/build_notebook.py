@@ -28,7 +28,8 @@ def code(*lines):
 md("# camsim 실습 노트북 — 카메라 기반 waypoint 모델: 시뮬 검증",
    "",
    "`f1tenth_gym`은 카메라를 그리지 못한다. 바닥 테이프 트랙은 전부 평면이므로 캘리브레이션 행렬 하나로 가짜 전방 영상을 그릴 수 있다.",
-   "이 노트북은 그 렌더러로 데이터를 만들고, waypoint CNN을 학습하고, gym 안에서 폐루프로 검증한다.",
+   "이 노트북은 그 지오메트리로 **BEV(top-down) 학습 데이터**를 만들고, waypoint CNN을 학습하고, gym 안에서 폐루프로 검증한다.",
+   "모델 입력은 BEV다. 시뮬은 BEV를 직접 그리고, 실차는 카메라 영상을 IPM으로 펴서 같은 규격의 BEV를 만든다.",
    "",
    "**진행 방법**: 각 장의 첫 셀에 있는 파라미터를 바꾸고 그 장을 다시 실행하면서 무엇이 달라지는지 본다.",
    "노트북 하나가 커널 하나이므로 앞 장에서 만든 것(데이터, 모델)은 뒤 장에서 그대로 쓴다.",
@@ -36,7 +37,7 @@ md("# camsim 실습 노트북 — 카메라 기반 waypoint 모델: 시뮬 검�
    "| 장 | 내용 | 바꿔 볼 값 |",
    "|---|---|---|",
    "| 1 | 카메라와 트랙 | 카메라 높이·pitch·화각, 트랙 폭, 테이프 색 |",
-   "| 2 | 정답(GT)과 데이터셋 | pose 샘플링 범위, waypoint 거리, 증강 세기, 장 수 |",
+   "| 2 | 정답(GT)과 데이터셋 (BEV) | pose 샘플링 범위, waypoint 거리, 증강 세기, 장 수 |",
    "| 3 | 학습 | 스텝, 배치, 학습률 |",
    "| 4 | 폐루프 | 속도, lookahead, 지연, 인지 노이즈 |",
    "| 5 | 결과 보관 | |")
@@ -122,8 +123,8 @@ code('horizon_v = camera.project(H_g2i, np.array([[1000.0, 0.0]]))[0, 1]',
      '',
      'i = 50',
      'pose = np.array([*trk.center[i], trk.heading[i]])',
-     'img = render.render(pose, trk.quads, None, H_g2i, cfg)',
-     'render.draw_points(img, gt.waypoints_ahead(pose, trk, cfg), H_g2i)',
+     'img_raw = render.render(pose, trk.quads, None, H_g2i, cfg)      # 순수 카메라 뷰 (IPM 비교용)',
+     'img = render.draw_points(img_raw.copy(), gt.waypoints_ahead(pose, trk, cfg), H_g2i)',
      'show(img, title="합성 카메라 뷰 (초록 = GT waypoint). 위 절반은 지평선 위라 모델 입력에서 잘라낸다")')
 
 md("### 트랙 어디인가",
@@ -135,16 +136,19 @@ code('mapimg = viz.MapImage(cfg.closed_loop.map_yaml)',
      'viz.mark_poses_on_map(overview, off, mapimg, [pose])',
      'show(overview, width=600, title="전체 맵에서의 위치")')
 
-md("### BEV 두 종류: 정답 vs IPM",
-   "왼쪽은 지오메트리에서 직접 그린 top-down(정답), 오른쪽은 위 카메라 뷰를 `H_i2g`로 편 것(실차 2주차 IPM과 같은 연산).",
-   "멀어질수록 오른쪽이 늘어지고 끊기는 것이 IPM의 해상도 한계다. **waypoint를 3 m 안쪽으로 잡는 이유**가 이 그림이다.",
-   "`cfg.bev` 범위·해상도를 바꾸면 두 그림이 함께 바뀐다 (시뮬·실차 공용 규격).")
-code('bev_true = render.render_bev(pose, trk.quads, cfg)',
-     'bev_ipm = render.ipm_bev(img, H_i2g, cfg)',
-     'show(viz.side_by_side(bev_true, bev_ipm), width=700, title=f"BEV 전방 {cfg.bev.x_range_m} m, 좌우 {cfg.bev.y_range_m} m, {cfg.bev.resolution_m*1000:.0f} mm/px")',
+md("### BEV 세 장: 정답 / 시뮬 모델 입력 / 실차 IPM",
+   "왼쪽: 지오메트리에서 직접 그린 top-down(정답). 가운데: 같은 것에 **카메라 가시 마스크**를 씌운 것 — 카메라가 못 보는 근거리(0.3 m 안쪽)와 화각 밖을 바닥색으로 가린다. 이것이 **시뮬 학습 데이터**다.",
+   "오른쪽: 위 카메라 뷰를 `H_i2g`로 편 것 — 실차 2주차 IPM이 만들어 낼 BEV. 가운데와 오른쪽이 같은 모양이어야 시뮬 학습 가중치가 실차로 넘어간다.",
+   "멀어질수록 오른쪽이 늘어지고 끊기는 것이 IPM의 해상도 한계다. **waypoint를 3 m 안쪽으로 잡는 이유**가 이 그림이다. `cfg.bev` 범위·해상도는 세 장이 공유한다.")
+code('vis_mask = render.bev_visibility_mask(H_g2i, cfg)',
+     'bev_true = render.render_bev(pose, trk.quads, cfg)',
+     'bev_sim = render.render_bev(pose, trk.quads, cfg, vis_mask)      # 모델 입력',
+     'bev_ipm = render.ipm_bev(img_raw, H_i2g, cfg)',
+     'show(viz.side_by_side(bev_true, bev_sim, bev_ipm), width=900, title=f"정답 | 시뮬 모델 입력 | 실차 IPM   (전방 {cfg.bev.x_range_m} m, 좌우 {cfg.bev.y_range_m} m, {cfg.bev.resolution_m*1000:.0f} mm/px)")',
+     'print(f"BEV 크기 {bev_sim.shape[1]} x {bev_sim.shape[0]} px, 카메라가 보는 비율 {vis_mask.mean()*100:.0f} %")',
      '',
      '# 왕복 오차: 카메라 뷰의 테이프 픽셀을 지면으로 되돌리면 원래 테이프에서 얼마나 벗어나나',
-     'vs, us = np.where(np.all(img == cfg.lane.color_tape, axis=-1))',
+     'vs, us = np.where(np.all(img_raw == cfg.lane.color_tape, axis=-1))',
      'g = camera.project(H_i2g, np.column_stack([us, vs]).astype(float))',
      'qv = render.to_vehicle(pose, trk.quads).reshape(-1, 2)',
      'd = np.sqrt(((g[:, None, :] - qv[None, ::4, :]) ** 2).sum(-1)).min(1)',
@@ -154,22 +158,21 @@ code('bev_true = render.render_bev(pose, trk.quads, cfg)',
 md("## 2. 정답(GT)과 데이터셋",
    "**주행하면서 데이터를 모으지 않는다.** 주행 가능 영역에 pose를 무작위로 뿌리고, 각 pose에서 영상을 그리고, 중심선을 따라 전방 호길이 기준으로 waypoint를 뽑는다.",
    "그래서 \"차선 이탈 직전\" 상황도 데이터에 자연히 들어가고, 모델은 복귀 동작을 따로 라벨링하지 않아도 배운다.",
-   "`cfg.sampling.lateral_frac`, `heading_deg`를 바꿔 아래 6장이 어떻게 달라지는지 보라.")
+   "각 샘플은 **BEV(모델 입력)** 로 직접 그려진다. 증강은 테이프 결손, pitch 지터(BEV가 휘는 워프), 블러, 글레어.",
+   "왼쪽: 참고용 카메라 뷰 / 가운데: 모델이 보는 BEV / 오른쪽: 차 주변 top-down. `cfg.sampling.lateral_frac`, `heading_deg`, `augment.*` 를 바꿔 보라.")
 code('rng = np.random.default_rng(0)',
      'poses = []',
      'for n in range(6):',
-     '    p = gt.sample_pose(trk, cfg, rng); poses.append(p)',
-     '    wp = gt.waypoints_ahead(p, trk, cfg)',
-     '    im = render.render(p, augment.dropout_quads(trk.quads, cfg, rng), None, augment.jitter_pitch(cfg, rng), cfg)',
-     '    im = augment.augment_image(im, cfg, rng)',
-     '    render.draw_points(im, wp, H_g2i)',
-     '    show(viz.side_by_side(im, viz.local_view(p, trk, wp, cfg, mapimg)), width=900, title=f"샘플 {n}: 증강 포함 (pitch 지터, 테이프 결손, 블러, 글레어)")',
+     '    bev, wp, p, cam = dataset.make_sample(trk, cfg, rng, with_camera=True, mask=vis_mask)',
+     '    poses.append(p)',
+     '    render.draw_points(cam, wp, H_g2i); render.draw_points_bev(bev, wp, cfg)',
+     '    show(viz.side_by_side(cam, bev, viz.local_view(p, trk, wp, cfg, mapimg)), width=1000, title=f"샘플 {n}: 카메라 뷰(참고) | BEV 모델 입력(증강 포함) | 위치")',
      'overview, off = viz.draw_track_on_map(mapimg, trk, cfg)',
      'show(viz.mark_poses_on_map(overview, off, mapimg, poses), width=600, title="샘플 6개의 위치")')
 
 md("### 데이터셋 저장",
-   f"`out/dataset/images/NNNNNN.png`(전체 렌더) + `labels.csv`(pose, waypoint)로 저장한다. pitch 지터·테이프 결손은 여기서 샘플마다 들어가고, 블러·글레어는 학습 로딩 때 넣는다.",
-   "20,000장에 1~2분, 약 300 MB. 실차 녹화 데이터도 같은 `labels.csv` 포맷으로 만들면 그대로 학습된다.")
+   "`out/dataset/images/NNNNNN.png`(**BEV**, 모델 입력) + `labels.csv`(pose, waypoint)로 저장한다. 테이프 결손·pitch 지터는 여기서 샘플마다 들어가고, 블러·글레어는 학습 로딩 때 넣는다.",
+   "20,000장에 몇 분, 수백 MB. 실차에서는 IPM으로 만든 BEV를 같은 포맷으로 저장하면 그대로 학습된다.")
 code('DATA_DIR = "out/dataset"',
      't0 = time.time()',
      'dataset.generate_dataset(trk, cfg, N_DATASET, DATA_DIR, seed=0, log_every=5000)',
@@ -177,10 +180,10 @@ code('DATA_DIR = "out/dataset"',
      'print(f"{len(files)}장 저장, {time.time()-t0:.0f}s")',
      'display(pd.read_csv(f"{DATA_DIR}/labels.csv").head())')
 
-md("### 데이터 훑어보기", "라벨(초록)이 테이프 사이 중심을 따라가는지, 횡 오프셋·헤딩 분포가 의도한 범위인지 확인한다.")
+md("### 데이터 훑어보기", "저장된 BEV에 라벨(초록)을 찍어 본다. 라벨이 테이프 사이 중심을 따라가는지, 횡 오프셋·헤딩 분포가 의도한 범위인지 확인한다.")
 code('for i in np.random.default_rng(1).choice(len(files), 3, replace=False):',
      '    im = cv2.imread(f"{DATA_DIR}/images/{files[i]}")',
-     '    show(render.draw_points(im, ds_wps[i], H_g2i), width=480, title=f"{files[i]}  pose={np.round(ds_poses[i], 2)}")',
+     '    show(render.draw_points_bev(im, ds_wps[i], cfg), width=360, title=f"{files[i]}  pose={np.round(ds_poses[i], 2)}")',
      'lat = np.array([gt.lateral_error(trk, p[:2]) for p in ds_poses])',
      'dth = np.rad2deg(np.angle(np.exp(1j * (ds_poses[:, 2] - trk.heading[[gt.nearest_index(trk, p[:2]) for p in ds_poses]]))))',
      'fig, ax = plt.subplots(1, 2, figsize=(9, 3))',
@@ -190,7 +193,7 @@ code('for i in np.random.default_rng(1).choice(len(files), 3, replace=False):',
 
 # --------------------------------------------------------------------------- 3. 학습
 md("## 3. 학습",
-   "작은 CNN(약 38만 파라미터)이 아래 절반 크롭(640×200)을 받아 waypoint 좌표 12개(m)를 낸다. 손실은 Huber.",
+   "작은 CNN(약 38만 파라미터)이 BEV 이미지를 받아 waypoint 좌표 12개(m)를 낸다. 손실은 Huber. BEV 해상도(`cfg.bev.resolution_m`)를 낮추면 학습이 빨라진다.",
    "train/val은 9:1로 나눈다. **train loss만 내려가고 val loss가 멈추면 오버피팅**이다. 스텝·장 수를 바꿔 비교해 보라.")
 code('ds_train = dataset.DiskDataset(DATA_DIR, cfg, "train", val_frac=0.1)',
      'ds_val = dataset.DiskDataset(DATA_DIR, cfg, "val", val_frac=0.1, image_augment=False)',
@@ -223,13 +226,15 @@ code('pred = model.Predictor(net, cfg, DEVICE)',
      'plt.xticks(x, [f"{a:g} m" for a in cfg.waypoints.ahead_m]); plt.ylabel("mean error (cm)"); plt.legend(); plt.grid(axis="y", alpha=.3)',
      'plt.title(f"mean {r_new[\'mean_m\']*100:.1f} cm"); plt.show()',
      '',
-     'im, wp, p = dataset.make_sample(trk, cfg, np.random.default_rng(7), do_augment=False, full=True)',
-     'render.draw_points(im, wp, H_g2i, (0, 255, 0)); render.draw_points(im, pred.predict(im), H_g2i, (255, 0, 255))',
-     'show(im, title="초록 = 정답, 자홍 = 모델 예측")')
+     'bev, wp, p, cam = dataset.make_sample(trk, cfg, np.random.default_rng(7), do_augment=False, with_camera=True, mask=vis_mask)',
+     'wp_pred = pred.predict(bev)',
+     'render.draw_points_bev(bev, wp, cfg, (0, 255, 0)); render.draw_points_bev(bev, wp_pred, cfg, (255, 0, 255))',
+     'render.draw_points(cam, wp, H_g2i, (0, 255, 0)); render.draw_points(cam, wp_pred, H_g2i, (255, 0, 255))',
+     'show(viz.side_by_side(cam, bev), width=900, title="초록 = 정답, 자홍 = 모델 예측  (왼쪽 카메라 뷰는 참고용, 모델은 오른쪽 BEV만 본다)")')
 
 # --------------------------------------------------------------------------- 4. 폐루프
 md("## 4. 폐루프 검증 (gym, ROS 없음)",
-   "매 제어 틱마다 렌더 → 모델 추론 → pure pursuit → `env.step`. 종료 조건은 실차 규칙과 같다: **차체 모서리가 테이프를 넘으면 실격**(`tape_crossed`), 한 바퀴 돌면 `lap`.",
+   "매 제어 틱마다 BEV 렌더(가시 마스크 포함) → 모델 추론 → pure pursuit → `env.step`. 종료 조건은 실차 규칙과 같다: **차체 모서리가 테이프를 넘으면 실격**(`tape_crossed`), 한 바퀴 돌면 `lap`.",
    "",
    "코랩은 실시간이 아니라 지연이 0이 된다. 젯슨의 지연을 흉내내는 버퍼(`latency_steps`, 1틱 = 1/control_hz 초)를 꼭 넣는다.",
    "먼저 **오라클**(정답 waypoint + 가우시안 노이즈)로 \"인지 오차 σ와 지연이 얼마까지면 완주하는가\"를 표로 만든다. 이것이 배포 게이트의 기준이 된다.")
@@ -242,7 +247,7 @@ code('env = closed_loop.make_env(cfg)',
      'print("평균 횡오차 (m):")',
      'display(df.pivot(index="latency_steps", columns="sigma", values="mean_lateral_m").round(3))')
 
-md("### 학습 모델로 주행", "지연을 바꿔 가며 달리고 횡오차 곡선을 겹쳐 그린다. 영상은 지연 0 주행이다 (초록 = 모델 예측 waypoint).")
+md("### 학습 모델로 주행", "지연을 바꿔 가며 달리고 횡오차 곡선을 겹쳐 그린다. 영상은 지연 0 주행: 왼쪽 카메라 뷰(참고), 오른쪽 모델 입력 BEV, 초록 = 모델 예측 waypoint.")
 code('results = {}',
      'plt.figure(figsize=(8, 3.5))',
      'for lat in LATENCIES:',
@@ -254,7 +259,7 @@ code('results = {}',
      'inner = (cfg.lane.track_width_m - cfg.lane.tape_width_m) / 2 - cfg.closed_loop.car_width_m / 2',
      'plt.axhline(inner * 100, color="r", ls="--", label="body touches tape (straight)")',
      'plt.xlabel("time (s)"); plt.ylabel("lateral error (cm)"); plt.legend(fontsize=8); plt.grid(alpha=.3); plt.show()',
-     'display(Video("out/run_latency0.mp4", embed=True, width=640))')
+     'display(Video("out/run_latency0.mp4", embed=True, width=900))')
 
 # --------------------------------------------------------------------------- 5. 보관
 md("## 5. 결과 보관",

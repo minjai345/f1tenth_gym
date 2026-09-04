@@ -3,6 +3,7 @@ import cv2
 import numpy as np
 from .config import Config
 from .camera import build
+from .render import ground_to_bev_matrix
 
 # Internal glare ellipse shape parameters (not student tunables -- these fix the
 # *shape* of the glare blob relative to image size, unlike glare_prob/glare_alpha
@@ -53,3 +54,25 @@ def glare(img: np.ndarray, cfg: Config, rng: np.random.Generator) -> np.ndarray:
 
 def augment_image(img: np.ndarray, cfg: Config, rng: np.random.Generator) -> np.ndarray:
     return glare(motion_blur(img, cfg, rng), cfg, rng)
+
+
+def jitter_bev(bev: np.ndarray, cfg: Config, rng: np.random.Generator) -> np.ndarray:
+    """pitch가 δ만큼 틀어진 카메라 영상을 '공칭' H_i2g로 IPM하면 BEV가 어떻게 휘는지를 BEV 워프로 재현한다.
+
+    참 지면점 -> (pitch+δ 카메라) 이미지 -> (공칭 H_i2g) 지면 -> BEV 픽셀.  실차에서 가감속 시 pitch가
+    변해 IPM 평면 가정이 깨지는 효과(원거리 BEV 휘어짐)가 학습 데이터에 들어간다. 원근 렌더 없이 BEV만으로 적용.
+    """
+    j = cfg.augment.pitch_jitter_deg
+    if j <= 0:
+        return bev
+    d = rng.uniform(-j, j)
+    if cfg.camera.h_i2g_file:
+        H_g2i_true, H_i2g_nom = build(cfg, pitch_deg=cfg.camera.pitch_deg + d)[0], build(cfg)[1]
+    else:
+        H_g2i_true = build(cfg, pitch_deg=cfg.camera.pitch_deg + d)[0]
+        H_i2g_nom = build(cfg)[1]
+    A = ground_to_bev_matrix(cfg)
+    M = A @ H_i2g_nom @ H_g2i_true @ np.linalg.inv(A)
+    h, w = bev.shape[:2]
+    floor = tuple(int(c) for c in cfg.lane.color_floor)
+    return cv2.warpPerspective(bev, M, (w, h), flags=cv2.INTER_NEAREST, borderMode=cv2.BORDER_CONSTANT, borderValue=floor)

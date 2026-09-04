@@ -1,9 +1,13 @@
-"""학습 데이터 두 경로.
+"""학습 데이터 두 경로. 모델 입력은 BEV(top-down) 이미지다.
 
-  SynthDataset : 디스크 없이 매 샘플 pose -> 렌더 -> 증강 -> 크롭 (무한 IterableDataset)
-  DiskDataset  : generate_dataset() 이 저장한 폴더(images/*.png + labels.csv)를 읽는다.
-                 pitch 지터·테이프 결손은 생성 시 이미 들어 있고, 블러·글레어는 로딩 때 적용한다.
-                 실차 녹화 데이터도 같은 포맷(labels.csv 의 wp 열)으로 맞추면 그대로 학습된다.
+  시뮬 : pose -> render_bev (지오메트리에서 직접 top-down) -> 카메라 가시 마스크 -> 증강  => BEV
+  실차 : 카메라 -> undistort -> IPM(render.ipm_bev)                                    => BEV
+  두 BEV는 config의 bev 섹션(범위·해상도)을 공유하므로 같은 모델에 그대로 들어간다.
+
+  SynthDataset : 디스크 없이 매 샘플 생성 (무한 IterableDataset)
+  DiskDataset  : generate_dataset() 이 저장한 폴더(images/*.png = BEV, labels.csv)를 읽는다.
+                 pitch 지터(BEV 워프)·테이프 결손은 생성 시 들어 있고, 블러·글레어는 로딩 때 적용한다.
+                 실차 IPM 출력을 같은 포맷으로 저장하면 그대로 학습된다.
 """
 import csv
 import os
@@ -16,41 +20,41 @@ from .track import Track
 from . import gt, render, augment
 
 
-def crop(img: np.ndarray, cfg: Config) -> np.ndarray:
-    return img[cfg.camera.image_height // 2:]
-
-
 def to_tensor(img_bgr: np.ndarray) -> torch.Tensor:
     return torch.from_numpy(np.ascontiguousarray(img_bgr)).permute(2, 0, 1).float().div_(255.0)
 
 
 def make_sample(track: Track, cfg: Config, rng: np.random.Generator, do_augment: bool = True,
-                image_augment: bool = True, full: bool = False):
-    """Return (img_bgr, waypoints (K,2) m, pose). img is the bottom-half crop unless full=True.
+                image_augment: bool = True, mask: np.ndarray = None, with_camera: bool = False):
+    """Return (bev_bgr, waypoints (K,2) m, pose) — with_camera=True 면 (bev, wp, pose, cam_img).
 
-    do_augment    : pitch 지터 + 테이프 결손 (렌더 전 증강)
-    image_augment : 블러 + 글레어 (렌더 후 증강). 디스크 저장용은 False로 두고 로딩 때 적용한다.
+    do_augment    : 테이프 결손(quad) + pitch 지터(BEV 워프)
+    image_augment : 블러 + 글레어. 디스크 저장용은 False로 두고 로딩 때 적용한다.
+    mask          : render.bev_visibility_mask(H_g2i, cfg). None이면 계산한다(느림 — 반복 호출 시 미리 만들어 넘길 것).
+    with_camera   : 시각화용 원근 카메라 뷰도 함께 렌더 (학습에는 쓰지 않음)
     """
+    from .camera import build
+    H_g2i = build(cfg)[0]
+    if mask is None:
+        mask = render.bev_visibility_mask(H_g2i, cfg)
     pose = gt.sample_pose(track, cfg, rng)
+    quads = augment.dropout_quads(track.quads, cfg, rng) if do_augment else track.quads
+    bev = render.render_bev(pose, quads, cfg, mask)
     if do_augment:
-        H = augment.jitter_pitch(cfg, rng)
-        quads = augment.dropout_quads(track.quads, cfg, rng)
-    else:
-        from .camera import build
-        H = build(cfg)[0]
-        quads = track.quads
-    # scan=None: training renders without LiDAR wall-occlusion (closed_loop.run passes gym's
-    # real scan instead). A known, deliberate train/test gap, kept so this module can be
-    # imported without gym.
-    img = render.render(pose, quads, None, H, cfg)
-    if do_augment and image_augment:
-        img = augment.augment_image(img, cfg, rng)
-    return (img if full else crop(img, cfg)), gt.waypoints_ahead(pose, track, cfg), pose
+        bev = augment.jitter_bev(bev, cfg, rng)
+        if image_augment:
+            bev = augment.augment_image(bev, cfg, rng)
+    wp = gt.waypoints_ahead(pose, track, cfg)
+    if with_camera:
+        return bev, wp, pose, render.render(pose, quads, None, H_g2i, cfg)
+    return bev, wp, pose
 
 
 class SynthDataset(IterableDataset):
     def __init__(self, track: Track, cfg: Config, seed: int = 0, augment: bool = True):
-        self.track, self.cfg, self.seed, self.augment = track, cfg, seed, augment
+        from .camera import build
+        self.track, self.cfg, self.seed, self.do_augment = track, cfg, seed, augment
+        self.mask = render.bev_visibility_mask(build(cfg)[0], cfg)
 
     def __iter__(self):
         info = get_worker_info()
@@ -58,7 +62,7 @@ class SynthDataset(IterableDataset):
         rng = np.random.default_rng([self.seed, wid])
         norm = self.cfg.waypoints.norm_m
         while True:
-            img, wp, _ = make_sample(self.track, self.cfg, rng, self.augment)
+            img, wp, _ = make_sample(self.track, self.cfg, rng, self.do_augment, mask=self.mask)
             yield to_tensor(img), torch.from_numpy(wp.reshape(-1) / norm).float()
 
 
@@ -74,16 +78,18 @@ def _label_header(cfg: Config):
 
 def generate_dataset(track: Track, cfg: Config, n: int, out_dir: str, seed: int = 0,
                      do_augment: bool = True, log_every: int = 2000) -> str:
-    """n장을 out_dir/images/NNNNNN.png (640x400 전체 렌더) + out_dir/labels.csv 로 저장. labels.csv 경로를 반환."""
+    """n장을 out_dir/images/NNNNNN.png (BEV, 모델 입력) + out_dir/labels.csv 로 저장. labels.csv 경로를 반환."""
+    from .camera import build
     img_dir = os.path.join(out_dir, IMAGES_DIR)
     os.makedirs(img_dir, exist_ok=True)
     rng = np.random.default_rng(seed)
+    mask = render.bev_visibility_mask(build(cfg)[0], cfg)
     path = os.path.join(out_dir, LABELS_CSV)
     with open(path, "w", newline="") as f:
         w = csv.writer(f)
         w.writerow(_label_header(cfg))
         for i in range(n):
-            img, wp, pose = make_sample(track, cfg, rng, do_augment, image_augment=False, full=True)
+            img, wp, pose = make_sample(track, cfg, rng, do_augment, image_augment=False, mask=mask)
             name = f"{i:06d}.png"
             cv2.imwrite(os.path.join(img_dir, name), img)
             w.writerow([name, *np.round(pose, 6), *np.round(wp.reshape(-1), 4)])
@@ -132,7 +138,7 @@ class DiskDataset(torch.utils.data.Dataset):
         return len(self.idx)
 
     def load_image(self, i: int) -> np.ndarray:
-        """전체 크기(640x400) BGR 이미지. i는 이 split 안의 인덱스."""
+        """저장된 BEV BGR 이미지. i는 이 split 안의 인덱스."""
         img = cv2.imread(os.path.join(self.root, IMAGES_DIR, self.files[self.idx[i]]), cv2.IMREAD_COLOR)
         if img is None:
             raise FileNotFoundError(self.files[self.idx[i]])
@@ -144,4 +150,4 @@ class DiskDataset(torch.utils.data.Dataset):
             rng = np.random.default_rng([self.seed, int(self.idx[i]), int(torch.randint(0, 2**31 - 1, (1,)))])
             img = augment.augment_image(img, self.cfg, rng)
         wp = self.wps[self.idx[i]]
-        return to_tensor(crop(img, self.cfg)), torch.from_numpy(wp.reshape(-1) / self.cfg.waypoints.norm_m).float()
+        return to_tensor(img), torch.from_numpy(wp.reshape(-1) / self.cfg.waypoints.norm_m).float()

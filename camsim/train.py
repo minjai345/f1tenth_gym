@@ -10,16 +10,17 @@ from . import model as M
 
 
 def evaluate(predictor, track: Track, cfg: Config, n: int = 200, seed: int = 123) -> dict:
+    """새 pose n개에서 증강 없는 BEV를 만들어 waypoint별 오차(m). OraclePredictor는 set_pose로 pose를 받는다."""
+    from .camera import build
+    from .render import bev_visibility_mask
     rng = np.random.default_rng(seed)
+    mask = bev_visibility_mask(build(cfg)[0], cfg)
     errs = []
     for _ in range(n):
-        img, wp, pose = make_sample(track, cfg, rng, do_augment=False)
+        bev, wp, pose = make_sample(track, cfg, rng, do_augment=False, mask=mask)
         if hasattr(predictor, "set_pose"):
             predictor.set_pose(pose)
-        full = np.empty((cfg.camera.image_height, cfg.camera.image_width, 3), np.uint8)
-        full[:] = cfg.lane.color_floor
-        full[cfg.camera.image_height // 2:] = img
-        pred = predictor.predict(full)
+        pred = predictor.predict(bev)
         errs.append(np.hypot(*(pred - wp).T))
     errs = np.array(errs)
     per = errs.mean(0)

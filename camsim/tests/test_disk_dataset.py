@@ -15,7 +15,8 @@ def test_files_and_labels_written(ctx):
     assert len(files) == 30 and poses.shape == (30, 3) and wps.shape == (30, len(cfg.waypoints.ahead_m), 2)
     assert sorted(os.listdir(os.path.join(root, "images"))) == files
     img = cv2.imread(os.path.join(root, "images", files[0]))
-    assert img.shape == (cfg.camera.image_height, cfg.camera.image_width, 3)      # 전체 렌더 저장
+    from camsim.render import bev_size
+    assert img.shape == (*bev_size(cfg), 3)      # BEV(모델 입력) 저장
 
 def test_labels_match_geometry(ctx):
     """저장된 waypoint는 저장된 pose에서 다시 계산한 GT와 같아야 한다 (라벨 파일이 자기 설명적)."""
@@ -37,7 +38,8 @@ def test_item_shapes_and_augment_toggle(ctx):
     cfg, trk, root = ctx
     ds = dataset.DiskDataset(root, cfg, "all", image_augment=False)
     x, y = ds[0]
-    assert x.shape == (3, cfg.camera.image_height // 2, cfg.camera.image_width) and y.shape == (2 * len(cfg.waypoints.ahead_m),)
+    from camsim.render import bev_size
+    assert x.shape == (3, *bev_size(cfg)) and y.shape == (2 * len(cfg.waypoints.ahead_m),)
     x2, _ = ds[0]
     assert torch.equal(x, x2)                       # 증강 없으면 결정적
     assert torch.allclose(y * cfg.waypoints.norm_m, torch.from_numpy(ds.wps[0].reshape(-1)).float())

@@ -5,7 +5,8 @@ import torch.nn as nn
 from .config import Config
 from .track import Track
 from . import gt
-from .dataset import crop, to_tensor
+from .dataset import to_tensor
+from .render import ipm_bev
 
 
 def _block(cin, cout):
@@ -32,10 +33,15 @@ class Predictor:
         self.k = len(cfg.waypoints.ahead_m)
 
     @torch.no_grad()
-    def predict(self, img_bgr: np.ndarray) -> np.ndarray:
-        x = to_tensor(crop(img_bgr, self.cfg))[None].to(self.device)
+    def predict(self, bev_bgr: np.ndarray) -> np.ndarray:
+        """BEV 이미지(config bev 규격) -> waypoints (K,2) m. 시뮬 폐루프와 실차 노드가 공유하는 인터페이스."""
+        x = to_tensor(bev_bgr)[None].to(self.device)
         y = self.net(x)[0].cpu().numpy() * self.cfg.waypoints.norm_m
         return y.reshape(self.k, 2)
+
+    def predict_camera(self, cam_bgr: np.ndarray, H_i2g: np.ndarray) -> np.ndarray:
+        """실차 경로: 카메라 영상 -> IPM(BEV) -> predict. 시뮬에서는 쓰지 않는다."""
+        return self.predict(ipm_bev(cam_bgr, H_i2g, self.cfg))
 
 
 class OraclePredictor:

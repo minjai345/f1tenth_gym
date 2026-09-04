@@ -92,8 +92,34 @@ def ground_to_bev_matrix(cfg: Config) -> np.ndarray:
                      [0.0, 0.0, 1.0]])
 
 
-def render_bev(pose, quads_world: np.ndarray, cfg: Config) -> np.ndarray:
-    """정답 BEV: 테이프 quad를 지오메트리에서 직접 top-down으로 그린다 (카메라·IPM 무관)."""
+def bev_visibility_mask(H_g2i: np.ndarray, cfg: Config) -> np.ndarray:
+    """BEV 픽셀 중 카메라가 실제로 볼 수 있는 곳(bool, (h,w)).
+
+    실차 IPM 출력은 카메라 화각 밖·근거리 사각 영역이 비어 있다(warp 경계값). 시뮬 BEV도 같은 영역을
+    바닥색으로 가려야 모델 입력이 실차와 일치한다. 픽셀 중심의 지면 좌표를 카메라로 투영해 이미지 안에
+    떨어지고(깊이 > 0) 근거리 컬링(near_m)을 통과하는지 본다.
+    """
+    h, w = bev_size(cfg)
+    b = cfg.bev
+    us, vs = np.meshgrid(np.arange(w) + 0.5, np.arange(h) + 0.5)
+    x = b.x_range_m[1] - vs * b.resolution_m
+    y = b.y_range_m[1] - us * b.resolution_m
+    hom = np.stack([x, y, np.ones_like(x)], -1) @ H_g2i.T
+    depth_ok = hom[..., 2] > 1e-9
+    with np.errstate(divide="ignore", invalid="ignore"):
+        u = hom[..., 0] / hom[..., 2]
+        v = hom[..., 1] / hom[..., 2]
+    in_img = (u >= 0) & (u < cfg.camera.image_width) & (v >= 0) & (v < cfg.camera.image_height)
+    ahead = (x - cfg.camera.offset_x_m) > cfg.render.near_m
+    return depth_ok & in_img & ahead
+
+
+def render_bev(pose, quads_world: np.ndarray, cfg: Config, mask: np.ndarray = None) -> np.ndarray:
+    """시뮬 BEV: 테이프 quad를 지오메트리에서 직접 top-down으로 그린다 (원근 렌더·IPM을 거치지 않음).
+
+    mask(bev_visibility_mask)를 주면 카메라가 못 보는 영역을 바닥색으로 가려 실차 IPM 출력과 같은 모양이 된다.
+    학습 데이터와 폐루프 입력은 이 함수로 만든다.
+    """
     h, w = bev_size(cfg)
     img = np.empty((h, w, 3), np.uint8)
     img[:] = cfg.lane.color_floor
@@ -106,7 +132,17 @@ def render_bev(pose, quads_world: np.ndarray, cfg: Config) -> np.ndarray:
         polys = np.round(bev_pixels(qv[keep], cfg) * _SCALE).astype(np.int32)
         cv2.fillPoly(img, list(polys), tuple(int(c) for c in cfg.lane.color_tape),
                      lineType=cv2.LINE_AA, shift=_SHIFT)
+    if mask is not None:
+        img[~mask] = cfg.lane.color_floor
     return img
+
+
+def draw_points_bev(img_bev, pts_vehicle, cfg: Config, color=(0, 255, 0), radius=5):
+    """BEV 이미지 위에 차량 좌표계 점(예: waypoint)을 찍는다."""
+    for u, v in bev_pixels(np.asarray(pts_vehicle, float).reshape(-1, 2), cfg):
+        if 0 <= u < img_bev.shape[1] and 0 <= v < img_bev.shape[0]:
+            cv2.circle(img_bev, (int(round(u)), int(round(v))), radius, color, -1, cv2.LINE_AA)
+    return img_bev
 
 
 def ipm_bev(img_perspective: np.ndarray, H_i2g: np.ndarray, cfg: Config) -> np.ndarray:

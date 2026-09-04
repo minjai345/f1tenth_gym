@@ -51,3 +51,27 @@ def test_glare_alpha_from_config(cfg):
     cfg.augment.glare_alpha = [1.0, 1.0]
     out = augment.glare(img, cfg, np.random.default_rng(0))
     assert out.max() == 255
+
+
+def test_jitter_bev_warps_far_more_than_near(cfg):
+    """pitch 지터 BEV 워프: 먼 곳이 더 많이 움직이고, 지터 0이면 항등."""
+    from camsim import render
+    import cv2
+    h, w = render.bev_size(cfg)
+    bev = np.full((h, w, 3), 128, np.uint8)
+    for x in (1.0, 3.5):
+        u, v = render.bev_pixels(np.array([[x, 0.0]]), cfg)[0]
+        cv2.circle(bev, (int(u), int(v)), 3, (255, 255, 255), -1)
+    cfg.augment.pitch_jitter_deg = 0.0
+    assert np.array_equal(augment.jitter_bev(bev, cfg, np.random.default_rng(0)), bev)
+    cfg.augment.pitch_jitter_deg = 3.0
+    out = augment.jitter_bev(bev, cfg, np.random.default_rng(1))
+    assert out.shape == bev.shape and not np.array_equal(out, bev)
+    def row_of(img, lo, hi):
+        rows = np.where(np.any(np.all(img == 255, axis=-1)[lo:hi], axis=1))[0]
+        return rows.mean() + lo if len(rows) else np.nan
+    near_v = render.bev_pixels(np.array([[1.0, 0.0]]), cfg)[0][1]
+    far_v = render.bev_pixels(np.array([[3.5, 0.0]]), cfg)[0][1]
+    d_near = abs(row_of(out, int(near_v) - 60, int(near_v) + 60) - near_v)
+    d_far = abs(row_of(out, 0, int(far_v) + 80) - far_v)
+    assert d_far > d_near

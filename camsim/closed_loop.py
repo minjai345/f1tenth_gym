@@ -11,7 +11,7 @@ import cv2
 import numpy as np
 from .config import Config
 from .track import Track
-from . import gt, render
+from . import gt, render, viz
 from .pure_pursuit import pure_pursuit
 from .model import OraclePredictor
 
@@ -74,10 +74,8 @@ def run(env, predictor, track: Track, cfg: Config, H_g2i: np.ndarray, start_inde
     obs, _, done, _ = env.reset(np.array([[p0[0], p0[1], track.heading[start_index]]]))
     buf = deque([np.column_stack([np.asarray(cfg.waypoints.ahead_m), np.zeros(k)])] * latency_steps)
 
-    writer = None
-    if video_path is not None:
-        writer = cv2.VideoWriter(str(video_path), cv2.VideoWriter_fourcc(*"mp4v"), hz_eff,
-                                 (cfg.camera.image_width, cfg.camera.image_height))
+    mask = render.bev_visibility_mask(H_g2i, cfg)
+    writer = None            # 영상 프레임 = [카메라 뷰 | 모델 입력 BEV], 첫 프레임 크기로 열림
 
     lats, traveled, reason = [], 0.0, "max_steps"
     s_prev = track.s[gt.nearest_index(track, p0)]
@@ -85,14 +83,19 @@ def run(env, predictor, track: Track, cfg: Config, H_g2i: np.ndarray, start_inde
     try:
         for steps in range(1, cl.max_steps + 1):
             pose = pose_of(obs)
-            img = render.render(pose, track.quads, obs["scans"][0], H_g2i, cfg)
+            bev = render.render_bev(pose, track.quads, cfg, mask)          # 모델 입력 (시뮬 BEV)
             if hasattr(predictor, "set_pose"):
                 predictor.set_pose(pose)
-            buf.append(predictor.predict(img))
+            buf.append(predictor.predict(bev))
             wp = buf.popleft()
             steer = pure_pursuit(wp, cl.lookahead_m, cl.wheelbase_m, cl.steer_max_rad)
-            if writer is not None:
-                writer.write(render.draw_points(img.copy(), wp, H_g2i))
+            if video_path is not None:
+                cam = render.draw_points(render.render(pose, track.quads, obs["scans"][0], H_g2i, cfg), wp, H_g2i)
+                frame = viz.side_by_side(cam, render.draw_points_bev(bev.copy(), wp, cfg))
+                if writer is None:
+                    writer = cv2.VideoWriter(str(video_path), cv2.VideoWriter_fourcc(*"mp4v"), hz_eff,
+                                             (frame.shape[1], frame.shape[0]))
+                writer.write(frame)
             for _ in range(physics_per_tick):
                 obs, _, done, _ = env.step(np.array([[steer, cl.speed_mps]]))
                 if done:

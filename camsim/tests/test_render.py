@@ -156,3 +156,33 @@ def test_ipm_bev_agrees_with_render_bev_near(ctx):
     t_d = cv2.dilate(t.astype(np.uint8), k).astype(bool)
     assert i.sum() > 500
     assert (i & t_d).sum() / i.sum() > 0.9         # ipm tape lies on (dilated) true tape
+
+
+def test_bev_visibility_mask_geometry(ctx):
+    """마스크: 정면 3 m는 보이고, 0.2 m는 근거리 사각, 전방 1 m·좌측 1.4 m는 화각(90도) 밖."""
+    cfg, trk, H, _ = ctx
+    m = render.bev_visibility_mask(H, cfg)
+    assert m.shape == render.bev_size(cfg) and m.dtype == bool
+    def at(x, y):
+        u, v = render.bev_pixels(np.array([[x, y]]), cfg)[0]
+        return m[int(v), int(u)]
+    assert at(3.0, 0.0) and at(1.0, 0.3)
+    assert not at(0.25, 0.0)
+    assert not at(1.0, 1.4)          # 45도 밖
+
+
+def test_render_bev_applies_mask(ctx):
+    cfg, trk, H, _ = ctx
+    pose = pose_on_track(trk)
+    m = render.bev_visibility_mask(H, cfg)
+    bev = render.render_bev(pose, trk.quads, cfg, m)
+    assert np.all(bev[~m] == cfg.lane.color_floor)
+    assert np.all(bev == cfg.lane.color_tape, axis=-1).sum() > 1000
+
+
+def test_draw_points_bev(ctx):
+    cfg = ctx[0]
+    img = np.zeros((*render.bev_size(cfg), 3), np.uint8)
+    render.draw_points_bev(img, np.array([[2.0, 0.0]]), cfg, color=(1, 2, 3))
+    u, v = render.bev_pixels(np.array([[2.0, 0.0]]), cfg)[0]
+    assert (img[int(v), int(u)] == (1, 2, 3)).all()
