@@ -1,4 +1,4 @@
-import copy, time, numpy as np, pytest
+import copy, time, numpy as np, pytest, cv2
 from camsim import config, camera, track, render
 
 CSV = "examples/example_waypoints.csv"
@@ -94,3 +94,65 @@ def test_render_speed(ctx):
     for _ in range(100):
         render.render(pose, trk.quads, None, H, cfg)
     assert (time.perf_counter() - t) / 100 < 0.005
+
+
+# ---- BEV (top-down) rendering and IPM warp ----------------------------------
+
+def _bev_size(cfg):
+    b = cfg.bev
+    return (int(round((b.x_range_m[1] - b.x_range_m[0]) / b.resolution_m)),
+            int(round((b.y_range_m[1] - b.y_range_m[0]) / b.resolution_m)))
+
+
+def test_render_bev_shape_from_config(ctx):
+    cfg, trk, H, _ = ctx
+    bev = render.render_bev(pose_on_track(trk), trk.quads, cfg)
+    h, w = _bev_size(cfg)
+    assert bev.shape == (h, w, 3) and bev.dtype == np.uint8
+    assert (bev[0, 0] == cfg.lane.color_floor).all()
+
+
+def test_render_bev_tape_columns_near_car(ctx):
+    """On a straight-ish segment the two tapes sit at y = ±track_width/2 -> known BEV columns."""
+    cfg, trk, H, _ = ctx
+    pose = np.array([*trk.center[10], trk.heading[10]])
+    bev = render.render_bev(pose, trk.quads, cfg)
+    b = cfg.bev
+    x_probe = b.x_range_m[0] + 0.3
+    v = int(round((b.x_range_m[1] - x_probe) / b.resolution_m))
+    half = cfg.lane.track_width_m / 2
+    u_left = int(round((b.y_range_m[1] - half) / b.resolution_m))
+    u_right = int(round((b.y_range_m[1] + half) / b.resolution_m))
+    u_mid = (u_left + u_right) // 2
+    tape = np.all(bev[v] == cfg.lane.color_tape, axis=-1)
+    tol = int(0.1 / b.resolution_m)
+    assert tape[u_left - tol:u_left + tol].any()
+    assert tape[u_right - tol:u_right + tol].any()
+    assert not tape[u_mid - tol:u_mid + tol].any()
+    assert u_left < u_mid < u_right                 # +y (left) is on the image's left
+
+
+def test_bev_pixels_roundtrip(ctx):
+    cfg = ctx[0]
+    pts = np.array([[cfg.bev.x_range_m[1], cfg.bev.y_range_m[1]], [cfg.bev.x_range_m[0], 0.0]])
+    uv = render.bev_pixels(pts, cfg)
+    assert np.allclose(uv[0], [0.0, 0.0])
+    h, w = _bev_size(cfg)
+    assert np.allclose(uv[1], [w / 2, h])
+
+
+def test_ipm_bev_agrees_with_render_bev_near(ctx):
+    """Warping the perspective render with H_i2g must reproduce the true BEV where IPM is well resolved."""
+    cfg, trk, H, H_i2g = ctx
+    pose = pose_on_track(trk)
+    truth = render.render_bev(pose, trk.quads, cfg)
+    ipm = render.ipm_bev(render.render(pose, trk.quads, None, H, cfg), H_i2g, cfg)
+    assert ipm.shape == truth.shape
+    b = cfg.bev
+    v_near = int(round((b.x_range_m[1] - 1.5) / b.resolution_m))     # rows closer than 1.5 m
+    t = np.all(truth[v_near:] == cfg.lane.color_tape, axis=-1)
+    i = np.all(ipm[v_near:] == cfg.lane.color_tape, axis=-1)
+    k = np.ones((5, 5), np.uint8)
+    t_d = cv2.dilate(t.astype(np.uint8), k).astype(bool)
+    assert i.sum() > 500
+    assert (i & t_d).sum() / i.sum() > 0.9         # ipm tape lies on (dilated) true tape

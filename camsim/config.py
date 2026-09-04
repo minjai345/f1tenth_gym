@@ -33,6 +33,13 @@ class Lane:
 
 
 @dataclass
+class Bev:
+    x_range_m: List[float]
+    y_range_m: List[float]
+    resolution_m: float
+
+
+@dataclass
 class Render:
     near_m: float
     far_m: float
@@ -79,6 +86,7 @@ class ClosedLoop:
 class Config:
     camera: Camera
     lane: Lane
+    bev: Bev
     render: Render
     waypoints: Waypoints
     sampling: Sampling

@@ -26,10 +26,13 @@ qv = render.to_vehicle(pose, trk.quads).reshape(-1, 2)
 d = np.sqrt(((g[:, None, :] - qv[None, :, :]) ** 2).sum(-1)).min(1)
 print(f"IPM round trip: median {np.median(d)*100:.1f} cm, 95% {np.percentile(d,95)*100:.1f} cm")
 
-# BEV 그림 (0.2~4 m x -1.5~1.5 m, 5 mm/px)
-bev = np.full((600, 760, 3), 255, np.uint8)
-px = ((g[:, 0] - 0.2) / 0.005).astype(int); py = ((1.5 - g[:, 1]) / 0.005).astype(int)
-ok = (px >= 0) & (px < 760) & (py >= 0) & (py < 600)
-bev[py[ok], px[ok]] = (0, 0, 255)
-cv2.imwrite("out/nb1_bev.png", cv2.rotate(bev, cv2.ROTATE_90_COUNTERCLOCKWISE))
-print("wrote out/nb1_*.png")
+# BEV 두 장: (왼쪽) 지오메트리에서 직접 그린 정답 BEV, (오른쪽) 원근 영상을 IPM(H_i2g)으로 펴서 만든 BEV.
+# 왼쪽은 카메라와 무관한 참값이고, 오른쪽이 실차 2주차 파이프라인이 실제로 보게 되는 것이다.
+# 멀어질수록 오른쪽이 늘어지고 끊기는 것이 IPM 해상도 한계(문서 4.4절)다.
+bev_true = render.render_bev(pose, trk.quads, cfg)
+bev_ipm = render.ipm_bev(img, H_i2g, cfg)
+gap = np.full((bev_true.shape[0], 20, 3), 255, np.uint8)
+cv2.imwrite("out/nb1_bev_render.png", bev_true)
+cv2.imwrite("out/nb1_bev_ipm.png", bev_ipm)
+cv2.imwrite("out/nb1_bev.png", np.hstack([bev_true, gap, bev_ipm]))
+print("wrote out/nb1_*.png  (nb1_bev.png: 왼쪽 정답 BEV | 오른쪽 IPM BEV)")

@@ -15,8 +15,13 @@ lane:
   track_width_m: 0.8        # 좌우 테이프 중심 사이 거리
   tape_width_m: 0.05
   segment_len_m: 0.05       # 테이프를 쪼개는 사각형 길이
-  color_floor: [200, 200, 200]   # BGR
-  color_tape: [30, 30, 220]
+  color_floor: [128, 128, 128]   # BGR. 회색 에폭시 바닥
+  color_tape: [0, 220, 255]      # BGR. 노란 테이프
+
+bev:                        # top-down(BEV) 이미지 규격. 시뮬 정답 BEV와 실차 IPM 출력이 공유
+  x_range_m: [0.2, 4.0]     # 전방 거리 범위
+  y_range_m: [-1.5, 1.5]    # 좌(+) / 우(-)
+  resolution_m: 0.005       # m/px  -> 760 x 600
 
 render:
   near_m: 0.15              # 이보다 가까운 테이프는 안 그림

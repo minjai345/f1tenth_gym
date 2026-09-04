@@ -31,6 +31,11 @@ gym 0.19의 `setup.py`는 pip이 그대로 못 읽는 요구사항 문자열을 
 `%run` 전에 `%cd f1tenth_gym`을 하므로 동일하게 루트에서 실행되는 셈이다.
 스크립트를 다시 실행하면 `out/`, `track.npz`, `model.pt`가 덮어써진다.
 
+## BEV 두 종류
+- `render.render_bev(pose, quads, cfg)`: 지오메트리에서 직접 그린 top-down 정답. 카메라·IPM과 무관.
+- `render.ipm_bev(img, H_i2g, cfg)`: 원근 영상을 `H_i2g`로 펴서 만든 BEV. 실차 2주차 IPM과 같은 연산.
+- 두 이미지의 범위·해상도는 `config.yaml`의 `bev:` 섹션 하나로 정한다 (시뮬·실차 공용).
+
 ## 좌표계
 world = gym 맵 (m). vehicle = 후륜축, x 전방, y 좌측. image = OpenCV (u 우, v 아래).
 `H_g2i`: ground (x,y,1) → image. pitch 0이면 지평선은 이미지 세로 중앙.

@@ -62,3 +62,57 @@ def draw_points(img, pts_vehicle, H_g2i, color=(0, 255, 0), radius=4):
         if 0 <= u < img.shape[1] and 0 <= v < img.shape[0]:
             cv2.circle(img, (int(round(u)), int(round(v))), radius, color, -1)
     return img
+
+
+# ---- BEV (top-down) ----------------------------------------------------------
+# BEV 픽셀 규약: 위 = 전방(+x), 왼쪽 = 차량 좌측(+y). 범위·해상도는 config의 bev 섹션.
+
+def bev_size(cfg: Config):
+    """(height, width) in pixels of the BEV image."""
+    b = cfg.bev
+    return (int(round((b.x_range_m[1] - b.x_range_m[0]) / b.resolution_m)),
+            int(round((b.y_range_m[1] - b.y_range_m[0]) / b.resolution_m)))
+
+
+def bev_pixels(pts_vehicle: np.ndarray, cfg: Config) -> np.ndarray:
+    """Vehicle-frame ground points (...,2) m -> BEV pixel coords (...,2) (u right, v down)."""
+    b = cfg.bev
+    p = np.asarray(pts_vehicle, dtype=np.float64)
+    u = (b.y_range_m[1] - p[..., 1]) / b.resolution_m
+    v = (b.x_range_m[1] - p[..., 0]) / b.resolution_m
+    return np.stack([u, v], axis=-1)
+
+
+def ground_to_bev_matrix(cfg: Config) -> np.ndarray:
+    """3x3 affine mapping ground (x, y, 1) -> BEV pixel (u, v, 1). Same convention as bev_pixels."""
+    b = cfg.bev
+    r = b.resolution_m
+    return np.array([[0.0, -1.0 / r, b.y_range_m[1] / r],
+                     [-1.0 / r, 0.0, b.x_range_m[1] / r],
+                     [0.0, 0.0, 1.0]])
+
+
+def render_bev(pose, quads_world: np.ndarray, cfg: Config) -> np.ndarray:
+    """정답 BEV: 테이프 quad를 지오메트리에서 직접 top-down으로 그린다 (카메라·IPM 무관)."""
+    h, w = bev_size(cfg)
+    img = np.empty((h, w, 3), np.uint8)
+    img[:] = cfg.lane.color_floor
+    qv = to_vehicle(pose, quads_world)
+    b = cfg.bev
+    ctr = qv.mean(1)
+    keep = ((ctr[:, 0] > b.x_range_m[0] - 0.5) & (ctr[:, 0] < b.x_range_m[1] + 0.5) &
+            (ctr[:, 1] > b.y_range_m[0] - 0.5) & (ctr[:, 1] < b.y_range_m[1] + 0.5))
+    if keep.any():
+        polys = np.round(bev_pixels(qv[keep], cfg) * _SCALE).astype(np.int32)
+        cv2.fillPoly(img, list(polys), tuple(int(c) for c in cfg.lane.color_tape),
+                     lineType=cv2.LINE_AA, shift=_SHIFT)
+    return img
+
+
+def ipm_bev(img_perspective: np.ndarray, H_i2g: np.ndarray, cfg: Config) -> np.ndarray:
+    """실차 2주차 IPM과 같은 연산: 원근 영상을 H_i2g로 지면에 펴서 BEV 규격으로 warp한다."""
+    h, w = bev_size(cfg)
+    H_img2bev = ground_to_bev_matrix(cfg) @ H_i2g
+    floor = tuple(int(c) for c in cfg.lane.color_floor)
+    return cv2.warpPerspective(img_perspective, H_img2bev, (w, h), flags=cv2.INTER_NEAREST,
+                               borderMode=cv2.BORDER_CONSTANT, borderValue=floor)
