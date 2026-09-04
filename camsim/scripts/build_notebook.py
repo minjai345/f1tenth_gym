@@ -58,14 +58,13 @@ code('REPO_URL = "https://github.com/minjai345/f1tenth_gym.git"   # 조교 fork.
      '    !pip install -q -r camsim/requirements.txt',
      '    !bash camsim/scripts/install_gym019.sh',
      '    !pip install -q --no-deps -e .',
-     'else:                                                       # 이미 레포 안 (코랩 재실행 또는 로컬)',
-     '    try:',
-     '        import google.colab                                 # 코랩이면 최신 코드·의존성으로 갱신',
-     '        !git pull -q',
-     '        !pip install -q -r camsim/requirements.txt',
-     '    except ImportError:',
-     '        pass                                                # 로컬은 건드리지 않음',
-     'print("repo:", os.getcwd())')
+     'elif os.getcwd().startswith("/content"):                    # 코랩 재실행: 최신 코드·의존성으로 갱신 (로컬은 건드리지 않음)',
+     '    !git pull',
+     '    !pip install -q -r camsim/requirements.txt',
+     'print("repo:", os.getcwd())',
+     '!git log -1 --format="code version: %h %cd" --date=short      # 오류가 나면 이 해시를 알려주세요',
+     'import camsim.dataset, inspect',
+     'print("커널이 로드한 코드:", "최신 (augment_fn 있음)" if "augment_fn" in inspect.signature(camsim.dataset.DiskDataset.__init__).parameters else "예전 모듈 — 런타임 재시작 필요!")')
 
 code('try:                                  # 있으면 켠다: 첫 셀에서 코드를 pull 받아도 커널 재시작 없이 새 모듈이 반영됨',
      '    get_ipython().run_line_magic("load_ext", "autoreload"); get_ipython().run_line_magic("autoreload", "2")',
