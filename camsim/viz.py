@@ -174,3 +174,20 @@ def crop_around(img: np.ndarray, offset_px, mapimg: MapImage, xy_world, half_m: 
     x0, y0 = max(c[0] - r, 0), max(c[1] - r, 0)
     sub = img[y0:c[1] + r, x0:c[0] + r]
     return cv2.resize(sub, (sub.shape[1] * scale, sub.shape[0] * scale), interpolation=cv2.INTER_NEAREST)
+
+
+def to_h264(src: str, dst: str = None, max_width: int = 960, crf: int = 28) -> str:
+    """OpenCV가 쓴 mp4v 영상을 H.264(yuv420p)로 변환한다. 브라우저·VSCode의 HTML5 비디오는 mp4v를 재생하지 못한다.
+
+    ffmpeg는 imageio-ffmpeg 패키지가 번들한 실행 파일을 쓴다(시스템 설치 불필요). 반환: 변환된 파일 경로.
+    """
+    import subprocess
+    import imageio_ffmpeg
+    if dst is None:
+        base, _ = os.path.splitext(src)
+        dst = base + "_h264.mp4"
+    vf = f"scale='min({max_width},iw)':-2"          # 폭 제한, 높이는 짝수로
+    cmd = [imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-loglevel", "error", "-i", src,
+           "-vf", vf, "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", str(crf), "-movflags", "+faststart", dst]
+    subprocess.run(cmd, check=True)
+    return dst

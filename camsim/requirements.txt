@@ -12,3 +12,4 @@ pillow
 pyglet<1.5
 pyopengl
 torch
+imageio-ffmpeg     # mp4v -> H.264 변환 (노트북·브라우저에서 영상 재생용)

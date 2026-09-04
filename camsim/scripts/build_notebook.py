@@ -266,7 +266,7 @@ code('results = {}',
      'inner = (cfg.lane.track_width_m - cfg.lane.tape_width_m) / 2 - cfg.closed_loop.car_width_m / 2',
      'plt.axhline(inner * 100, color="r", ls="--", label="body touches tape (straight)")',
      'plt.xlabel("time (s)"); plt.ylabel("lateral error (cm)"); plt.legend(fontsize=8); plt.grid(alpha=.3); plt.show()',
-     'display(Video("out/run_latency0.mp4", embed=True, width=900))')
+     'display(Video(viz.to_h264("out/run_latency0.mp4"), embed=True, width=900))   # mp4v -> H.264 변환 후 표시 (브라우저 재생용)')
 
 md("### 맵 위의 주행 경로",
    "검은 점선 = 중심선(GT 경로), 노란 선 = 테이프, 회색 = 오라클(정답 waypoint, 지연 0) 주행, 색 선 = 학습 모델 주행(지연별).",

@@ -45,6 +45,7 @@ world = gym 맵 (m). vehicle = 후륜축, x 전방, y 좌측. image = OpenCV (u 
 - 코랩 Python(3.13)에는 numpy 1.22 wheel이 없다. 그래서 코랩에서는 numpy를 코랩 기본(2.x) 그대로 두고 f110_gym을
   `pip install --no-deps -e .` 로 설치한다 (numpy 2.5에서 테스트 60개 통과 확인). 노트북 첫 셀이 이 순서대로 되어 있다.
 - numpy를 설치 중에 바꾸면 런타임을 재시작해야 한다. 재시작 없이 진행하면 `numpy.dtype size changed` 오류가 난다.
+- 주행 영상(mp4)이 셀에 안 뜨면 코덱 문제다. OpenCV의 mp4v는 브라우저가 못 읽으므로 `viz.to_h264()` 로 변환해 띄운다 (노트북은 이미 그렇게 함).
 - `pyglet` import 에러가 나면 `!apt-get install -y libgl1` 후 재시도.
 - 노트북 첫 코드 셀의 `REPO_URL` 기본값은 조교 fork(`https://github.com/minjai345/f1tenth_gym.git`, `main`)다.
   다른 fork를 쓰려면 그 줄만 바꾸면 된다. clone이 실패하면 `%cd f1tenth_gym`부터 전부 깨지므로 주소를 먼저 확인할 것.

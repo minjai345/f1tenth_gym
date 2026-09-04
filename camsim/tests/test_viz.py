@@ -1,4 +1,4 @@
-import numpy as np, pytest
+import os, numpy as np, pytest
 from camsim import config, track, gt, viz
 
 MAP_YAML = "examples/example_map.yaml"
@@ -58,3 +58,16 @@ def test_draw_paths_on_map_marks_paths(ctx):
     assert (img[px[1], px[0]] == viz.PATH_COLORS[0]).all()
     zoom = viz.crop_around(img, off, m, path[-1], half_m=3.0, scale=2)
     assert zoom.shape[0] > 0 and zoom.ndim == 3
+
+
+def test_to_h264_converts(tmp_path):
+    import cv2
+    src = str(tmp_path / "v.mp4")
+    w = cv2.VideoWriter(src, cv2.VideoWriter_fourcc(*"mp4v"), 10, (320, 200))
+    for i in range(10):
+        f = np.zeros((200, 320, 3), np.uint8); f[:, : 32 * i] = 255; w.write(f)
+    w.release()
+    dst = viz.to_h264(src, max_width=160)
+    assert dst.endswith("_h264.mp4") and os.path.getsize(dst) > 500
+    cap = cv2.VideoCapture(dst)
+    assert cap.isOpened() and int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) == 160
