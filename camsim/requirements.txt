@@ -13,3 +13,5 @@ pyglet<1.5
 pyopengl
 torch
 imageio-ffmpeg     # mp4v -> H.264 변환 (노트북·브라우저에서 영상 재생용)
+matplotlib         # 코랩엔 기본 설치. 로컬 노트북 환경용
+pandas

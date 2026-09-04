@@ -16,3 +16,4 @@ flycheck_*
 /out/
 /track.npz
 /model.pt
+.venv-lab/
