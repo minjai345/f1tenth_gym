@@ -67,9 +67,10 @@ code('REPO_URL = "https://github.com/minjai345/f1tenth_gym.git"   # 조교 fork.
      '        pass                                                # 로컬은 건드리지 않음',
      'print("repo:", os.getcwd())')
 
-code('%load_ext autoreload',
-     '%autoreload 2',
-     '# ↑ 첫 셀에서 코드를 pull 받으면 커널 재시작 없이 새 모듈이 반영된다 (매직 줄에는 주석을 붙일 수 없음)',
+code('try:                                  # 있으면 켠다: 첫 셀에서 코드를 pull 받아도 커널 재시작 없이 새 모듈이 반영됨',
+     '    get_ipython().run_line_magic("load_ext", "autoreload"); get_ipython().run_line_magic("autoreload", "2")',
+     'except Exception as e:',
+     '    print("autoreload 사용 불가 —", type(e).__name__, "(코드가 갱신되면 런타임 재시작 후 첫 셀부터 다시 실행)")',
      'import sys, copy, json, time, numpy as np, cv2, torch, pandas as pd',
      'import matplotlib.pyplot as plt',
      'plt.rcParams["axes.unicode_minus"] = False   # 그래프 글자는 영어(코랩 기본 폰트에 한글 없음)',
