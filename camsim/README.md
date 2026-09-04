@@ -36,6 +36,11 @@ gym 0.19의 `setup.py`는 pip이 그대로 못 읽는 요구사항 문자열을 
 - `render.ipm_bev(img, H_i2g, cfg)`: 원근 영상을 `H_i2g`로 펴서 만든 BEV. 실차 2주차 IPM과 같은 연산.
 - 두 이미지의 범위·해상도는 `config.yaml`의 `bev:` 섹션 하나로 정한다 (시뮬·실차 공용).
 
+## 실격 규칙 (폐루프 종료 조건)
+실차 트랙은 벽 없이 테이프가 경계다. 시뮬도 같은 규칙을 쓴다: 차체(`closed_loop.car_length_m` x `car_width_m`) 네 모서리 중
+하나라도 테이프 안쪽 선(중심선에서 `track_width_m/2 - tape_width_m/2`)을 넘으면 `reason="tape_crossed"`로 종료. 완주(`lap`)는
+테이프를 한 번도 안 넘고 한 바퀴 돈 것이다. gym 벽 충돌(`collision`)은 이 맵에서는 벽이 멀어 거의 안 난다.
+
 ## 좌표계
 world = gym 맵 (m). vehicle = 후륜축, x 전방, y 좌측. image = OpenCV (u 우, v 아래).
 `H_g2i`: ground (x,y,1) → image. pitch 0이면 지평선은 이미지 세로 중앙.

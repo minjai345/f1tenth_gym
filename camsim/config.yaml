@@ -52,6 +52,7 @@ closed_loop:
   speed_mps: 2.0
   latency_steps: 0          # 제어 틱 단위 지연
   max_steps: 4000           # 제어 틱
-  offtrack_m: 0.4           # 중심선 이탈 시 종료
+  car_length_m: 0.58        # gym 기본 차체. 실격 판정(차체 모서리가 테이프 안쪽 선을 넘으면)에 사용
+  car_width_m: 0.31
   wheelbase_m: 0.3302       # lf + lr (gym 기본)
   steer_max_rad: 0.4189

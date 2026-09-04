@@ -1,4 +1,8 @@
-"""f110_gym 안에서 렌더 -> 추론 -> pure pursuit -> step. ROS 없음. 지연은 제어 틱 단위 버퍼로 주입."""
+"""f110_gym 안에서 렌더 -> 추론 -> pure pursuit -> step. ROS 없음. 지연은 제어 틱 단위 버퍼로 주입.
+
+종료 조건 (Result.reason): "lap" 한 바퀴 완주 / "tape_crossed" 차체 모서리가 테이프 안쪽 선을 넘음(실차 실격 규칙,
+gt.crosses_tape) / "collision" gym 벽 충돌 / "max_steps". 실차 트랙은 벽 없이 테이프만 있으므로 실격 판정은 벽이 아니라 테이프 기준이다.
+"""
 from collections import deque
 from dataclasses import dataclass
 import os
@@ -100,8 +104,8 @@ def run(env, predictor, track: Track, cfg: Config, H_g2i: np.ndarray, start_inde
             s_prev = s_now
             if obs["collisions"][0]:
                 reason = "collision"; break
-            if lat > cl.offtrack_m:
-                reason = "offtrack"; break
+            if gt.crosses_tape(pose, track, cfg):          # 실차 규칙: 테이프를 넘으면 실격
+                reason = "tape_crossed"; break
             if traveled >= track.length:
                 reason = "lap"; break
     finally:

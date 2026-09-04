@@ -30,3 +30,18 @@ def sample_pose(track: Track, cfg: Config, rng: np.random.Generator) -> np.ndarr
     n = np.array([-np.sin(h), np.cos(h)])
     xy = track.center[i] + lat * n
     return np.array([xy[0], xy[1], h + dth])
+
+
+def body_corners(pose, cfg: Config) -> np.ndarray:
+    """차체 사각형 네 모서리(world). gym의 collision_models.get_vertices 와 같은 규약: pose를 중심으로 length x width."""
+    x, y, th = pose
+    L, W = cfg.closed_loop.car_length_m / 2, cfg.closed_loop.car_width_m / 2
+    local = np.array([[L, W], [L, -W], [-L, -W], [-L, W]])
+    c, s = np.cos(th), np.sin(th)
+    return local @ np.array([[c, s], [-s, c]]) + [x, y]
+
+
+def crosses_tape(pose, track: Track, cfg: Config) -> bool:
+    """실격 규칙: 차체 모서리 중 하나라도 테이프 안쪽 선(중심선에서 track_width/2 - tape_width/2)을 넘으면 True."""
+    inner = cfg.lane.track_width_m / 2 - cfg.lane.tape_width_m / 2
+    return any(lateral_error(track, c) > inner for c in body_corners(pose, cfg))

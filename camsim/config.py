@@ -77,7 +77,8 @@ class ClosedLoop:
     speed_mps: float
     latency_steps: int
     max_steps: int
-    offtrack_m: float
+    car_length_m: float
+    car_width_m: float
     wheelbase_m: float
     steer_max_rad: float
 

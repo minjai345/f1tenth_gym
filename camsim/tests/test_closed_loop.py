@@ -31,7 +31,7 @@ def test_latency_buffer_delays(ctx):
 def test_huge_noise_leaves_track(ctx):
     cfg, trk, env, H = ctx
     r = cl.run(env, model.OraclePredictor(trk, cfg, noise_sigma=2.0), trk, cfg, H)
-    assert r.reason in ("offtrack", "collision") and not r.finished
+    assert r.reason in ("tape_crossed", "collision") and not r.finished
 
 def test_video_written(ctx, tmp_path):
     cfg, trk, env, H = ctx
