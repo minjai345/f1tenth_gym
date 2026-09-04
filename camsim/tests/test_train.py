@@ -24,3 +24,16 @@ def test_train_runs_and_loss_drops(ctx, tmp_path):
     assert (tmp_path / "m.pt").exists()
     r = train.evaluate(model.Predictor(net, cfg), trk, cfg, n=10)
     assert np.isfinite(r["mean_m"])
+
+
+def test_val_loss_and_callback(ctx, tmp_path):
+    from camsim import dataset
+    cfg, trk = ctx
+    root = str(tmp_path / "ds"); dataset.generate_dataset(trk, cfg, 24, root, log_every=0)
+    tr = dataset.DiskDataset(root, cfg, "train", val_frac=0.25)
+    va = dataset.DiskDataset(root, cfg, "val", val_frac=0.25, image_augment=False)
+    calls = []
+    net, hist = train.train(trk, cfg, steps=8, batch_size=4, dataset=tr, val_dataset=va, val_batches=2,
+                            log_every=4, callback=lambda h: calls.append(len(h)))
+    assert [h["step"] for h in hist] == [4, 8] and all("val_loss" in h and np.isfinite(h["val_loss"]) for h in hist)
+    assert calls == [1, 2]

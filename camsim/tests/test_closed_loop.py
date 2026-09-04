@@ -64,3 +64,11 @@ def test_control_hz_warns_when_not_evenly_divisible(ctx):
     with pytest.warns(UserWarning, match="camsim: control_hz"):
         r = cl.run(env, model.OraclePredictor(trk, cfg2), trk, cfg2, H)
     assert r.control_hz_eff == pytest.approx(100 / 3)
+
+
+def test_lateral_trace_recorded(ctx):
+    import copy
+    cfg, trk, env, H = ctx
+    cfg2 = copy.deepcopy(cfg); cfg2.closed_loop.max_steps = 20
+    r = cl.run(env, model.OraclePredictor(trk, cfg2), trk, cfg2, H)
+    assert r.lateral_trace.shape == (r.steps,) and r.lateral_trace.max() == r.max_lateral_m

@@ -37,10 +37,28 @@ def _batches(dataset, batch_size, num_workers, seed):
                                   generator=g, drop_last=True)
 
 
+@torch.no_grad()
+def _val_loss(net, val_dataset, loss_fn, batch_size, val_batches, device):
+    """val_dataset 의 앞쪽 val_batches 배치로 Huber loss 평균 (셔플 없음, 증강은 dataset 설정에 따름)."""
+    net.eval()
+    dl = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+    tot, k = 0.0, 0
+    for x, y in dl:
+        tot += loss_fn(net(x.to(device)), y.to(device)).item(); k += 1
+        if k >= val_batches:
+            break
+    net.train()
+    return tot / max(k, 1)
+
+
 def train(track: Track, cfg: Config, steps: int, batch_size: int = 32, lr: float = 1e-3,
           device: str = "cpu", out_path=None, num_workers: int = 0, log_every: int = 50, seed: int = 0,
-          dataset=None):
-    """dataset=None 이면 온더플라이(SynthDataset), 아니면 주어진 Dataset(예: DiskDataset)으로 학습."""
+          dataset=None, val_dataset=None, val_batches: int = 8, callback=None):
+    """dataset=None 이면 온더플라이(SynthDataset), 아니면 주어진 Dataset(예: DiskDataset)으로 학습.
+
+    val_dataset 이 있으면 log_every 마다 val loss 도 계산해 history 에 넣는다 (키 "val_loss").
+    callback(history) 는 log_every 마다 호출된다 (노트북에서 loss 곡선을 실시간으로 그릴 때 사용).
+    """
     torch.manual_seed(seed)
     net = M.WaypointNet(n_out=2 * len(cfg.waypoints.ahead_m)).to(device)
     opt = torch.optim.AdamW(net.parameters(), lr=lr)
@@ -55,8 +73,14 @@ def train(track: Track, cfg: Config, steps: int, batch_size: int = 32, lr: float
         opt.zero_grad(); loss.backward(); opt.step(); sched.step()
         run += loss.item()
         if step % log_every == 0:
-            history.append({"step": step, "loss": run / log_every, "sec": time.time() - t0})
-            print(f"step {step:6d}  loss {run / log_every:.4f}  {time.time() - t0:6.0f}s", flush=True)
+            rec = {"step": step, "loss": run / log_every, "sec": time.time() - t0}
+            if val_dataset is not None:
+                rec["val_loss"] = _val_loss(net, val_dataset, loss_fn, batch_size, val_batches, device)
+            history.append(rec)
+            msg = f"step {step:6d}  loss {rec['loss']:.4f}" + (f"  val {rec['val_loss']:.4f}" if "val_loss" in rec else "")
+            print(msg + f"  {rec['sec']:6.0f}s", flush=True)
+            if callback is not None:
+                callback(history)
             run = 0.0
         if step >= steps:
             break

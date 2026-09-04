@@ -39,6 +39,7 @@ class Result:
     max_lateral_m: float
     progress_m: float
     control_hz_eff: float
+    lateral_trace: np.ndarray = None   # 제어 틱마다 중심선 대비 횡오차 (m). 그래프용
 
 
 def _unwrap_progress(track: Track, s_prev: float, s_now: float) -> float:
@@ -113,7 +114,7 @@ def run(env, predictor, track: Track, cfg: Config, H_g2i: np.ndarray, start_inde
             writer.release()
     lats = np.array(lats) if lats else np.zeros(1)
     return Result(reason == "lap", reason, steps, float(lats.mean()), float(lats.max()), float(traveled),
-                  hz_eff)
+                  hz_eff, lats)
 
 
 def sweep(env, track: Track, cfg: Config, H_g2i, latency_list, sigma_list, predictor_factory=None):
