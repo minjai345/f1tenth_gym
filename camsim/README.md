@@ -32,6 +32,22 @@ gym 0.19의 `setup.py`는 pip이 그대로 못 읽는 요구사항 문자열을 
 
 `camsim/scripts/` 의 `nb1_render.py`, `make_dataset.py`, `nb2_train.py`, `nb3_closed_loop.py` 는 같은 단계의 헤드리스 버전으로, 로컬 테스트용이다.
 
+## 모델 입력은 BEV
+시뮬: `render.render_bev(pose, quads, cfg, mask)` 가 테이프를 top-down 으로 직접 그린다. `mask = render.bev_visibility_mask(H_g2i, cfg)` 로
+카메라가 못 보는 영역(근거리 사각, 화각 밖)을 바닥색으로 가려 실차 IPM 출력과 같은 모양을 만든다.
+실차: 카메라 → undistort → `render.ipm_bev(cam, H_i2g, cfg)` → 같은 규격의 BEV. `Predictor.predict(bev)` 하나를 양쪽이 공유하고,
+실차용 편의 함수로 `Predictor.predict_camera(cam, H_i2g)` 가 있다. 원근 렌더(`render.render`)는 시각화·IPM 비교용이다.
+BEV 범위·해상도는 `config.yaml` 의 `bev:` 섹션 하나로 정한다 (시뮬·실차 공용).
+
+## 데이터셋
+`dataset.generate_dataset` (스크립트 `make_dataset.py N`) 이 `out/dataset/images/NNNNNN.png`(BEV, 모델 입력) 와
+`labels.csv`(file, x, y, theta, wp0_x..wp5_y) 를 만든다. 저장 데이터는 증강 없는 plain 이다. train/val 은 9:1 결정적 분리.
+증강은 `DiskDataset(..., augment_fn=fn)` 의 `fn(bev, rng) -> bev` 하나로 로딩 때 넣는다 (기본 None).
+`camsim/augment.py` 의 `jitter_bev`(pitch 워프), `erase_patches`, `glare`, `motion_blur`, `example_augment` 는 예시이며
+세기는 config `augment:` 로 조절한다 (기본 전부 off). `train.evaluate(..., degrade_fn=fn)` 으로 열화 입력에 대한 강건성을 잰다.
+sim-to-real 증강 설계는 노트북 3장 과제다. 실차에서 IPM으로 만든 BEV를 같은 `labels.csv` 포맷으로 저장하면 그대로 학습된다.
+코랩 로컬 디스크에 생성하고 드라이브에는 zip 하나로 옮길 것 (드라이브는 작은 파일 다량에 매우 느리다).
+
 ## 실격 규칙 (폐루프 종료 조건)
 실차 트랙은 벽 없이 테이프가 경계다. 시뮬도 같은 규칙을 쓴다: 차체(`closed_loop.car_length_m` x `car_width_m`) 네 모서리 중
 하나라도 테이프 안쪽 선(중심선에서 `track_width_m/2 - tape_width_m/2`)을 넘으면 `reason="tape_crossed"`로 종료. 완주(`lap`)는
