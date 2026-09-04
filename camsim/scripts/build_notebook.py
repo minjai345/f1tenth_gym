@@ -57,6 +57,13 @@ code('REPO_URL = "https://github.com/minjai345/f1tenth_gym.git"   # 조교 fork.
      '    !pip install -q -r camsim/requirements.txt',
      '    !bash camsim/scripts/install_gym019.sh',
      '    !pip install -q --no-deps -e .',
+     'else:                                                       # 이미 레포 안 (코랩 재실행 또는 로컬)',
+     '    try:',
+     '        import google.colab                                 # 코랩이면 최신 코드·의존성으로 갱신',
+     '        !git pull -q',
+     '        !pip install -q -r camsim/requirements.txt',
+     '    except ImportError:',
+     '        pass                                                # 로컬은 건드리지 않음',
      'print("repo:", os.getcwd())')
 
 code('import sys, copy, json, time, numpy as np, cv2, torch, pandas as pd',
