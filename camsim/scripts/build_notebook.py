@@ -68,7 +68,8 @@ code('REPO_URL = "https://github.com/minjai345/f1tenth_gym.git"   # 조교 fork.
      'print("repo:", os.getcwd())')
 
 code('%load_ext autoreload',
-     '%autoreload 2                      # 첫 셀에서 코드를 pull 받으면 커널 재시작 없이 새 모듈이 반영된다',
+     '%autoreload 2',
+     '# ↑ 첫 셀에서 코드를 pull 받으면 커널 재시작 없이 새 모듈이 반영된다 (매직 줄에는 주석을 붙일 수 없음)',
      'import sys, copy, json, time, numpy as np, cv2, torch, pandas as pd',
      'import matplotlib.pyplot as plt',
      'plt.rcParams["axes.unicode_minus"] = False   # 그래프 글자는 영어(코랩 기본 폰트에 한글 없음)',
