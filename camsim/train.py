@@ -9,15 +9,16 @@ from .dataset import SynthDataset, DiskDataset, make_sample
 from . import model as M
 
 
-def evaluate(predictor, track: Track, cfg: Config, n: int = 200, seed: int = 123) -> dict:
-    """새 pose n개에서 증강 없는 BEV를 만들어 waypoint별 오차(m). OraclePredictor는 set_pose로 pose를 받는다."""
+def evaluate(predictor, track: Track, cfg: Config, n: int = 200, seed: int = 123, degrade_fn=None) -> dict:
+    """새 pose n개의 BEV로 waypoint별 오차(m). degrade_fn(bev, rng) 을 주면 열화된 입력에 대한 강건성 평가가 된다.
+    OraclePredictor는 set_pose로 pose를 받는다."""
     from .camera import build
     from .render import bev_visibility_mask
     rng = np.random.default_rng(seed)
     mask = bev_visibility_mask(build(cfg)[0], cfg)
     errs = []
     for _ in range(n):
-        bev, wp, pose = make_sample(track, cfg, rng, do_augment=False, mask=mask)
+        bev, wp, pose = make_sample(track, cfg, rng, degrade_fn, mask=mask)
         if hasattr(predictor, "set_pose"):
             predictor.set_pose(pose)
         pred = predictor.predict(bev)

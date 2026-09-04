@@ -76,3 +76,24 @@ def jitter_bev(bev: np.ndarray, cfg: Config, rng: np.random.Generator) -> np.nda
     h, w = bev.shape[:2]
     floor = tuple(int(c) for c in cfg.lane.color_floor)
     return cv2.warpPerspective(bev, M, (w, h), flags=cv2.INTER_NEAREST, borderMode=cv2.BORDER_CONSTANT, borderValue=floor)
+
+
+def erase_patches(bev: np.ndarray, cfg: Config, rng: np.random.Generator, n_max: int = 3,
+                  size_px=(10, 60)) -> np.ndarray:
+    """BEV 위 임의 사각형을 바닥색으로 지운다 (테이프 마모·가림의 이미지 수준 근사). 학생 증강 예시용."""
+    if rng.uniform() >= cfg.augment.tape_dropout_prob:        # 적용 확률은 tape_dropout_prob 를 공유
+        return bev
+    out = bev.copy()
+    h, w = out.shape[:2]
+    floor = np.array(cfg.lane.color_floor, np.uint8)
+    for _ in range(int(rng.integers(1, n_max + 1))):
+        ph, pw = rng.integers(size_px[0], size_px[1] + 1, 2)
+        y, x = int(rng.integers(0, max(1, h - ph))), int(rng.integers(0, max(1, w - pw)))
+        out[y:y + ph, x:x + pw] = floor
+    return out
+
+
+def example_augment(bev: np.ndarray, cfg: Config, rng: np.random.Generator) -> np.ndarray:
+    """참고용 조합: pitch 워프 -> 패치 지우기 -> 블러 -> 글레어. 세기는 cfg.augment 로 조절.
+    노트북에서 학생이 만드는 my_augment(bev, rng) 의 출발점."""
+    return glare(motion_blur(erase_patches(jitter_bev(bev, cfg, rng), cfg, rng), cfg, rng), cfg, rng)

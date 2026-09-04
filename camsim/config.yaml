@@ -36,13 +36,13 @@ sampling:
   lateral_frac: 0.35        # 중심선에서 ±track_width*frac 까지 pose 샘플링
   heading_deg: 15.0         # 헤딩 ±
 
-augment:
-  pitch_jitter_deg: 2.0
-  blur_max_px: 3
-  tape_dropout_prob: 0.3
-  tape_dropout_len: [5, 20]   # 지우는 연속 사각형 개수 범위
-  glare_prob: 0.3
-  glare_alpha: [0.3, 0.7]     # 글레어 오버레이 블렌드 비율 범위
+augment:                    # 기본은 전부 끔(plain 모델). sim-to-real 갭을 줄이는 증강은 학생이 설계한다 (노트북 3장 과제).
+  pitch_jitter_deg: 0.0     # 예시 증강 augment.jitter_bev 의 세기. 0 = 사용 안 함
+  blur_max_px: 1            # 1 = 블러 없음
+  tape_dropout_prob: 0.0
+  tape_dropout_len: [5, 20]
+  glare_prob: 0.0
+  glare_alpha: [0.3, 0.7]
 
 closed_loop:
   map_yaml: examples/example_map.yaml

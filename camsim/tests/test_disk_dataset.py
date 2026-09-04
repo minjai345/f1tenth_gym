@@ -36,7 +36,7 @@ def test_split_is_disjoint_and_deterministic(ctx):
 
 def test_item_shapes_and_augment_toggle(ctx):
     cfg, trk, root = ctx
-    ds = dataset.DiskDataset(root, cfg, "all", image_augment=False)
+    ds = dataset.DiskDataset(root, cfg, "all")
     x, y = ds[0]
     from camsim.render import bev_size
     assert x.shape == (3, *bev_size(cfg)) and y.shape == (2 * len(cfg.waypoints.ahead_m),)
@@ -58,3 +58,13 @@ def test_waypoint_count_mismatch_raises(ctx):
     cfg2 = copy.deepcopy(cfg); cfg2.waypoints.ahead_m = [1.0, 2.0]
     with pytest.raises(ValueError):
         dataset.DiskDataset(root, cfg2)
+
+
+def test_augment_fn_hook_applied_at_load(ctx):
+    cfg, trk, root = ctx
+    calls = []
+    def fn(bev, rng):
+        calls.append(1); out = bev.copy(); out[:] = 0; return out
+    ds = dataset.DiskDataset(root, cfg, "all", augment_fn=fn)
+    x, _ = ds[0]
+    assert calls == [1] and float(x.max()) == 0.0

@@ -14,7 +14,7 @@ def test_make_sample_is_bev_with_camera_mask(ctx):
     """모델 입력은 BEV. 카메라가 못 보는 근거리(0.32 m 안쪽)는 바닥색이어야 한다(실차 IPM 출력과 동일)."""
     from camsim import camera, render
     cfg, trk = ctx
-    bev, wp, pose, cam = dataset.make_sample(trk, cfg, np.random.default_rng(0), do_augment=False, with_camera=True)
+    bev, wp, pose, cam = dataset.make_sample(trk, cfg, np.random.default_rng(0), with_camera=True)
     h, w = bev_hw(cfg)
     assert bev.shape == (h, w, 3) and cam.shape == (cfg.camera.image_height, cfg.camera.image_width, 3)
     near_rows = int((cfg.bev.x_range_m[1] - 0.30) / cfg.bev.resolution_m)      # x < 0.30 m -> 아래쪽 행들

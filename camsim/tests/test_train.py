@@ -31,9 +31,20 @@ def test_val_loss_and_callback(ctx, tmp_path):
     cfg, trk = ctx
     root = str(tmp_path / "ds"); dataset.generate_dataset(trk, cfg, 24, root, log_every=0)
     tr = dataset.DiskDataset(root, cfg, "train", val_frac=0.25)
-    va = dataset.DiskDataset(root, cfg, "val", val_frac=0.25, image_augment=False)
+    va = dataset.DiskDataset(root, cfg, "val", val_frac=0.25)
     calls = []
     net, hist = train.train(trk, cfg, steps=8, batch_size=4, dataset=tr, val_dataset=va, val_batches=2,
                             log_every=4, callback=lambda h: calls.append(len(h)))
     assert [h["step"] for h in hist] == [4, 8] and all("val_loss" in h and np.isfinite(h["val_loss"]) for h in hist)
     assert calls == [1, 2]
+
+
+def test_evaluate_with_degrade_fn(ctx):
+    cfg, trk = ctx
+    o = model.OraclePredictor(trk, cfg)
+    class P:
+        def predict(s, img): return o.predict(img)
+        def set_pose(s, p): o.set_pose(p)
+    seen = []
+    r = train.evaluate(P(), trk, cfg, n=5, degrade_fn=lambda bev, rng: (seen.append(bev.shape), bev)[1])
+    assert len(seen) == 5 and r["mean_m"] < 1e-9

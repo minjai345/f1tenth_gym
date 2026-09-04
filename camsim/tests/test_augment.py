@@ -6,6 +6,7 @@ def cfg():
     return config.load()
 
 def test_jitter_pitch_changes_horizon(cfg):
+    cfg.augment.pitch_jitter_deg = 2.0
     rng = np.random.default_rng(0)
     horizon = cfg.camera.image_height / 2.0
     vs = {round(camera.project(augment.jitter_pitch(cfg, rng), np.array([[1000., 0.]]))[0, 1], 1)
@@ -34,6 +35,7 @@ def test_dropout_noop_when_prob_zero(cfg):
 def test_image_ops_keep_shape_dtype(cfg):
     img = np.full((400, 640, 3), 200, np.uint8)
     img[200:, 300:340] = (30, 30, 220)
+    cfg.augment.blur_max_px = 3; cfg.augment.glare_prob = 1.0
     rng = np.random.default_rng(0)
     out = augment.augment_image(img, cfg, rng)
     assert out.shape == img.shape and out.dtype == np.uint8
@@ -75,3 +77,19 @@ def test_jitter_bev_warps_far_more_than_near(cfg):
     d_near = abs(row_of(out, int(near_v) - 60, int(near_v) + 60) - near_v)
     d_far = abs(row_of(out, 0, int(far_v) + 80) - far_v)
     assert d_far > d_near
+
+
+def test_defaults_are_plain(cfg):
+    """기본 config 는 증강 전부 off: example_augment 가 항등이어야 한다."""
+    from camsim import render
+    bev = np.random.default_rng(0).integers(0, 255, (*render.bev_size(cfg), 3), dtype=np.uint8)
+    assert np.array_equal(augment.example_augment(bev, cfg, np.random.default_rng(1)), bev)
+
+
+def test_erase_patches_uses_floor_color(cfg):
+    from camsim import render
+    bev = np.full((*render.bev_size(cfg), 3), 255, np.uint8)
+    cfg.augment.tape_dropout_prob = 1.0
+    out = augment.erase_patches(bev, cfg, np.random.default_rng(5), n_max=3)
+    erased = np.all(out == cfg.lane.color_floor, axis=-1)
+    assert out.shape == bev.shape and erased.sum() >= 100
