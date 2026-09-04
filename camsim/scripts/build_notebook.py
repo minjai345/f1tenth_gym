@@ -43,7 +43,8 @@ md("# camsim 실습 노트북 — 카메라 기반 waypoint 모델: 시뮬 검�
    "| 5 | 결과 보관 | |")
 
 md("## 0. 설치와 설정",
-   "코랩에서는 첫 셀이 레포를 받고 의존성을 설치한다 (1~2분). 이미 레포 안에서 실행 중이면(로컬) 건너뛴다.")
+   "코랩에서는 첫 셀이 레포를 받고 의존성을 설치한다 (1~2분). 이미 레포 안이면 `git pull`로 갱신만 한다.",
+   "코드가 갱신된 뒤 `TypeError: unexpected keyword` 같은 오류가 나면 커널에 예전 모듈이 남은 것이다: 런타임 재시작 후 첫 셀부터 다시 실행 (데이터·모델 파일은 VM에 남아 있어 `REGENERATE=False`, `RETRAIN=False`면 건너뛴다).")
 code('REPO_URL = "https://github.com/minjai345/f1tenth_gym.git"   # 조교 fork. 본인 fork를 쓰면 여기만 바꾸세요',
      'BRANCH = "main"',
      'import os',
@@ -66,7 +67,9 @@ code('REPO_URL = "https://github.com/minjai345/f1tenth_gym.git"   # 조교 fork.
      '        pass                                                # 로컬은 건드리지 않음',
      'print("repo:", os.getcwd())')
 
-code('import sys, copy, json, time, numpy as np, cv2, torch, pandas as pd',
+code('%load_ext autoreload',
+     '%autoreload 2                      # 첫 셀에서 코드를 pull 받으면 커널 재시작 없이 새 모듈이 반영된다',
+     'import sys, copy, json, time, numpy as np, cv2, torch, pandas as pd',
      'import matplotlib.pyplot as plt',
      'plt.rcParams["axes.unicode_minus"] = False   # 그래프 글자는 영어(코랩 기본 폰트에 한글 없음)',
      'from IPython.display import Image, Video, display, clear_output',
@@ -100,6 +103,8 @@ code('cfg = config.load()',
      'cfg.sampling.lateral_frac = 0.35  # 중심선에서 ±track_width*frac 까지 pose를 뿌린다',
      'cfg.sampling.heading_deg  = 15.0  # 헤딩 ±',
      'N_DATASET = 300 if SMOKE else 20000     # 저장할 장 수',
+     'DATA_DIR = "out/dataset"',
+     'REGENERATE = False        # True: 데이터셋이 있어도 다시 만든다 (카메라·트랙·waypoint 설정을 바꿨으면 True)',
      '# 증강은 기본 off (plain 모델). 3장 끝 "sim-to-real" 과제에서 my_augment 를 직접 설계한다.',
      'cfg.augment.pitch_jitter_deg = 2.0       # 아래 값들은 예시 증강(augment.example_augment)의 세기. 과제에서 사용',
      'cfg.augment.tape_dropout_prob = 0.3',
@@ -110,6 +115,7 @@ code('cfg = config.load()',
      'STEPS = 30 if SMOKE else 3000',
      'BATCH = 8 if SMOKE else 32',
      'LR = 1e-3',
+     'RETRAIN = True            # False: model.pt 가 있으면 학습을 건너뛰고 불러온다 (런타임 재시작 후 4장만 다시 볼 때)',
      '',
      '# ---- 4장: 폐루프 ------------------------------------------------------',
      'cfg.closed_loop.speed_mps = 2.0',
@@ -182,9 +188,11 @@ code('rng = np.random.default_rng(0)',
 md("### 데이터셋 저장",
    "`out/dataset/images/NNNNNN.png`(**BEV**, 모델 입력) + `labels.csv`(pose, waypoint)로 저장한다. 증강은 저장하지 않고 학습 로딩 때 함수 하나(`augment_fn`)로 넣는다.",
    "20,000장에 몇 분, 수백 MB. 실차에서는 IPM으로 만든 BEV를 같은 포맷으로 저장하면 그대로 학습된다.")
-code('DATA_DIR = "out/dataset"',
-     't0 = time.time()',
-     'dataset.generate_dataset(trk, cfg, N_DATASET, DATA_DIR, seed=0, log_every=5000)',
+code('t0 = time.time()',
+     'if REGENERATE or not os.path.isfile(f"{DATA_DIR}/labels.csv"):',
+     '    dataset.generate_dataset(trk, cfg, N_DATASET, DATA_DIR, seed=0, log_every=5000)',
+     'else:',
+     '    print(f"{DATA_DIR} 이 이미 있어 생성을 건너뜁니다 (다시 만들려면 REGENERATE = True)")',
      'files, ds_poses, ds_wps = dataset.read_labels(DATA_DIR)',
      'print(f"{len(files)}장 저장, {time.time()-t0:.0f}s")',
      'display(pd.read_csv(f"{DATA_DIR}/labels.csv").head())')
@@ -227,10 +235,13 @@ code('AUGMENT_FN = None        # plain. 과제에서 my_augment 로 바꿔 재�
      '    plt.title(f"step {st[-1]}  train {history[-1][\'loss\']:.4f}" + (f"  val {history[-1][\'val_loss\']:.4f}" if "val_loss" in history[-1] else ""))',
      '    plt.show()',
      '',
-     'net, hist = train.train(trk, cfg, steps=STEPS, batch_size=BATCH, lr=LR, device=DEVICE, out_path="model.pt",',
-     '                        num_workers=2 if DEVICE == "cuda" else 0, log_every=max(STEPS // 30, 1),',
-     '                        dataset=ds_train, val_dataset=ds_val, val_batches=32, callback=live_plot)   # val 32배치(약 1000장)로 평가해 곡선 안정화',
-     'print("model.pt 저장")')
+     'if RETRAIN or not os.path.exists("model.pt"):',
+     '    net, hist = train.train(trk, cfg, steps=STEPS, batch_size=BATCH, lr=LR, device=DEVICE, out_path="model.pt",',
+     '                            num_workers=2 if DEVICE == "cuda" else 0, log_every=max(STEPS // 30, 1),',
+     '                            dataset=ds_train, val_dataset=ds_val, val_batches=32, callback=live_plot)   # val 32배치(약 1000장)로 평가해 곡선 안정화',
+     '    print("model.pt 저장")',
+     'else:',
+     '    net = model.load("model.pt", cfg); print("model.pt 불러옴 (다시 학습하려면 RETRAIN = True)")')
 
 md("### waypoint별 오차", "가까운 waypoint는 잘 맞고 먼 것이 나쁘면 정상이다(카메라 해상도 한계). 전부 나쁘면 학습이 덜 된 것이다.")
 code('pred = model.Predictor(net, cfg, DEVICE)',
