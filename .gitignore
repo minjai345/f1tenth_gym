@@ -17,3 +17,4 @@ flycheck_*
 /track.npz
 /model.pt
 .venv-lab/
+notebooks/f1tenth_gym/
