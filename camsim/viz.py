@@ -140,30 +140,73 @@ def side_by_side(*imgs, gap=10, bg=255) -> np.ndarray:
 PATH_COLORS = [(110, 110, 110), (255, 0, 0), (0, 160, 0), (0, 0, 255), (200, 0, 200), (0, 140, 255), (120, 120, 0)]  # 0번 = 회색(오라클/기준용)
 
 
-def draw_paths_on_map(mapimg: MapImage, track: Track, cfg: Config, paths: dict, thickness: int = 3,
-                      crop_margin_m: float = 2.0, legend: bool = True):
+def magnify_offsets(track: Track, xy: np.ndarray, factor: float) -> np.ndarray:
+    """경로의 '중심선 대비 편차'만 factor 배로 부풀린다 (경로 자체 위치는 유지).
+
+    60 m 트랙에서 주행 경로들의 차이는 수 cm라 전체 맵에서는 1~2 px 로 겹쳐 보인다. 그림에서만 편차를
+    과장해 비교할 수 있게 한다. factor=1 이면 원본 그대로.
+    """
+    xy = np.asarray(xy, float)[:, :2]
+    if factor == 1.0 or len(xy) == 0:
+        return xy
+    d = ((xy[:, None, :] - track.center[None, :, :]) ** 2).sum(-1)
+    i = np.argmin(d, axis=1)
+    base = track.center[i]
+    return base + factor * (xy - base)
+
+
+def draw_paths_on_map(mapimg: MapImage, track: Track, cfg: Config, paths: dict, thickness: int = 1,
+                      crop_margin_m: float = 2.0, legend: bool = True, dashed: bool = True,
+                      magnify: float = 1.0):
     """전체 맵 위에 GT 경로(중심선, 검은 점선)와 주행 경로들을 겹쳐 그린다.
 
-    paths: {label: (N,2) world xy 또는 (N,3) pose}. 각 경로의 끝에 원을 찍고 label 을 적는다.
-    반환: (img_bgr, offset_px)
+    경로들이 거의 겹치므로 얇게 그리고, dashed=True 면 경로마다 다른 파선 패턴으로 구분한다.
+    magnify > 1 이면 중심선 대비 편차를 그 배수만큼 과장해 그린다 (비교용. 실제 위치가 아님).
+    범례는 그림 위 흰 띠에 실제 패턴으로 표시한다. paths: {label: (N,2) world xy 또는 (N,3) pose}.
+    반환: (img_bgr, offset_px) — offset 은 원본 맵 픽셀 기준이며 범례 띠 높이가 이미 반영돼 있다.
     """
     img, off = draw_track_on_map(mapimg, track, cfg, crop_margin_m)
     c = np.round(mapimg.world_to_px(track.center) - off).astype(np.int32)
     for k in range(0, len(c), 6):                      # 점선 중심선
         cv2.line(img, tuple(c[k]), tuple(c[(k + 3) % len(c)]), (0, 0, 0), 1, cv2.LINE_AA)
-    y0 = 24
+
+    def _draw(dst, px, col, on, off_, phase):
+        """px 를 (on, off_) 픽셀 패턴의 파선으로 그린다. on=0 이면 실선."""
+        if on <= 0:
+            cv2.polylines(dst, [px.reshape(-1, 1, 2)], False, col, thickness, cv2.LINE_AA)
+            return
+        seg = np.hypot(*np.diff(px, axis=0).T)
+        pos = np.concatenate([[0.0], np.cumsum(seg)])
+        keep = ((pos + phase) % (on + off_)) < on
+        for k in range(len(px) - 1):
+            if keep[k]:
+                cv2.line(dst, tuple(px[k]), tuple(px[k + 1]), col, thickness, cv2.LINE_AA)
+
+    band = (20 * (len(paths) + (1 if magnify != 1.0 else 0)) + 12) if legend else 0
+    if band:                                             # 범례용 흰 띠를 그림 위에 덧댄다
+        img = np.vstack([np.full((band, img.shape[1], 3), 255, np.uint8), img])
+        off = np.array([off[0], off[1] - band])
+    y0 = 20
+    if legend and magnify != 1.0:
+        cv2.putText(img, f"lateral deviation x{magnify:g} (comparison only)", (12, y0),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1, cv2.LINE_AA)
+        y0 += 20
     for i, (label, xy) in enumerate(paths.items()):
         col = PATH_COLORS[i % len(PATH_COLORS)]
-        xy = np.asarray(xy, float)[:, :2]
+        on, off_ = (0, 0) if not dashed or i == 0 else (14, 8)
+        phase = 0 if not dashed else i * 6              # 같은 패턴이라도 위상을 어긋나게
+        xy = magnify_offsets(track, xy, magnify)
         if len(xy) == 0:
             continue
         px = np.round(mapimg.world_to_px(xy) - off).astype(np.int32)
-        cv2.polylines(img, [px.reshape(-1, 1, 2)], False, col, thickness, cv2.LINE_AA)
-        cv2.circle(img, tuple(px[0]), 6, col, 2, cv2.LINE_AA)          # 시작: 빈 원
-        cv2.circle(img, tuple(px[-1]), 8, col, -1, cv2.LINE_AA)        # 끝: 채운 원
+        _draw(img, px, col, on, off_, phase)
+        cv2.circle(img, tuple(px[0]), 5, col, 1, cv2.LINE_AA)          # 시작: 빈 원
+        cv2.circle(img, tuple(px[-1]), 6, col, -1, cv2.LINE_AA)        # 끝: 채운 원
         if legend:
-            cv2.putText(img, label, (12, y0), cv2.FONT_HERSHEY_SIMPLEX, 0.6, col, 2, cv2.LINE_AA)
-            y0 += 24
+            sample = np.array([[12, y0 - 5], [56, y0 - 5]], np.int32)  # 범례에도 같은 패턴
+            _draw(img, sample, col, on, off_, phase)
+            cv2.putText(img, label, (64, y0), cv2.FONT_HERSHEY_SIMPLEX, 0.5, col, 1, cv2.LINE_AA)
+            y0 += 20
     return img, off
 
 

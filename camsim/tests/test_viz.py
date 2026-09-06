@@ -55,7 +55,9 @@ def test_draw_paths_on_map_marks_paths(ctx):
     path = trk.center[:200] + 0.1
     img, off = viz.draw_paths_on_map(m, trk, cfg, {"a": path, "b": trk.center[300:400]})
     px = np.round(m.world_to_px(path[100]) - off).astype(int)
-    assert (img[px[1], px[0]] == viz.PATH_COLORS[0]).all()
+    near = img[px[1] - 2:px[1] + 3, px[0] - 2:px[0] + 3].reshape(-1, 3).astype(int)
+    d = np.abs(near - np.array(viz.PATH_COLORS[0])).sum(1)   # 얇은 AA 선이라 정확 일치 대신 근접도로 본다
+    assert d.min() < 90 and d.min() < np.abs(255 - np.array(viz.PATH_COLORS[0])).sum()
     zoom = viz.crop_around(img, off, m, path[-1], half_m=3.0, scale=2)
     assert zoom.shape[0] > 0 and zoom.ndim == 3
 
@@ -71,3 +73,38 @@ def test_to_h264_converts(tmp_path):
     assert dst.endswith("_h264.mp4") and os.path.getsize(dst) > 500
     cap = cv2.VideoCapture(dst)
     assert cap.isOpened() and int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) == 160
+
+
+def test_dashed_paths_leave_gaps(ctx):
+    """두 번째 이후 경로는 파선이라 같은 경로를 실선으로 그린 것보다 픽셀이 적어야 한다."""
+    cfg, trk, m = ctx
+    p = trk.center[:400]
+    solid, _ = viz.draw_paths_on_map(m, trk, cfg, {"a": p}, dashed=False)
+    dash, _ = viz.draw_paths_on_map(m, trk, cfg, {"first": p + 5.0, "b": p}, dashed=True)
+    def near_count(img, col):
+        return (np.abs(img.astype(int) - np.array(col)).sum(-1) < 90).sum()
+    n_solid = near_count(solid, viz.PATH_COLORS[0])
+    n_dash = near_count(dash, viz.PATH_COLORS[1])
+    assert 0 < n_dash < n_solid * 0.8
+
+
+def test_magnify_offsets_scales_deviation_only(ctx):
+    cfg, trk, m = ctx
+    i = np.arange(0, 300)
+    h = trk.heading[i]
+    nrm = np.column_stack([-np.sin(h), np.cos(h)])
+    path = trk.center[i] + 0.05 * nrm
+    out = viz.magnify_offsets(trk, path, 10.0)
+    dev = ((out - trk.center[i]) * nrm).sum(1)
+    assert np.allclose(dev, 0.5, atol=0.02)                       # 0.05 m -> 0.5 m
+    assert np.allclose(viz.magnify_offsets(trk, path, 1.0), path)  # factor 1 = 원본
+
+
+def test_legend_band_shifts_offset(ctx):
+    cfg, trk, m = ctx
+    plain, off0 = viz.draw_paths_on_map(m, trk, cfg, {"a": trk.center[:100]}, legend=False)
+    withl, off1 = viz.draw_paths_on_map(m, trk, cfg, {"a": trk.center[:100]}, legend=True)
+    assert withl.shape[0] > plain.shape[0] and off1[1] < off0[1]
+    px = np.round(m.world_to_px(trk.center[50]) - off1).astype(int)   # 좌표 보정이 맞는지
+    near = withl[px[1] - 2:px[1] + 3, px[0] - 2:px[0] + 3].reshape(-1, 3).astype(int)
+    assert np.abs(near - np.array(viz.PATH_COLORS[0])).sum(1).min() < 90
