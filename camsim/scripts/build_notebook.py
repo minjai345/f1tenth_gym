@@ -88,7 +88,17 @@ code('try:                                  # 있으면 켠다: 첫 셀에서 �
      'print("device:", DEVICE, "| torch", torch.__version__, "| numpy", np.__version__)')
 
 md("### 파라미터",
-   "`camsim/config.yaml` 이 기본값이다. 아래에서 덮어쓴 값이 이 노트북 전체에 적용된다. 값을 바꾼 뒤에는 이 셀부터 다시 실행한다.")
+   "`camsim/config.yaml` 이 기본값이고, 이 셀이 그 위에 덮어쓴다. **값을 바꿨으면 항상 이 셀을 먼저 다시 실행한다** (여기서 `cfg` 를 새로 만든다).",
+   "그 다음 어디까지 다시 실행할지는 무엇을 바꿨느냐에 달렸다. 첫 셀(설치)은 세션에 한 번이면 된다.",
+   "",
+   "| 바꾼 것 | 다시 실행할 곳 |",
+   "|---|---|",
+   "| `STEPS`, `BATCH`, `LR`, `AUGMENT_FN` | 이 셀 → 3장 학습 셀 |",
+   "| `speed_mps`, `lookahead_m`, `LATENCIES`, `SIGMAS` | 이 셀 → 4장 |",
+   "| 카메라(`height_m`, `pitch_deg`, `hfov_deg`), `track_width_m`, `ahead_m`, `sampling.*` | 이 셀 + `REGENERATE = True` → 2장 → 3장 → 4장 |",
+   "| 코드를 `git pull` 로 갱신 | 커널 재시작 → 첫 셀부터 (`REGENERATE=False`, `RETRAIN=False` 면 데이터·모델 재사용) |",
+   "",
+   "카메라나 트랙을 바꾸고 데이터를 다시 만들지 않으면, 예전 설정으로 만든 이미지에 새 설정의 정답을 맞추는 꼴이 되니 주의.")
 code('cfg = config.load()',
      '',
      '# ---- 1장: 카메라와 트랙 -------------------------------------------------',
