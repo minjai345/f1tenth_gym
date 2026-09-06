@@ -12,6 +12,9 @@ camera:
   h_i2g_file: null          # 2주차 캘리브레이션 H_i2g (.npy, 3x3, image px -> ground m). 있으면 위 값 무시
 
 lane:
+  follow_walls: true          # true: 맵의 벽 안쪽을 따라 테이프를 놓는다 (트랙 폭이 구간마다 달라짐)
+                              # false: 중심선에서 좌우 track_width_m/2 로 일정하게 (실차 테이프 트랙과 같은 방식)
+  wall_margin_m: 0.25         # follow_walls 일 때 벽에서 얼마나 안쪽에 놓을지
   track_width_m: 0.8        # 좌우 테이프 중심 사이 거리
   tape_width_m: 0.05
   segment_len_m: 0.05       # 테이프를 쪼개는 사각형 길이

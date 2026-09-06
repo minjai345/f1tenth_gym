@@ -51,6 +51,10 @@ BEV 범위·해상도는 `config.yaml` 의 `bev:` 섹션 하나로 정한다 (�
 sim-to-real 증강 설계는 노트북 3장 과제다. 실차에서 IPM으로 만든 BEV를 같은 `labels.csv` 포맷으로 저장하면 그대로 학습된다.
 코랩 로컬 디스크에 생성하고 드라이브에는 zip 하나로 옮길 것 (드라이브는 작은 파일 다량에 매우 느리다).
 
+## 테이프 배치
+`lane.follow_walls: true` 면 맵 PNG 의 벽까지 거리를 재서 `wall_margin_m` 안쪽에 테이프를 놓는다 (트랙 모양이 맵과 일치, 폭은 구간마다 다름).
+`false` 면 중심선에서 `track_width_m/2` 로 일정하게 놓는다 (실습실 테이프 트랙과 같은 방식). 실차 트랙 치수가 정해지면 이쪽으로 바꾼다.
+
 ## 실격 규칙 (폐루프 종료 조건)
 실차 트랙은 벽 없이 테이프가 경계다. 시뮬도 같은 규칙을 쓴다: 차체(`closed_loop.car_length_m` x `car_width_m`) 네 모서리 중
 하나라도 테이프 안쪽 선(중심선에서 `track_width_m/2 - tape_width_m/2`)을 넘으면 `reason="tape_crossed"`로 종료. 완주(`lap`)는

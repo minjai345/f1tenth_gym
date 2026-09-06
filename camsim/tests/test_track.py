@@ -8,6 +8,14 @@ def ctx():
     cfg = config.load()
     return cfg, track.from_csv(CSV, cfg)
 
+
+@pytest.fixture(scope="module")
+def ctx_fixed():
+    """벽을 무시하고 중심선에서 일정 폭 (실차 테이프 트랙 방식)."""
+    cfg = config.load()
+    cfg.lane.follow_walls = False
+    return cfg, track.from_csv(CSV, cfg)
+
 def test_resample_is_uniform_and_closed(ctx):
     cfg, trk = ctx
     d = np.hypot(*np.diff(trk.center, axis=0).T)
@@ -21,8 +29,8 @@ def test_heading_matches_direction(ctx):
     d = trk.center[1] - trk.center[0]
     assert np.arctan2(d[1], d[0]) == pytest.approx(trk.heading[0], abs=0.05)
 
-def test_quads_sit_on_both_sides(ctx):
-    cfg, trk = ctx
+def test_quads_sit_on_both_sides(ctx_fixed):
+    cfg, trk = ctx_fixed
     n = len(trk.center)
     assert trk.quads.shape == (2 * n, 4, 2)
     i = 100

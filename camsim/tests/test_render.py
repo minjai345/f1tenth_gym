@@ -4,6 +4,16 @@ from camsim import config, camera, track, render
 CSV = "examples/example_waypoints.csv"
 
 @pytest.fixture(scope="module")
+def ctx_fixed():
+    """일정 폭 트랙 (테이프가 좌우 대칭이라 위치를 예측할 수 있는 테스트용)."""
+    cfg = config.load()
+    cfg.lane.follow_walls = False
+    trk = track.from_csv(CSV, cfg)
+    H_g2i, H_i2g = camera.build(cfg)
+    return cfg, trk, H_g2i, H_i2g
+
+
+@pytest.fixture(scope="module")
 def ctx():
     cfg = config.load()
     trk = track.from_csv(CSV, cfg)
@@ -27,8 +37,8 @@ def test_tape_is_drawn_below_horizon_only(ctx):
     assert tape[horizon:].sum() > 500
     assert tape[:horizon - 1].sum() == 0
 
-def test_left_tape_on_left(ctx):
-    cfg, trk, H, _ = ctx
+def test_left_tape_on_left(ctx_fixed):
+    cfg, trk, H, _ = ctx_fixed
     img = render.render(pose_on_track(trk), trk.quads, None, H, cfg)
     # A row 3/4 of the way from the horizon to the bottom of the image is geometrically
     # guaranteed to be past the point where the +/-track_width/2 tape is still within the
@@ -112,9 +122,9 @@ def test_render_bev_shape_from_config(ctx):
     assert (bev[0, 0] == cfg.lane.color_floor).all()
 
 
-def test_render_bev_tape_columns_near_car(ctx):
+def test_render_bev_tape_columns_near_car(ctx_fixed):
     """On a straight-ish segment the two tapes sit at y = ±track_width/2 -> known BEV columns."""
-    cfg, trk, H, _ = ctx
+    cfg, trk, H, _ = ctx_fixed
     pose = np.array([*trk.center[10], trk.heading[10]])
     bev = render.render_bev(pose, trk.quads, cfg)
     b = cfg.bev

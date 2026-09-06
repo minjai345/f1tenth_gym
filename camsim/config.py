@@ -25,6 +25,8 @@ class Camera:
 
 @dataclass
 class Lane:
+    follow_walls: bool
+    wall_margin_m: float
     track_width_m: float
     tape_width_m: float
     segment_len_m: float
