@@ -61,11 +61,20 @@ class Sampling:
 @dataclass
 class Augment:
     pitch_jitter_deg: float
-    blur_max_px: int
+    ipm_blur_max_px: int
     tape_dropout_prob: float
     tape_dropout_len: List[int]
-    glare_prob: float
-    glare_alpha: List[float]
+    brightness_delta: float
+    contrast_range: List[float]
+    gamma_range: List[float]
+    hue_shift_deg: float
+    sat_scale: List[float]
+    illum_strength: float
+    shadow_prob: float
+    shadow_darkness: List[float]
+    blur_max_px: int
+    noise_sigma: float
+    jpeg_quality: List[int]
 
 
 @dataclass

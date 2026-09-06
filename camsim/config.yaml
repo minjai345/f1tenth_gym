@@ -36,13 +36,25 @@ sampling:
   lateral_frac: 0.35        # 중심선에서 ±track_width*frac 까지 pose 샘플링
   heading_deg: 15.0         # 헤딩 ±
 
-augment:                    # 기본은 전부 끔(plain 모델). sim-to-real 갭을 줄이는 증강은 학생이 설계한다 (노트북 3장 과제).
-  pitch_jitter_deg: 0.0     # 예시 증강 augment.jitter_bev 의 세기. 0 = 사용 안 함
-  blur_max_px: 1            # 1 = 블러 없음
-  tape_dropout_prob: 0.0
-  tape_dropout_len: [5, 20]
-  glare_prob: 0.0
-  glare_alpha: [0.3, 0.7]
+augment:                      # 기본은 전부 "변화 없음". sim-to-real 증강은 학생이 설계한다 (노트북 3장 과제).
+  # 기하 — IPM 평면 가정이 깨지거나 테이프가 손상된 경우
+  pitch_jitter_deg: 0.0       # jitter_bev: 가감속 시 pitch 변화로 BEV 가 휘는 정도 (도)
+  ipm_blur_max_px: 0          # ipm_blur: 먼 곳일수록 커지는 블러의 최대 커널 (0 = 사용 안 함)
+  tape_dropout_prob: 0.0      # erase_patches / dropout_quads 적용 확률
+  tape_dropout_len: [5, 20]   # dropout_quads 가 지우는 연속 사각형 개수
+  # 조명 — OpenCV 표준 기법
+  brightness_delta: 0.0       # brightness_contrast: 밝기 ± (convertScaleAbs beta)
+  contrast_range: [1.0, 1.0]  # 대비 배율 (alpha)
+  gamma_range: [1.0, 1.0]     # gamma: LUT 감마 범위
+  hue_shift_deg: 0.0          # hsv_shift: 색상 ± (도). 조명 색온도 변화
+  sat_scale: [1.0, 1.0]       # 채도 배율
+  illum_strength: 0.0         # illumination: 불균일 조명 세기 0~1
+  shadow_prob: 0.0            # shadow: 그림자 다각형 적용 확률
+  shadow_darkness: [0.5, 0.8] # 그림자 안의 밝기 배율
+  # 센서
+  blur_max_px: 0              # blur: GaussianBlur 최대 커널 (0 또는 1 = 사용 안 함)
+  noise_sigma: 0.0            # noise: 가우시안 노이즈 표준편차
+  jpeg_quality: [100, 100]    # jpeg: 압축 품질 범위 (100 = 무손실에 가까움)
 
 closed_loop:
   map_yaml: examples/example_map.yaml

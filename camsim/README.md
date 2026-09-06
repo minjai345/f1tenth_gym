@@ -43,8 +43,11 @@ BEV 범위·해상도는 `config.yaml` 의 `bev:` 섹션 하나로 정한다 (�
 `dataset.generate_dataset` (스크립트 `make_dataset.py N`) 이 `out/dataset/images/NNNNNN.png`(BEV, 모델 입력) 와
 `labels.csv`(file, x, y, theta, wp0_x..wp5_y) 를 만든다. 저장 데이터는 증강 없는 plain 이다. train/val 은 9:1 결정적 분리.
 증강은 `DiskDataset(..., augment_fn=fn)` 의 `fn(bev, rng) -> bev` 하나로 로딩 때 넣는다 (기본 None).
-`camsim/augment.py` 의 `jitter_bev`(pitch 워프), `erase_patches`, `glare`, `motion_blur`, `example_augment` 는 예시이며
-세기는 config `augment:` 로 조절한다 (기본 전부 off). `train.evaluate(..., degrade_fn=fn)` 으로 열화 입력에 대한 강건성을 잰다.
+`camsim/augment.py` 는 OpenCV 기반 증강을 제공한다 (세기는 config `augment:`, 기본은 전부 "변화 없음"):
+기하 `jitter_bev`(pitch 변화로 BEV 가 휨 — 기하학적으로 정확), `ipm_blur`(먼 곳일수록 뭉개짐), `erase_patches`/`dropout_quads`(테이프 마모);
+조명 `brightness_contrast`, `gamma`, `hsv_shift`, `illumination`(불균일 조명), `shadow`;
+센서 `blur`, `noise`, `jpeg`; 조합 `example_augment`.
+`jitter_bev` 외에는 실제 카메라 물리의 근사이므로, 실차 영상을 찍은 뒤 다시 설계하는 것이 맞다. `train.evaluate(..., degrade_fn=fn)` 으로 열화 입력에 대한 강건성을 잰다.
 sim-to-real 증강 설계는 노트북 3장 과제다. 실차에서 IPM으로 만든 BEV를 같은 `labels.csv` 포맷으로 저장하면 그대로 학습된다.
 코랩 로컬 디스크에 생성하고 드라이브에는 zip 하나로 옮길 것 (드라이브는 작은 파일 다량에 매우 느리다).
 
