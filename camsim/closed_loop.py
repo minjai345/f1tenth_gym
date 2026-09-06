@@ -39,6 +39,7 @@ class Result:
     max_lateral_m: float
     progress_m: float
     control_hz_eff: float
+    time_s: float = 0.0                # 주행 시간 (초). 랩타임 비교용
     lateral_trace: np.ndarray = None   # 제어 틱마다 중심선 대비 횡오차 (m). 그래프용
     pose_trace: np.ndarray = None      # (steps,3) 제어 틱마다 world pose. 맵 위 경로 그리기용
 
@@ -120,7 +121,7 @@ def run(env, predictor, track: Track, cfg: Config, H_g2i: np.ndarray, start_inde
             writer.release()
     lats = np.array(lats) if lats else np.zeros(1)
     return Result(reason == "lap", reason, steps, float(lats.mean()), float(lats.max()), float(traveled),
-                  hz_eff, lats, np.array(poses).reshape(-1, 3))
+                  hz_eff, steps / hz_eff, lats, np.array(poses).reshape(-1, 3))
 
 
 def sweep(env, track: Track, cfg: Config, H_g2i, latency_list, sigma_list, predictor_factory=None):

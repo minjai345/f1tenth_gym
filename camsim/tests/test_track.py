@@ -10,24 +10,36 @@ def ctx():
 
 
 @pytest.fixture(scope="module")
+def ctx_racing():
+    """CSV 의 레이싱 라인을 기준 경로로 (CSV 고유 속성을 검사할 때)."""
+    cfg = config.load()
+    cfg.waypoints.line = "racing"
+    return cfg, track.from_csv(CSV, cfg)
+
+
+@pytest.fixture(scope="module")
 def ctx_fixed():
     """벽을 무시하고 중심선에서 일정 폭 (실차 테이프 트랙 방식)."""
     cfg = config.load()
     cfg.lane.follow_walls = False
     return cfg, track.from_csv(CSV, cfg)
 
-def test_resample_is_uniform_and_closed(ctx):
-    cfg, trk = ctx
-    d = np.hypot(*np.diff(trk.center, axis=0).T)
-    assert np.allclose(d, cfg.lane.segment_len_m, atol=2e-3)
-    assert np.hypot(*(trk.center[0] - trk.center[-1])) > 0.03     # no duplicated closing point
-    assert trk.length == pytest.approx(156.36, abs=0.2)   # a property of the CSV, not config
-    assert trk.s[0] == 0.0 and trk.s[-1] < trk.length
+def test_resample_is_uniform_and_closed(ctx, ctx_racing):
+    for cfg, trk in (ctx, ctx_racing):
+        d = np.hypot(*np.diff(trk.center, axis=0).T)
+        assert np.allclose(d, cfg.lane.segment_len_m, atol=2e-3)
+        assert np.hypot(*(trk.center[0] - trk.center[-1])) > 0.03   # no duplicated closing point
+        assert trk.s[0] == 0.0 and trk.s[-1] < trk.length
+    assert ctx_racing[1].length == pytest.approx(156.36, abs=0.2)   # a property of the CSV
+    assert ctx[1].length > ctx_racing[1].length                     # 중간선이 레이싱 라인보다 길다
 
 def test_heading_matches_direction(ctx):
+    """heading 은 중앙차분 접선이므로, 곡률이 작은 구간에서 전방 세그먼트 방향과 거의 같아야 한다."""
     cfg, trk = ctx
-    d = trk.center[1] - trk.center[0]
-    assert np.arctan2(d[1], d[0]) == pytest.approx(trk.heading[0], abs=0.05)
+    d = np.roll(trk.center, -1, axis=0) - trk.center
+    seg = np.arctan2(d[:, 1], d[:, 0])
+    err = np.abs(np.angle(np.exp(1j * (seg - trk.heading))))
+    assert np.median(err) < 0.02 and np.percentile(err, 95) < 0.1
 
 def test_quads_sit_on_both_sides(ctx_fixed):
     cfg, trk = ctx_fixed

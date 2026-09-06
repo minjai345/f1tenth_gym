@@ -15,6 +15,8 @@ class Track:
     s: np.ndarray         # (N,) cumulative arc length, s[0]=0
     length: float         # closed-loop length
     quads: np.ndarray     # (M,4,2) tape rectangles, world m
+    left_m: np.ndarray    # (N,) center 에서 왼쪽 테이프 중심선까지 거리 (법선 +방향)
+    right_m: np.ndarray   # (N,) 오른쪽 테이프 중심선까지 거리 (법선 -방향)
 
 
 def resample(xy: np.ndarray, step: float) -> np.ndarray:
@@ -107,14 +109,33 @@ def from_csv(path: str, cfg: Config, x_col: int = 1, y_col: int = 2, delimiter: 
         left = right = np.full(len(center), half)
     quads = np.concatenate([_tape_quads(center, heading, +left, cfg.lane.tape_width_m),
                             _tape_quads(center, heading, -right, cfg.lane.tape_width_m)])
-    return Track(center, heading, s, float(length), quads)
+
+    if cfg.waypoints.line == "center":       # 좌우 테이프의 중간선을 기준 경로로 (실차 라벨링과 같은 기준)
+        nrm = np.column_stack([-np.sin(heading), np.cos(heading)])
+        mid = center + ((left - right) / 2.0)[:, None] * nrm
+        ref = resample(mid, step)
+        ref_heading = _heading(ref)
+        half = _interp_offsets((left + right) / 2.0, center, ref)      # 새 기준선에서의 좌우 여유
+        return Track(ref, ref_heading, np.arange(len(ref)) * step, float(len(ref) * step),
+                     quads, half, half)
+    if cfg.waypoints.line != "racing":
+        raise ValueError(f"waypoints.line must be 'center' or 'racing', got {cfg.waypoints.line!r}")
+    return Track(center, heading, s, float(length), quads, left, right)
+
+
+def _interp_offsets(values: np.ndarray, src: np.ndarray, dst: np.ndarray) -> np.ndarray:
+    """src 위에 정의된 값을 dst 의 각 점에서 가장 가까운 src 점의 값으로 옮긴다."""
+    i = np.argmin(((dst[:, None, :] - src[None, :, :]) ** 2).sum(-1), axis=1)
+    return values[i]
 
 
 def save(track: Track, path) -> None:
     np.savez_compressed(path, center=track.center, heading=track.heading, s=track.s,
-                        length=track.length, quads=track.quads)
+                        length=track.length, quads=track.quads,
+                        left_m=track.left_m, right_m=track.right_m)
 
 
 def load(path) -> Track:
     d = np.load(path)
-    return Track(d["center"], d["heading"], d["s"], float(d["length"]), d["quads"])
+    return Track(d["center"], d["heading"], d["s"], float(d["length"]), d["quads"],
+                 d["left_m"], d["right_m"])

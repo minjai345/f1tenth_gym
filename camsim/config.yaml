@@ -32,6 +32,8 @@ render:
   lidar_fov_rad: 4.7        # f110_gym 기본 LiDAR 화각 (1080빔)
 
 waypoints:
+  line: center              # 정답 경로의 기준. center = 좌우 테이프의 중간선 (실차 자동 라벨링과 같은 기준)
+                            #                  racing = CSV 의 최적 레이싱 라인 (코너 안쪽을 파고듦)
   ahead_m: [0.5, 1.0, 1.5, 2.0, 2.5, 3.0]   # 전방 호길이. 모델 출력 = len * 2
   norm_m: 1.0               # 타깃 정규화 나눗수
 

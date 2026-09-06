@@ -82,9 +82,9 @@ def test_lidar_occludes(ctx):
     scan[:] = 1.0                     # wall at 1 m in every direction
     assert not render.visible_quads(qv, scan, cfg)[0]
 
-def test_ipm_round_trip(ctx):
+def test_ipm_round_trip(ctx_fixed):
     """Bottom-of-image tape pixels mapped back to ground land within tape_width of a tape centerline."""
-    cfg, trk, H, H_i2g = ctx
+    cfg, trk, H, H_i2g = ctx_fixed
     pose = pose_on_track(trk)
     img = render.render(pose, trk.quads, None, H, cfg)
     horizon = cfg.camera.image_height // 2

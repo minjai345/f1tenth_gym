@@ -45,8 +45,9 @@ def test_sample_pose_within_bounds(ctx):
     rng = np.random.default_rng(1)
     for _ in range(200):
         p = gt.sample_pose(trk, cfg, rng)
-        assert gt.lateral_error(trk, p[:2]) <= cfg.sampling.lateral_frac * cfg.lane.track_width_m + 0.03
-        i = gt.nearest_index(trk, p[:2])
+        lat, i = gt.signed_lateral(trk, p[:2])          # 그 지점의 실제 트랙 폭 기준
+        corridor = trk.left_m[i] + trk.right_m[i]
+        assert abs(lat) <= cfg.sampling.lateral_frac * corridor + 0.05
         dth = np.angle(np.exp(1j * (p[2] - trk.heading[i])))
         assert abs(dth) <= np.deg2rad(cfg.sampling.heading_deg) + 0.05
 
@@ -61,20 +62,16 @@ def test_body_corners_are_rectangle_around_pose(ctx):
     assert np.allclose(d, np.hypot(L / 2, W / 2))
 
 
-def test_crosses_tape_uses_car_body(ctx):
-    """실격 = 차체 모서리가 테이프 안쪽 선을 넘음. 중심선 이탈 0.4 m 보다 훨씬 먼저 걸린다."""
+def test_crosses_tape_uses_car_body_and_local_tape(ctx):
+    """실격 = 차체 모서리가 그 지점의 테이프 안쪽 선을 넘음 (테이프 위치는 지점마다 다를 수 있다)."""
     cfg, trk = ctx
     i = 10
     h = trk.heading[i]
     n = np.array([-np.sin(h), np.cos(h)])
-    margin = cfg.lane.track_width_m / 2 - cfg.lane.tape_width_m / 2 - cfg.closed_loop.car_width_m / 2
-    on = np.array([*trk.center[i], h])
-    inside = np.array([*(trk.center[i] + (margin - 0.05) * n), h])
-    outside = np.array([*(trk.center[i] + (margin + 0.05) * n), h])
-    assert not gt.crosses_tape(on, trk, cfg)
-    assert not gt.crosses_tape(inside, trk, cfg)
-    assert gt.crosses_tape(outside, trk, cfg)
-    # 차를 옆으로 돌리면 모서리가 더 튀어나온다 -> 같은 중심 위치에서도 실격
-    turned = np.array([*trk.center[i], h + np.pi / 4])
-    assert gt.crosses_tape(turned, trk, cfg) == (
-        np.hypot(cfg.closed_loop.car_length_m, cfg.closed_loop.car_width_m) / 2 > cfg.lane.track_width_m / 2 - cfg.lane.tape_width_m / 2)
+    margin = trk.left_m[i] - cfg.lane.tape_width_m / 2 - cfg.closed_loop.car_width_m / 2
+    assert not gt.crosses_tape(np.array([*trk.center[i], h]), trk, cfg)
+    assert not gt.crosses_tape(np.array([*(trk.center[i] + (margin - 0.05) * n), h]), trk, cfg)
+    assert gt.crosses_tape(np.array([*(trk.center[i] + (margin + 0.05) * n), h]), trk, cfg)
+    # 오른쪽도 대칭으로 동작
+    margin_r = trk.right_m[i] - cfg.lane.tape_width_m / 2 - cfg.closed_loop.car_width_m / 2
+    assert gt.crosses_tape(np.array([*(trk.center[i] - (margin_r + 0.05) * n), h]), trk, cfg)
